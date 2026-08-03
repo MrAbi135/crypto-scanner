@@ -1,0 +1,51 @@
+name: deploy-staging
+
+# Runs after ci succeeds on main. Targets the GitHub `staging` environment,
+# whose host + SSH + SOPS-age secrets are provisioned in Sprint S0.3 — until
+# then this workflow has no environment to deploy to and does not run to green.
+on:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd /opt/scanner
+            git fetch --all && git reset --hard "${{ github.sha }}"
+            printf '%s' "${{ secrets.SOPS_AGE_KEY }}" > /tmp/age.key
+            SOPS_AGE_KEY_FILE=/tmp/age.key sops -d ops/env/staging.enc.env > ops/env/staging.env
+            rm -f /tmp/age.key
+            docker compose -f ops/compose/docker-compose.staging.yml pull
+            docker compose -f ops/compose/docker-compose.staging.yml up -d
+      - name: Post-deploy readiness gate
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            for port in 8000 8001 8002 8003; do
+              for i in $(seq 1 24); do
+                code=$(docker compose -f /opt/scanner/ops/compose/docker-compose.staging.yml exec -T api \
+                  python -c "import urllib.request;print(urllib.request.urlopen('http://localhost:'+str($port)+'/internal/health/live',timeout=2).status)" 2>/dev/null || echo 000)
+                [ "$code" = "200" ] && break
+                [ "$i" = "24" ] && { echo "process on :$port not ready in 120s"; exit 1; }
+                sleep 5
+              done
+            done
+            echo "all four processes ready"

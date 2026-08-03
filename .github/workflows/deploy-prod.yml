@@ -1,0 +1,21 @@
+name: deploy-prod
+
+# Manual-only, gated on the GitHub `production` environment with required
+# reviewers. That environment is NOT created until Sprint S22, so this workflow
+# is structurally inert until launch — no accidental production path exists.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit SHA to deploy (must be an image already built by ci)"
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Guard
+        run: |
+          echo "Production deploy of ${{ github.event.inputs.sha }}."
+          echo "Gated on the 'production' environment + required reviewers (created at S22)."

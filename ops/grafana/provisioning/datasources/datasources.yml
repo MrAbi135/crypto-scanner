@@ -1,0 +1,15 @@
+# Provisioned datasources (S0.2 §6.2). Never hand-edited in the UI
+# (Constitution §33.2 applied to observability).
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100

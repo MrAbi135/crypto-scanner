@@ -1,0 +1,20 @@
+# Normalize line endings to LF on checkin for all text (Constitution §10 — one canonical form).
+* text=auto eol=lf
+
+# Explicit binaries — never touched by EOL normalization.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.dump binary
+*.gz binary
+
+# Governance + docs are documentation, not code (keeps language stats honest).
+docs/**            linguist-documentation
+*.md               linguist-documentation
+
+# Lockfiles are generated — collapse diffs in review.
+uv.lock            linguist-generated
+frontend/pnpm-lock.yaml linguist-generated

@@ -1,0 +1,64 @@
+# Pre-commit hook manifest (S0.1 guide §2, §15, §16).
+# Fast, local, deterministic. Runtime target < 5s (S0.2 §16).
+# Install:  pre-commit install && pre-commit install --hook-type commit-msg
+minimum_pre_commit_version: "3.5.0"
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  # --- Python: lint + format (ruff is the single Python style authority, TDR §25) ---
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        name: ruff (lint, autofix)
+        args: [--fix]
+        files: ^backend/
+      - id: ruff-format
+        name: ruff (format)
+        files: ^backend/
+
+  # --- Secret leak defense (Constitution §17; gitleaks also runs in CI at S0.2) ---
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+        name: gitleaks (staged secret scan)
+
+  # --- Conventional Commits (S0.1 guide §16: closed type set) ---
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.4.0
+    hooks:
+      - id: conventional-pre-commit
+        name: conventional commit message
+        stages: [commit-msg]
+        args: [feat, fix, chore, docs, test, refactor]
+
+  # --- Frontend: eslint + prettier on staged FE files only (run via pnpm) ---
+  - repo: local
+    hooks:
+      - id: frontend-eslint
+        name: eslint (frontend, staged)
+        language: system
+        entry: bash -c 'cd frontend && pnpm exec eslint --max-warnings=0'
+        files: ^frontend/src/.*\.(ts|tsx)$
+        pass_filenames: false
+        require_serial: true
+      - id: frontend-prettier
+        name: prettier --check (frontend, staged)
+        language: system
+        entry: bash -c 'cd frontend && pnpm exec prettier --check .'
+        files: ^frontend/.*\.(ts|tsx|json|css|html)$
+        pass_filenames: false
+        require_serial: true
+
+  # --- Repo hygiene ---
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=1024]

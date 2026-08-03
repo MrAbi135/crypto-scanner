@@ -1,0 +1,37 @@
+
+> @scanner/app@0.1.0 lint C:\Users\My PC\Downloads\Coin scanner\crypto-scanner\frontend
+> eslint src --max-warnings=0
+
+
+> @scanner/app@0.1.0 typecheck C:\Users\My PC\Downloads\Coin scanner\crypto-scanner\frontend
+> tsc --noEmit
+
+
+> @scanner/app@0.1.0 test C:\Users\My PC\Downloads\Coin scanner\crypto-scanner\frontend
+> vitest run
+
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mC:/Users/My PC/Downloads/Coin scanner/crypto-scanner/frontend[39m
+
+ [32m✓[39m src/shared/lib/errors.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 11[2mms[22m[39m
+ [32m✓[39m src/shared/lib/result.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 12[2mms[22m[39m
+ [32m✓[39m src/shared/lib/invariant.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+ [32m✓[39m src/app/App.test.tsx [2m([22m[2m1 test[22m[2m)[22m[90m 243[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m4 passed[39m[22m[90m (4)[39m
+[2m      Tests [22m [1m[32m7 passed[39m[22m[90m (7)[39m
+[2m   Start at [22m 04:17:15
+[2m   Duration [22m 11.37s[2m (transform 518ms, setup 0ms, collect 3.74s, tests 280ms, environment 14.71s, prepare 2.38s)[22m
+
+
+> @scanner/app@0.1.0 build C:\Users\My PC\Downloads\Coin scanner\crypto-scanner\frontend
+> tsc --noEmit && vite build
+
+[36mvite v5.4.21 [32mbuilding for production...[36m[39m
+transforming...
+[32m✓[39m 256 modules transformed.
+rendering chunks...
+computing gzip size...
+[2mdist/[22m[32mindex.html                [39m[1m[2m  0.34 kB[22m[1m[22m[2m │ gzip:  0.25 kB[22m
+[2mdist/[22m[36massets/index-C7e03W84.js  [39m[1m[2m142.62 kB[22m[1m[22m[2m │ gzip: 45.81 kB[22m
+[32m✓ built in 2.90s[39m

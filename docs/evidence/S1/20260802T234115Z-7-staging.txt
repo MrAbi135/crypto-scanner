@@ -1,0 +1,4 @@
+sync-symbols: seen=3670 eligible_usdt=722 upserted=722
+backfill BTCUSDT H1: range=[2023-01-01T00:00:00+00:00, 2026-08-02T23:00:00+00:00) fetched=31438 inserted=31438 gaps_recorded=1 quarantined=0
+  finding: BTCUSDT H1: 1 candle(s) missing after 2023-03-24T12:00:00+00:00
+verify-continuity BTCUSDT H1: expected=31416 present=31415 missing=1 covered_by_incidents=1 uncovered=0

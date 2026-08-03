@@ -1,0 +1,19 @@
+{
+  "uid": "doctrine-placeholder",
+  "title": "Doctrine (populated from S4)",
+  "tags": ["doctrine", "placeholder"],
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Detection doctrine dashboards",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "Detector golden-signal dashboards are populated from Sprint S4 (SLS engines). This folder exists now so every future doctrine dashboard has a home in git."
+      }
+    }
+  ]
+}

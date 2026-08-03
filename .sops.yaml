@@ -1,0 +1,24 @@
+# SOPS creation rules (TDR §24, S0.1 guide §15).
+# Maps encrypted env files to the age recipients allowed to decrypt them.
+#
+# SETUP (developer, once — private key STAYS LOCAL, never committed):
+#   age-keygen -o ~/.config/sops/age/keys.txt
+#   # copy the "public key:" line and replace the placeholder recipient below
+#
+# The CI age public key is added as a second recipient for staging/prod so the
+# deploy pipeline can decrypt; its private key lives only in GitHub Actions
+# secrets (never in this repo). See docs/security/README.md.
+#
+# NOTE: the recipients below are PLACEHOLDERS. `.enc.env` files are not created
+# until Sprint S0.2/S22; this file fixes the encryption policy now.
+
+creation_rules:
+  - path_regex: ops/env/staging\.enc\.env$
+    age: >-
+      age1placeholderreplacewithdeveloperagepublickey000000000000000000,
+      age1placeholderreplacewithciagepublickey00000000000000000000000000
+
+  - path_regex: ops/env/prod\.enc\.env$
+    age: >-
+      age1placeholderreplacewithdeveloperagepublickey000000000000000000,
+      age1placeholderreplacewithciagepublickey00000000000000000000000000

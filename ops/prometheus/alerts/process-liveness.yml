@@ -1,0 +1,12 @@
+# Seed alert rule (S0.2 §6.2): a process metrics endpoint unreachable for 2m.
+groups:
+  - name: process-liveness
+    rules:
+      - alert: ProcessDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Process target down"
+          description: "{{ $labels.job }} target {{ $labels.instance }} has been down for >2m."

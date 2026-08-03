@@ -1,0 +1,31 @@
+{
+  "uid": "release-annotations",
+  "title": "Releases",
+  "tags": ["release"],
+  "schemaVersion": 39,
+  "version": 1,
+  "annotations": {
+    "list": [
+      {
+        "name": "Deploys",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "enable": true,
+        "iconColor": "blue",
+        "expr": "changes(scanner_process_info[5m]) > 0",
+        "titleFormat": "release {{version}}"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Release markers",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "Deploy annotations are derived from `scanner_process_info` version changes. Every future dashboard inherits release markers from this folder's annotation."
+      }
+    }
+  ]
+}

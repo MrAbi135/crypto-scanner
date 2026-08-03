@@ -1,0 +1,143 @@
+name: scanner-dev
+
+# One file runs the entire dev platform (S0.2 §6). PostgreSQL + TimescaleDB are
+# one container by design (TDR §8). The frontend runs on the host in dev
+# (`pnpm dev`) for hot-reload speed. Observability is opt-in via `--profile obs`.
+
+services:
+  db:
+    image: timescale/timescaledb:2.15.2-pg16
+    environment:
+      POSTGRES_USER: scanner
+      POSTGRES_PASSWORD: scanner-dev-only # dev-only literal; real envs use SOPS
+      POSTGRES_DB: scanner
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../db/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scanner -d scanner"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7.2.5-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ../..
+      dockerfile: ops/docker/backend.Dockerfile
+    command: ["python", "-m", "scanner.runtime.api"]
+    env_file: [../env/dev.env]
+    environment:
+      SCANNER_API_PORT: "8000"
+    ports: ["8000:8000"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/internal/health/ready', timeout=2).status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  ingest:
+    build:
+      context: ../..
+      dockerfile: ops/docker/backend.Dockerfile
+    command: ["python", "-m", "scanner.runtime.ingest"]
+    env_file: [../env/dev.env]
+    environment:
+      SCANNER_HEALTH_PORT: "8001"
+    read_only: true
+    tmpfs: ["/tmp"]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/internal/health/ready', timeout=2).status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  engine:
+    build:
+      context: ../..
+      dockerfile: ops/docker/backend.Dockerfile
+    command: ["python", "-m", "scanner.runtime.engine"]
+    env_file: [../env/dev.env]
+    environment:
+      SCANNER_HEALTH_PORT: "8002"
+    read_only: true
+    tmpfs: ["/tmp"]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8002/internal/health/ready', timeout=2).status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: ops/docker/backend.Dockerfile
+    command: ["python", "-m", "scanner.runtime.worker"]
+    env_file: [../env/dev.env]
+    environment:
+      SCANNER_HEALTH_PORT: "8003"
+    read_only: true
+    tmpfs: ["/tmp"]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8003/internal/health/ready', timeout=2).status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  # --- observability (opt-in: `docker compose --profile obs up`) ---
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    profiles: ["obs"]
+    volumes:
+      - ../prometheus:/etc/prometheus:ro
+    ports: ["9090:9090"]
+
+  loki:
+    image: grafana/loki:3.1.1
+    profiles: ["obs"]
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    volumes:
+      - ../loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+    ports: ["3100:3100"]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    profiles: ["obs"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+    ports: ["3001:3000"]
+    depends_on: [prometheus, loki]
+
+volumes:
+  pgdata:
+  redisdata:

@@ -1,0 +1,19 @@
+# Code ownership & mandatory review (S0.1 guide §2, §16).
+# Replace @project-owner with the real owner/team handle at repo creation.
+
+# Default owner for everything.
+*                               @project-owner
+
+# The frozen governance stack — amendments arrive as new versions, never edits.
+# Any change here demands explicit owner review (Constitution §42).
+/docs/governance/               @project-owner
+
+# Architecture decisions are immutable once merged (Constitution §12.3).
+/docs/adr/                      @project-owner
+
+# Repository law: tooling, CI, secrets policy, dependency contracts.
+/.github/                       @project-owner
+/.pre-commit-config.yaml        @project-owner
+/.sops.yaml                     @project-owner
+/backend/pyproject.toml         @project-owner
+/frontend/package.json          @project-owner

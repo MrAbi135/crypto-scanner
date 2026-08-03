@@ -1,0 +1,48 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# === Node ===
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+coverage/
+
+# === Environment & secrets — the critical block ===
+ops/env/dev.env
+ops/env/*.local.env
+*.env.decrypted
+!ops/env/.env.example        # the catalog IS committed
+# staging.enc.env / prod.enc.env are committed — encrypted is the point
+
+# age/SOPS private material — belt and suspenders
+*.agekey
+keys.txt
+
+# === IDE / OS ===
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+
+# === Artifacts ===
+*.log
+tmp/
+.playwright/
+test-results/
+
+# === Data — never commit market data or DB volumes ===
+*.dump
+*.sql.gz
+pgdata/
+redisdata/
+backend/tests/golden/**/raw/    # raw captures stay local; curated datasets ARE committed

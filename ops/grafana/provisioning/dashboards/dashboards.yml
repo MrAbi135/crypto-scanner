@@ -1,0 +1,13 @@
+# Dashboard provider (S0.2 §6.2, extended S0.3 §8.3): loads provisioned JSON
+# dashboards from disk; the folder structure (ops/doctrine/business/release)
+# becomes Grafana folders. Never hand-edited in the UI (Constitution §33.2).
+apiVersion: 1
+providers:
+  - name: platform
+    orgId: 1
+    type: file
+    disableDeletion: true
+    editable: false
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: true

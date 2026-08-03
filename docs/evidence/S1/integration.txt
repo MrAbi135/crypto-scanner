@@ -1,0 +1,21 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.13, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Users\My PC\Downloads\Coin scanner\crypto-scanner\backend
+configfile: pyproject.toml
+plugins: anyio-4.14.2, hypothesis-6.165.0, asyncio-1.4.0, cov-7.1.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 5 items
+
+tests\integration\test_persistence_pg.py .....                           [100%]
+
+============================== warnings summary ===============================
+tests\integration\test_persistence_pg.py:21
+  C:\Users\My PC\Downloads\Coin scanner\crypto-scanner\backend\tests\integration\test_persistence_pg.py:21: DeprecationWarning: testcontainers.postgres is deprecated, use testcontainers.community.postgres instead
+    from testcontainers.postgres import PostgresContainer
+
+tests/integration/test_persistence_pg.py::test_migration_created_hypertable
+  C:\Users\My PC\Downloads\Coin scanner\crypto-scanner\backend\.venv\Lib\site-packages\alembic\config.py:612: DeprecationWarning: No path_separator found in configuration; falling back to legacy splitting on spaces, commas, and colons for prepend_sys_path.  Consider adding path_separator=os to Alembic config.
+    util.warn_deprecated(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 5 passed, 2 warnings in 16.42s ========================

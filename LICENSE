@@ -1,0 +1,22 @@
+Copyright (c) 2026. All rights reserved.
+
+PROPRIETARY AND CONFIDENTIAL
+
+This software and its accompanying documentation (the "Institutional AI Crypto
+Scanner", the "Software") are proprietary and confidential. The Software is a
+commercial SaaS product. No license, express or implied, is granted by the
+availability of this source.
+
+You MAY NOT, without prior written permission of the copyright holder:
+  - copy, reproduce, or distribute the Software or any portion of it;
+  - modify, adapt, or create derivative works;
+  - publish, sublicense, sell, lease, or otherwise transfer the Software;
+  - disclose the Software or its documentation to any third party.
+
+The frozen governance documents in `docs/governance/` are part of this
+proprietary work and carry the same restrictions.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY.

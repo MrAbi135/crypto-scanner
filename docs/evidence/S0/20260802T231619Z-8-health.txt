@@ -1,0 +1,15 @@
+api (host :8000):
+{"status":"live"} live:8000 ok
+{"status":"ready","dependencies":{"db":"ok","redis":"ok"}} ready:8000 ok
+ingest (internal :8001):
+200 {"status":"ready","dependencies":{"db":"ok","redis":"ok"}}
+engine (internal :8002):
+200 {"status":"ready","dependencies":{"db":"ok","redis":"ok"}}
+worker (internal :8003):
+200 {"status":"ready","dependencies":{"db":"ok","redis":"ok"}}
+metrics (api :8000):
+# HELP python_gc_objects_collected_total Objects collected during gc
+# TYPE python_gc_objects_collected_total counter
+python_gc_objects_collected_total{generation="0"} 418.0
+python_gc_objects_collected_total{generation="1"} 11.0
+python_gc_objects_collected_total{generation="2"} 0.0

@@ -1,0 +1,7 @@
+# Frontend workspace (S0.1 guide §4, TAD §31).
+# One SPA package today. The `packages/*` seam is declared now so the R3+
+# React Native app extracts entities/services/design-system without surgery
+# (TDR §25.11) — no such packages exist yet.
+packages:
+  - "."
+  # - "packages/*"   # future: shared design-system / entities / services extraction

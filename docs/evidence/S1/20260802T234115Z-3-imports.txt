@@ -1,0 +1,17 @@
+=============
+Import Linter
+=============
+
+
+---------
+Contracts
+---------
+
+Analyzed 103 files, 210 dependencies.
+-------------------------------------
+
+Layered architecture (TAD §27) KEPT
+Domain purity (TAD §2.3) KEPT
+Engine acyclicity (TAD §27) KEPT
+
+Contracts: 3 kept, 0 broken.

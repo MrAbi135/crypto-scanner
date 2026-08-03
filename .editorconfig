@@ -1,0 +1,29 @@
+# Editor law for every contributor and tool (Constitution §10.2, S0.1 guide §2).
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+# Python — 4 spaces (PEP 8, ruff).
+[*.py]
+indent_size = 4
+
+# Web + data formats — 2 spaces.
+[*.{ts,tsx,js,jsx,json,yaml,yml,css,html}]
+indent_size = 2
+
+# Shell scripts — 2 spaces, POSIX.
+[*.sh]
+indent_size = 2
+
+# Markdown — preserve trailing whitespace (hard line breaks are meaningful).
+[*.md]
+trim_trailing_whitespace = false
+
+# Makefiles require tabs.
+[Makefile]
+indent_style = tab

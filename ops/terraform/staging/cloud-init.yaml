@@ -1,0 +1,20 @@
+#cloud-config
+# Staging host bootstrap (S0.3 §7.1): docker + compose, hardened SSH,
+# unattended security upgrades. No app deploy here — the pipeline does that.
+package_update: true
+package_upgrade: true
+packages:
+  - docker.io
+  - docker-compose-plugin
+  - unattended-upgrades
+
+ssh_pwauth: false
+disable_root: true
+
+runcmd:
+  - systemctl enable --now docker
+  - systemctl enable --now unattended-upgrades
+  - mkdir -p /opt/scanner
+  - sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+  - sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+  - systemctl restart ssh

@@ -1,0 +1,2 @@
+candles hypertable count: 1
+schema verified: market.candles is a hypertable; compression policy present

@@ -1,0 +1,86 @@
+........................................................................ [ 48%]
+........................................................................ [ 96%]
+.....                                                                    [100%]
+============================== warnings summary ===============================
+tests\unit\runtime\test_health.py:10
+  C:\Users\My PC\Downloads\Coin scanner\crypto-scanner\backend\tests\unit\runtime\test_health.py:10: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.12.13-final-0 _______________
+
+Name                                                              Stmts   Miss  Cover   Missing
+-----------------------------------------------------------------------------------------------
+src\scanner\__init__.py                                               1      0   100%
+src\scanner\application\__init__.py                                   0      0   100%
+src\scanner\application\admin\__init__.py                             0      0   100%
+src\scanner\application\ai\__init__.py                                0      0   100%
+src\scanner\application\alerts\__init__.py                            0      0   100%
+src\scanner\application\detection\__init__.py                         0      0   100%
+src\scanner\application\identity\__init__.py                          0      0   100%
+src\scanner\application\marketdata\__init__.py                        5      0   100%
+src\scanner\application\marketdata\backfill.py                       77      5    94%   103-109
+src\scanner\application\marketdata\continuity.py                     41      1    98%   51
+src\scanner\application\marketdata\symbol_sync.py                    24      0   100%
+src\scanner\application\marketdata\validation.py                     73      2    97%   138, 171
+src\scanner\application\ports\__init__.py                             4      0   100%
+src\scanner\application\ports\clock.py                                5      0   100%
+src\scanner\application\ports\market_data_provider.py                16      0   100%
+src\scanner\application\ports\repositories.py                        26      0   100%
+src\scanner\application\workspace\__init__.py                         0      0   100%
+src\scanner\config\__init__.py                                       12      0   100%
+src\scanner\config\base.py                                           11      0   100%
+src\scanner\config\processes.py                                      15      0   100%
+src\scanner\domain\__init__.py                                        0      0   100%
+src\scanner\domain\common\__init__.py                                 3      0   100%
+src\scanner\domain\common\candle.py                                  40      0   100%
+src\scanner\domain\common\symbol.py                                  22      0   100%
+src\scanner\domain\confluence\__init__.py                             0      0   100%
+src\scanner\domain\ict\__init__.py                                    0      0   100%
+src\scanner\domain\lifecycle\__init__.py                              0      0   100%
+src\scanner\domain\liquidity\__init__.py                              0      0   100%
+src\scanner\domain\momentum\__init__.py                               0      0   100%
+src\scanner\domain\ranking\__init__.py                                0      0   100%
+src\scanner\domain\structure\__init__.py                              0      0   100%
+src\scanner\domain\volume\__init__.py                                 0      0   100%
+src\scanner\infrastructure\__init__.py                                0      0   100%
+src\scanner\infrastructure\ai_providers\__init__.py                   0      0   100%
+src\scanner\infrastructure\channels\__init__.py                       0      0   100%
+src\scanner\infrastructure\exchanges\__init__.py                      0      0   100%
+src\scanner\infrastructure\exchanges\binance\__init__.py              3      0   100%
+src\scanner\infrastructure\exchanges\binance\rate_budget.py          33      4    88%   20, 30, 42-43
+src\scanner\infrastructure\exchanges\binance\rest.py                 68     11    84%   64, 96, 142-145, 156-164
+src\scanner\infrastructure\metadata\__init__.py                       0      0   100%
+src\scanner\infrastructure\metadata\coingecko\__init__.py             0      0   100%
+src\scanner\infrastructure\observability\__init__.py                  0      0   100%
+src\scanner\infrastructure\observability\logging.py                  51      0   100%
+src\scanner\infrastructure\observability\metrics.py                  18      0   100%
+src\scanner\infrastructure\persistence\__init__.py                    0      0   100%
+src\scanner\infrastructure\persistence\models.py                     48      0   100%
+src\scanner\infrastructure\redis\__init__.py                          0      0   100%
+src\scanner\infrastructure\sentiment\__init__.py                      0      0   100%
+src\scanner\infrastructure\sentiment\alternative_me\__init__.py       0      0   100%
+src\scanner\interfaces\__init__.py                                    0      0   100%
+src\scanner\interfaces\api\__init__.py                                0      0   100%
+src\scanner\interfaces\cli\__init__.py                                0      0   100%
+src\scanner\interfaces\cli\main.py                                   21      0   100%
+src\scanner\interfaces\ws\__init__.py                                 0      0   100%
+src\scanner\runtime\__init__.py                                       0      0   100%
+src\scanner\runtime\wiring\__init__.py                                0      0   100%
+src\scanner\runtime\wiring\bootstrap.py                              11      0   100%
+src\scanner\runtime\wiring\health.py                                 56      6    89%   41-44, 47, 58, 103
+src\scanner\shared\__init__.py                                       10      0   100%
+src\scanner\shared\constants.py                                       4      0   100%
+src\scanner\shared\decimal_math.py                                   24      0   100%
+src\scanner\shared\errors.py                                         29      0   100%
+src\scanner\shared\events.py                                         32      0   100%
+src\scanner\shared\guards.py                                         14      0   100%
+src\scanner\shared\ids.py                                            54      0   100%
+src\scanner\shared\result.py                                         38      0   100%
+src\scanner\shared\timeutil.py                                       53      0   100%
+src\scanner\shared\types.py                                          12      0   100%
+-----------------------------------------------------------------------------------------------
+TOTAL                                                               954     29    97%
+Required test coverage of 85.0% reached. Total coverage: 96.96%
+149 passed, 1 warning in 23.61s

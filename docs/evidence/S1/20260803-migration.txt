@@ -1,0 +1,7 @@
+S1 item 6 (B1/B2) — migration + hypertable — 2026-08-03 (dev compose PG16+Timescale)
+alembic_version: 001_market_schema
+market tables: candles,symbols,data_incidents
+candles hypertable count (=1): 1
+compression policy (=1): 1
+check constraints: ck_candles_hl,ck_candles_ohlc,ck_candles_tf,ck_candles_volumes
+idempotence: second 'alembic upgrade head' applied no new revision (verified)
