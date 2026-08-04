@@ -95,7 +95,7 @@ jobs:
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: |
             ghcr.io/mrabi135/crypto-scanner/backend:${{ github.sha }}
-            ghghcr.io/mrabi135/crypto-scanner/backend:main
+            ghcr.io/mrabi135/crypto-scanner/backend:main
       - name: Build frontend image
         uses: docker/build-push-action@v6
         with:
