@@ -19,6 +19,7 @@ dependencies = [
   "redis>=5.0",           # readiness-probe Redis PING (TDR §9); stream/cache use lands S2
   # --- Sprint S0.3 additions ---
   "sentry-sdk>=2.0",      # exception reporting (TDR §20); DSN-gated, disabled by default
+  "websockets>=17.0.1",
 ]
 
 [dependency-groups]
