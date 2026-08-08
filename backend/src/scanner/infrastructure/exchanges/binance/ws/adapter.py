@@ -4,11 +4,33 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Sequence
 
 import structlog
 import websockets
 
 log = structlog.get_logger(__name__)
+
+
+def build_combined_stream_url(base_url: str, streams: Sequence[str]) -> str:
+    """Build a Binance combined-stream URL from stream names."""
+    normalized = [stream.lower() for stream in streams]
+
+    if not normalized:
+        raise ValueError("at least one Binance stream is required")
+
+    joined = "/".join(normalized)
+    return f"{base_url.rstrip('/')}/stream?streams={joined}"
+
+
+def unwrap_stream_event(event: dict[str, object]) -> dict[str, object]:
+    """Return the event payload for both raw and combined stream formats."""
+    data = event.get("data")
+
+    if isinstance(data, dict):
+        return data
+
+    return event
 
 
 class BinanceWebSocketAdapter:
@@ -37,7 +59,12 @@ class BinanceWebSocketAdapter:
 
                     while self._running:
                         raw = await websocket.recv()
-                        event = json.loads(raw)
+                        message = json.loads(raw)
+
+                        if not isinstance(message, dict):
+                            continue
+
+                        event = unwrap_stream_event(message)
                         await self.handle_event(event)
 
             except asyncio.CancelledError:
