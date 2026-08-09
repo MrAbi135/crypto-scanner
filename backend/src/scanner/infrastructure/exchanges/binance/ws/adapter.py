@@ -9,7 +9,20 @@ from collections.abc import Sequence
 import structlog
 import websockets
 
+from scanner.domain.common import Candle, CandleSource
+from scanner.shared import Timeframe, parse_decimal, utc_from_ms
+
 log = structlog.get_logger(__name__)
+
+
+_BINANCE_INTERVALS: dict[str, Timeframe] = {
+    "5m": Timeframe.M5,
+    "15m": Timeframe.M15,
+    "1h": Timeframe.H1,
+    "4h": Timeframe.H4,
+    "1d": Timeframe.D1,
+    "1w": Timeframe.W1,
+}
 
 
 def build_combined_stream_url(base_url: str, streams: Sequence[str]) -> str:
@@ -24,7 +37,7 @@ def build_combined_stream_url(base_url: str, streams: Sequence[str]) -> str:
 
 
 def unwrap_stream_event(event: dict[str, object]) -> dict[str, object]:
-    """Return the event payload for both raw and combined stream formats."""
+    """Return the payload for both raw and combined stream formats."""
     data = event.get("data")
 
     if isinstance(data, dict):
@@ -33,12 +46,55 @@ def unwrap_stream_event(event: dict[str, object]) -> dict[str, object]:
     return event
 
 
+def parse_closed_kline(event: dict[str, object]) -> Candle | None:
+    """Convert a closed Binance kline event into the canonical Candle."""
+    if event.get("e") != "kline":
+        return None
+
+    kline = event.get("k")
+    if not isinstance(kline, dict):
+        return None
+
+    if kline.get("x") is not True:
+        return None
+
+    interval = kline.get("i")
+    if not isinstance(interval, str):
+        return None
+
+    timeframe = _BINANCE_INTERVALS.get(interval)
+    if timeframe is None:
+        return None
+
+    symbol = kline.get("s")
+    if not isinstance(symbol, str) or not symbol:
+        return None
+
+    return Candle(
+        symbol=symbol,
+        timeframe=timeframe,
+        open_time=utc_from_ms(int(kline["t"])),
+        open=parse_decimal(kline["o"], field="open"),
+        high=parse_decimal(kline["h"], field="high"),
+        low=parse_decimal(kline["l"], field="low"),
+        close=parse_decimal(kline["c"], field="close"),
+        volume=parse_decimal(kline["v"], field="volume"),
+        quote_volume=parse_decimal(kline["q"], field="quote_volume"),
+        taker_buy_volume=parse_decimal(
+            kline["V"],
+            field="taker_buy_volume",
+        ),
+        trade_count=int(kline["n"]),
+        source=CandleSource.STREAM,
+    )
+
+
 class BinanceWebSocketAdapter:
     """Receive Binance market-stream events with reconnect handling."""
 
     def __init__(
         self,
-        url: str = "wss://stream.binance.com:9443/ws/btcusdt@kline_1m",
+        url: str = "wss://stream.binance.com:9443",
         *,
         reconnect_delay_seconds: int = 5,
     ) -> None:
@@ -81,16 +137,17 @@ class BinanceWebSocketAdapter:
 
     async def handle_event(self, event: dict[str, object]) -> None:
         """Process one Binance stream event."""
-        event_type = event.get("e")
+        candle = parse_closed_kline(event)
 
-        if event_type == "kline":
-            kline = event.get("k")
+        if candle is None:
+            return
 
-            if isinstance(kline, dict) and kline.get("x") is True:
-                log.info(
-                    "binance_kline_closed",
-                    symbol=kline.get("s"),
-                    interval=kline.get("i"),
-                    open_time=kline.get("t"),
-                    close_time=kline.get("T"),
-                )
+        log.info(
+            "binance_candle_created",
+            symbol=candle.symbol,
+            timeframe=candle.timeframe.value,
+            open_time=candle.open_time.isoformat(),
+            close=str(candle.close),
+            volume=str(candle.volume),
+            source=candle.source.value,
+        )

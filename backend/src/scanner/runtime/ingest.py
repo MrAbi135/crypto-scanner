@@ -11,14 +11,26 @@ from starlette.applications import Starlette
 from scanner.config import get_settings
 from scanner.infrastructure.exchanges.binance.ws.adapter import (
     BinanceWebSocketAdapter,
+    build_combined_stream_url,
 )
 from scanner.runtime.wiring.bootstrap import bootstrap
 from scanner.runtime.wiring.health import build_health_app, run_asgi
 
+_STREAMS = (
+    "BTCUSDT@kline_5m",
+    "ETHUSDT@kline_5m",
+)
+
 
 async def _run_websocket(settings) -> None:
+    url = build_combined_stream_url(
+        settings.binance_ws_url,
+        _STREAMS,
+    )
+
     adapter = BinanceWebSocketAdapter(
-        url=settings.binance_ws_url,
+        url=url,
+        reconnect_delay_seconds=settings.binance_ws_reconnect_delay_seconds,
     )
     await adapter.run()
 
