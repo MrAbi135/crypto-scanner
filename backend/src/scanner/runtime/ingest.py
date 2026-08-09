@@ -31,12 +31,18 @@ from scanner.infrastructure.persistence.repositories import (
 )
 from scanner.runtime.wiring.bootstrap import bootstrap
 from scanner.runtime.wiring.health import build_health_app, run_asgi
+from scanner.shared import Timeframe
 
 log = structlog.get_logger(__name__)
 
 _STREAMS = (
     "BTCUSDT@kline_5m",
     "ETHUSDT@kline_5m",
+)
+
+_FEEDS = (
+    ("BTCUSDT", Timeframe.M5),
+    ("ETHUSDT", Timeframe.M5),
 )
 
 
@@ -119,6 +125,39 @@ def main() -> None:
                 clock,
             )
 
+            async def readiness_probe() -> tuple[bool, dict[str, str]]:
+                details: dict[str, str] = {}
+                all_ready = True
+
+                for symbol, timeframe in _FEEDS:
+                    key = f"feed:{symbol}:{timeframe.value}"
+
+                    if not live_ingest.has_observation(
+                        symbol,
+                        timeframe,
+                    ):
+                        details[key] = "NO_DATA"
+                        all_ready = False
+                        continue
+
+                    state = live_ingest.freshness(
+                        symbol,
+                        timeframe,
+                    )
+
+                    details[key] = state.value
+
+                    if not live_ingest.detection_allowed(
+                        symbol,
+                        timeframe,
+                    ):
+                        all_ready = False
+
+                return all_ready, details
+
+            app.state.readiness_probe = readiness_probe
+            app.state.live_ingest = live_ingest
+
             task = asyncio.create_task(
                 _run_websocket(
                     settings,
@@ -126,7 +165,6 @@ def main() -> None:
                 )
             )
             app.state.websocket_task = task
-            app.state.live_ingest = live_ingest
 
             try:
                 yield

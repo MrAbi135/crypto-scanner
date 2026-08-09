@@ -45,6 +45,14 @@ class LiveIngestService:
         """Whether downstream detection may consume this series."""
         return self._tracker(symbol, timeframe).detection_allowed
 
+    def has_observation(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+    ) -> bool:
+        """Whether at least one exchange event has been observed."""
+        return self._tracker(symbol, timeframe).last_event_at is not None
+
     async def ingest(
         self,
         candle: Candle,
