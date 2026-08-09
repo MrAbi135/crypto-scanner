@@ -245,3 +245,45 @@ class IncidentRow(Base):
         nullable=False,
         default="",
     )
+
+
+class LiquidityHistoryRow(Base):
+    """Daily liquidity observations for S3 universe tiering."""
+
+    __tablename__ = "liquidity_history"
+    __table_args__ = (
+        CheckConstraint(
+            "daily_quote_volume >= 0",
+            name="ck_liquidity_history_volume_nonnegative",
+        ),
+        CheckConstraint(
+            "spread_bps >= 0",
+            name="ck_liquidity_history_spread_nonnegative",
+        ),
+        CheckConstraint(
+            "depth_2pct >= 0",
+            name="ck_liquidity_history_depth_nonnegative",
+        ),
+        {"schema": "market"},
+    )
+
+    exchange_symbol: Mapped[str] = mapped_column(
+        String(32),
+        primary_key=True,
+    )
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        primary_key=True,
+    )
+    daily_quote_volume: Mapped[Decimal] = mapped_column(
+        Numeric,
+        nullable=False,
+    )
+    spread_bps: Mapped[Decimal] = mapped_column(
+        Numeric,
+        nullable=False,
+    )
+    depth_2pct: Mapped[Decimal] = mapped_column(
+        Numeric,
+        nullable=False,
+    )

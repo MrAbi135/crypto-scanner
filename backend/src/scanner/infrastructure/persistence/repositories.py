@@ -14,12 +14,25 @@ from sqlalchemy import bindparam, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from scanner.application.marketdata.universe import UniverseTier
-from scanner.application.ports import Clock, IncidentRecord, UniverseStateRecord
-from scanner.domain.common import Candle, CandleSource, Symbol, SymbolStatus
+from scanner.application.ports import (
+    Clock,
+    IncidentRecord,
+    UniverseStateRecord,
+)
+from scanner.application.ports.liquidity_history import (
+    LiquidityHistoryRecord,
+)
+from scanner.domain.common import (
+    Candle,
+    CandleSource,
+    Symbol,
+    SymbolStatus,
+)
+from scanner.domain.common.universe import UniverseTier
 from scanner.infrastructure.persistence.models import (
     CandleRow,
     IncidentRow,
+    LiquidityHistoryRow,
     SymbolRow,
 )
 from scanner.shared import Timeframe
@@ -58,15 +71,15 @@ class PgSymbolRepository:
 
         rows = [
             {
-                "id": s.id,
-                "venue": s.venue,
-                "exchange_symbol": s.exchange_symbol,
-                "base_asset": s.base_asset,
-                "quote_asset": s.quote_asset,
-                "status": s.status.value,
-                "first_seen_at": s.first_seen_at,
+                "id": symbol.id,
+                "venue": symbol.venue,
+                "exchange_symbol": symbol.exchange_symbol,
+                "base_asset": symbol.base_asset,
+                "quote_asset": symbol.quote_asset,
+                "status": symbol.status.value,
+                "first_seen_at": symbol.first_seen_at,
             }
-            for s in symbols
+            for symbol in symbols
         ]
 
         stmt = pg_insert(SymbolRow).values(rows)
@@ -76,9 +89,17 @@ class PgSymbolRepository:
         # richer lifecycle moves belong to the S3 universe manager).
         stmt = stmt.on_conflict_do_update(
             constraint="uq_symbols_venue_exchange",
-            set_={"status": stmt.excluded.status},
-            where=(stmt.excluded.status == SymbolStatus.DELISTED.value)
-            & (SymbolRow.status != SymbolStatus.DELISTED.value),
+            set_={
+                "status": stmt.excluded.status,
+            },
+            where=(
+                stmt.excluded.status
+                == SymbolStatus.DELISTED.value
+            )
+            & (
+                SymbolRow.status
+                != SymbolStatus.DELISTED.value
+            ),
         )
 
         async with self._sessions() as session:
@@ -87,19 +108,25 @@ class PgSymbolRepository:
 
             return int(
                 result.rowcount or 0
-            )  # type: ignore[attr-defined]  # CursorResult
+            )  # type: ignore[attr-defined]
 
-    async def list_active(self) -> Sequence[Symbol]:
+    async def list_active(
+        self,
+    ) -> Sequence[Symbol]:
         async with self._sessions() as session:
             rows = (
                 await session.execute(
                     select(SymbolRow).where(
-                        SymbolRow.status == SymbolStatus.ACTIVE.value
+                        SymbolRow.status
+                        == SymbolStatus.ACTIVE.value
                     )
                 )
             ).scalars()
 
-            return [_to_symbol(row) for row in rows]
+            return [
+                _to_symbol(row)
+                for row in rows
+            ]
 
     async def get(
         self,
@@ -109,12 +136,16 @@ class PgSymbolRepository:
             row = (
                 await session.execute(
                     select(SymbolRow).where(
-                        SymbolRow.exchange_symbol == exchange_symbol
+                        SymbolRow.exchange_symbol
+                        == exchange_symbol
                     )
                 )
             ).scalar_one_or_none()
 
-            return _to_symbol(row) if row is not None else None
+            if row is None:
+                return None
+
+            return _to_symbol(row)
 
     async def get_universe_state(
         self,
@@ -124,7 +155,8 @@ class PgSymbolRepository:
             row = (
                 await session.execute(
                     select(SymbolRow).where(
-                        SymbolRow.exchange_symbol == exchange_symbol
+                        SymbolRow.exchange_symbol
+                        == exchange_symbol
                     )
                 )
             ).scalar_one_or_none()
@@ -132,14 +164,16 @@ class PgSymbolRepository:
             if row is None:
                 return None
 
+            candidate_tier = (
+                UniverseTier(row.candidate_tier)
+                if row.candidate_tier is not None
+                else None
+            )
+
             return UniverseStateRecord(
                 exchange_symbol=row.exchange_symbol,
                 tier=UniverseTier(row.tier),
-                candidate_tier=(
-                    UniverseTier(row.candidate_tier)
-                    if row.candidate_tier is not None
-                    else None
-                ),
+                candidate_tier=candidate_tier,
                 consecutive_passes=row.consecutive_passes,
                 consecutive_failures=row.consecutive_failures,
             )
@@ -152,7 +186,8 @@ class PgSymbolRepository:
             row = (
                 await session.execute(
                     select(SymbolRow).where(
-                        SymbolRow.exchange_symbol == state.exchange_symbol
+                        SymbolRow.exchange_symbol
+                        == state.exchange_symbol
                     )
                 )
             ).scalar_one_or_none()
@@ -163,13 +198,19 @@ class PgSymbolRepository:
                 )
 
             row.tier = state.tier.value
+
             row.candidate_tier = (
                 state.candidate_tier.value
                 if state.candidate_tier is not None
                 else None
             )
-            row.consecutive_passes = state.consecutive_passes
-            row.consecutive_failures = state.consecutive_failures
+
+            row.consecutive_passes = (
+                state.consecutive_passes
+            )
+            row.consecutive_failures = (
+                state.consecutive_failures
+            )
 
             await session.commit()
 
@@ -217,16 +258,15 @@ class PgCandleRepository:
             raw = await conn.get_raw_connection()
 
             driver = raw.driver_connection
-            # asyncpg connection (TDR §26 hot path)
+
             assert driver is not None
 
-            # Create the staging table through SQLAlchemy so the session's
-            # transaction is physically begun; a raw asyncpg statement here
-            # would autocommit and fire ON COMMIT DROP before the COPY.
             await conn.execute(
                 text(
-                    "CREATE TEMP TABLE IF NOT EXISTS _candles_stage "
-                    "(LIKE market.candles INCLUDING DEFAULTS) ON COMMIT DROP"
+                    "CREATE TEMP TABLE IF NOT EXISTS "
+                    "_candles_stage "
+                    "(LIKE market.candles INCLUDING DEFAULTS) "
+                    "ON COMMIT DROP"
                 )
             )
 
@@ -241,7 +281,11 @@ class PgCandleRepository:
                 WITH moved AS (
                     INSERT INTO market.candles
                     SELECT * FROM _candles_stage
-                    ON CONFLICT (symbol, timeframe, open_time) DO NOTHING
+                    ON CONFLICT (
+                        symbol,
+                        timeframe,
+                        open_time
+                    ) DO NOTHING
                     RETURNING 1
                 )
                 SELECT count(*) FROM moved
@@ -263,9 +307,12 @@ class PgCandleRepository:
                     select(CandleRow.open_time)
                     .where(
                         CandleRow.symbol == symbol,
-                        CandleRow.timeframe == timeframe.value,
+                        CandleRow.timeframe
+                        == timeframe.value,
                     )
-                    .order_by(CandleRow.open_time.desc())
+                    .order_by(
+                        CandleRow.open_time.desc()
+                    )
                     .limit(1)
                 )
             ).scalar_one_or_none()
@@ -283,11 +330,16 @@ class PgCandleRepository:
                     select(CandleRow)
                     .where(
                         CandleRow.symbol == symbol,
-                        CandleRow.timeframe == timeframe.value,
-                        CandleRow.open_time >= bindparam("start"),
-                        CandleRow.open_time < bindparam("end"),
+                        CandleRow.timeframe
+                        == timeframe.value,
+                        CandleRow.open_time
+                        >= bindparam("start"),
+                        CandleRow.open_time
+                        < bindparam("end"),
                     )
-                    .order_by(CandleRow.open_time.asc()),
+                    .order_by(
+                        CandleRow.open_time.asc()
+                    ),
                     {
                         "start": start,
                         "end": end,
@@ -295,7 +347,10 @@ class PgCandleRepository:
                 )
             ).scalars()
 
-            return [_to_candle(row) for row in rows]
+            return [
+                _to_candle(row)
+                for row in rows
+            ]
 
     async def count_series(
         self,
@@ -307,9 +362,12 @@ class PgCandleRepository:
         async with self._sessions() as session:
             value = await session.execute(
                 text(
-                    "SELECT count(*) FROM market.candles "
-                    "WHERE symbol = :symbol AND timeframe = :tf "
-                    "AND open_time >= :start AND open_time < :end"
+                    "SELECT count(*) "
+                    "FROM market.candles "
+                    "WHERE symbol = :symbol "
+                    "AND timeframe = :tf "
+                    "AND open_time >= :start "
+                    "AND open_time < :end"
                 ),
                 {
                     "symbol": symbol,
@@ -319,7 +377,9 @@ class PgCandleRepository:
                 },
             )
 
-            return int(value.scalar_one())
+            return int(
+                value.scalar_one()
+            )
 
 
 class PgIncidentRepository:
@@ -341,7 +401,7 @@ class PgIncidentRepository:
                     symbol=incident.symbol,
                     timeframe=(
                         incident.timeframe.value
-                        if incident.timeframe
+                        if incident.timeframe is not None
                         else None
                     ),
                     incident_type=incident.incident_type,
@@ -392,11 +452,16 @@ class PgIncidentRepository:
         async with self._sessions() as session:
             rows = (
                 await session.execute(
-                    stmt.order_by(IncidentRow.started_at)
+                    stmt.order_by(
+                        IncidentRow.started_at
+                    )
                 )
             ).scalars()
 
-            return [_to_incident(row) for row in rows]
+            return [
+                _to_incident(row)
+                for row in rows
+            ]
 
     async def list_for_series(
         self,
@@ -409,13 +474,83 @@ class PgIncidentRepository:
                     select(IncidentRow)
                     .where(
                         IncidentRow.symbol == symbol,
-                        IncidentRow.timeframe == timeframe.value,
+                        IncidentRow.timeframe
+                        == timeframe.value,
                     )
-                    .order_by(IncidentRow.started_at)
+                    .order_by(
+                        IncidentRow.started_at
+                    )
                 )
             ).scalars()
 
-            return [_to_incident(row) for row in rows]
+            return [
+                _to_incident(row)
+                for row in rows
+            ]
+
+
+class PgLiquidityHistoryRepository:
+    """PostgreSQL persistence for daily liquidity observations."""
+
+    def __init__(
+        self,
+        sessions: async_sessionmaker[AsyncSession],
+    ) -> None:
+        self._sessions = sessions
+
+    async def append(
+        self,
+        record: LiquidityHistoryRecord,
+    ) -> None:
+        stmt = (
+            pg_insert(LiquidityHistoryRow)
+            .values(
+                exchange_symbol=record.exchange_symbol,
+                observed_at=record.observed_at,
+                daily_quote_volume=record.daily_quote_volume,
+                spread_bps=record.spread_bps,
+                depth_2pct=record.depth_2pct,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    LiquidityHistoryRow.exchange_symbol,
+                    LiquidityHistoryRow.observed_at,
+                ]
+            )
+        )
+
+        async with self._sessions() as session:
+            await session.execute(stmt)
+            await session.commit()
+
+    async def fetch_recent(
+        self,
+        exchange_symbol: str,
+        *,
+        limit: int = 7,
+    ) -> Sequence[LiquidityHistoryRecord]:
+        if limit <= 0:
+            return []
+
+        async with self._sessions() as session:
+            rows = (
+                await session.execute(
+                    select(LiquidityHistoryRow)
+                    .where(
+                        LiquidityHistoryRow.exchange_symbol
+                        == exchange_symbol
+                    )
+                    .order_by(
+                        LiquidityHistoryRow.observed_at.desc()
+                    )
+                    .limit(limit)
+                )
+            ).scalars()
+
+            return [
+                _to_liquidity_history(row)
+                for row in rows
+            ]
 
 
 def _to_symbol(
@@ -462,11 +597,23 @@ def _to_incident(
         symbol=row.symbol,
         timeframe=(
             Timeframe(row.timeframe)
-            if row.timeframe
+            if row.timeframe is not None
             else None
         ),
         candle_span=row.candle_span,
         resolution=row.resolution,
         resolved_at=row.resolved_at,
         notes=row.notes,
+    )
+
+
+def _to_liquidity_history(
+    row: LiquidityHistoryRow,
+) -> LiquidityHistoryRecord:
+    return LiquidityHistoryRecord(
+        exchange_symbol=row.exchange_symbol,
+        observed_at=row.observed_at,
+        daily_quote_volume=row.daily_quote_volume,
+        spread_bps=row.spread_bps,
+        depth_2pct=row.depth_2pct,
     )
