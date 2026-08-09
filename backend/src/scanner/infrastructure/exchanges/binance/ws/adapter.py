@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 
 import structlog
 import websockets
@@ -14,6 +14,7 @@ from scanner.shared import Timeframe, parse_decimal, utc_from_ms
 
 log = structlog.get_logger(__name__)
 
+CandleHandler = Callable[[Candle], Awaitable[None]]
 
 _BINANCE_INTERVALS: dict[str, Timeframe] = {
     "5m": Timeframe.M5,
@@ -97,9 +98,11 @@ class BinanceWebSocketAdapter:
         url: str = "wss://stream.binance.com:9443",
         *,
         reconnect_delay_seconds: int = 5,
+        candle_handler: CandleHandler | None = None,
     ) -> None:
         self._url = url
         self._reconnect_delay_seconds = reconnect_delay_seconds
+        self._candle_handler = candle_handler
         self._running = False
 
     async def run(self) -> None:
@@ -142,12 +145,13 @@ class BinanceWebSocketAdapter:
         if candle is None:
             return
 
+        if self._candle_handler is not None:
+            await self._candle_handler(candle)
+
         log.info(
-            "binance_candle_created",
+            "binance_candle_processed",
             symbol=candle.symbol,
             timeframe=candle.timeframe.value,
             open_time=candle.open_time.isoformat(),
-            close=str(candle.close),
-            volume=str(candle.volume),
             source=candle.source.value,
         )
