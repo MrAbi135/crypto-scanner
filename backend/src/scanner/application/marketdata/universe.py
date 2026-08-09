@@ -4,18 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from enum import Enum
 
+from scanner.domain.common.universe import UniverseTier
 from scanner.shared import Timeframe
-
-
-class UniverseTier(str, Enum):
-    """Liquidity eligibility tier."""
-
-    T1 = "T1"
-    T2 = "T2"
-    T3 = "T3"
-    INELIGIBLE = "INELIGIBLE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +58,9 @@ def classify_tier(snapshot: LiquiditySnapshot) -> UniverseTier:
     return UniverseTier.INELIGIBLE
 
 
-def scanned_timeframes(tier: UniverseTier) -> tuple[Timeframe, ...]:
+def scanned_timeframes(
+    tier: UniverseTier,
+) -> tuple[Timeframe, ...]:
     """Return the scanned timeframe set permitted by one liquidity tier."""
 
     if tier is UniverseTier.T1:

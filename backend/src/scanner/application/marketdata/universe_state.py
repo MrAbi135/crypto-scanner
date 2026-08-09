@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from scanner.application.marketdata.universe import UniverseTier
+from scanner.domain.common.universe import UniverseTier
 
 _PROMOTION_DAYS = 7
 _DEMOTION_DAYS = 3
@@ -26,7 +26,10 @@ class UniverseTierState:
     consecutive_passes: int = 0
     consecutive_failures: int = 0
 
-    def evaluate(self, observed_tier: UniverseTier) -> UniverseTier:
+    def evaluate(
+        self,
+        observed_tier: UniverseTier,
+    ) -> UniverseTier:
         """Apply one daily liquidity evaluation and return the stable tier."""
 
         if observed_tier is self.current_tier:

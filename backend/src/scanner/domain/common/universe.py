@@ -12,3 +12,4 @@ class UniverseTier(str, Enum):
     T2 = "T2"
     T3 = "T3"
     INELIGIBLE = "INELIGIBLE"
+    
