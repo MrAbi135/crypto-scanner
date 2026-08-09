@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable, Sequence
+from datetime import datetime
 
 import structlog
 import websockets
@@ -14,7 +15,7 @@ from scanner.shared import Timeframe, parse_decimal, utc_from_ms
 
 log = structlog.get_logger(__name__)
 
-CandleHandler = Callable[[Candle], Awaitable[None]]
+CandleHandler = Callable[[Candle, datetime], Awaitable[None]]
 
 _BINANCE_INTERVALS: dict[str, Timeframe] = {
     "5m": Timeframe.M5,
@@ -45,6 +46,16 @@ def unwrap_stream_event(event: dict[str, object]) -> dict[str, object]:
         return data
 
     return event
+
+
+def parse_event_time(event: dict[str, object]) -> datetime | None:
+    """Return Binance exchange event time."""
+    event_time = event.get("E")
+
+    if not isinstance(event_time, int):
+        return None
+
+    return utc_from_ms(event_time)
 
 
 def parse_closed_kline(event: dict[str, object]) -> Candle | None:
@@ -145,8 +156,18 @@ class BinanceWebSocketAdapter:
         if candle is None:
             return
 
+        event_at = parse_event_time(event)
+
+        if event_at is None:
+            log.warning(
+                "binance_event_timestamp_missing",
+                symbol=candle.symbol,
+                timeframe=candle.timeframe.value,
+            )
+            return
+
         if self._candle_handler is not None:
-            await self._candle_handler(candle)
+            await self._candle_handler(candle, event_at)
 
         log.info(
             "binance_candle_processed",

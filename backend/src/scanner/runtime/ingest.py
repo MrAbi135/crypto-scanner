@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 import httpx
 import structlog
@@ -48,8 +49,14 @@ async def _run_websocket(
         _STREAMS,
     )
 
-    async def handle_candle(candle: Candle) -> None:
-        inserted = await live_ingest.ingest(candle)
+    async def handle_candle(
+        candle: Candle,
+        event_at: datetime,
+    ) -> None:
+        inserted = await live_ingest.ingest(
+            candle,
+            event_at,
+        )
 
         log.info(
             "live_candle_ingested",
@@ -57,6 +64,14 @@ async def _run_websocket(
             timeframe=candle.timeframe.value,
             open_time=candle.open_time.isoformat(),
             inserted=inserted,
+            freshness=live_ingest.freshness(
+                candle.symbol,
+                candle.timeframe,
+            ).value,
+            detection_allowed=live_ingest.detection_allowed(
+                candle.symbol,
+                candle.timeframe,
+            ),
         )
 
     adapter = BinanceWebSocketAdapter(
@@ -78,7 +93,10 @@ def main() -> None:
         sessions = build_session_factory(engine)
         clock = SystemClock()
 
-        candle_repo = PgCandleRepository(sessions, clock)
+        candle_repo = PgCandleRepository(
+            sessions,
+            clock,
+        )
         incident_repo = PgIncidentRepository(sessions)
 
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -98,24 +116,35 @@ def main() -> None:
             live_ingest = LiveIngestService(
                 candle_repo,
                 backfill,
+                clock,
             )
 
             task = asyncio.create_task(
-                _run_websocket(settings, live_ingest)
+                _run_websocket(
+                    settings,
+                    live_ingest,
+                )
             )
             app.state.websocket_task = task
+            app.state.live_ingest = live_ingest
 
             try:
                 yield
             finally:
                 task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
+                await asyncio.gather(
+                    task,
+                    return_exceptions=True,
+                )
                 await engine.dispose()
 
     app = build_health_app(settings)
     app.router.lifespan_context = lifespan
 
-    run_asgi(app, settings.health_port)
+    run_asgi(
+        app,
+        settings.health_port,
+    )
 
 
 if __name__ == "__main__":
