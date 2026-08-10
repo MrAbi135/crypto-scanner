@@ -1,0 +1,453 @@
+"""Tests for deterministic structure history replay."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+
+import pytest
+
+from scanner.application.detection.state import (
+    EngineStateManager,
+)
+from scanner.application.detection.structure_replay import (
+    StructureReplayService,
+)
+from scanner.application.ports.detection import (
+    EngineEventRecord,
+)
+from scanner.domain.common import (
+    Candle,
+    CandleSource,
+)
+from scanner.shared import Timeframe
+
+
+class FakeClock:
+    def now(self) -> datetime:
+        return datetime(
+            2026,
+            8,
+            10,
+            12,
+            tzinfo=UTC,
+        )
+
+
+class FakeCandleRepository:
+    def __init__(
+        self,
+        candles: list[Candle],
+    ) -> None:
+        self.candles = candles
+
+    async def fetch_series(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> list[Candle]:
+        return [
+            candle
+            for candle in self.candles
+            if (
+                candle.symbol == symbol
+                and candle.timeframe
+                is timeframe
+                and start
+                <= candle.open_time
+                < end
+            )
+        ]
+
+
+class FakeEventRepository:
+    def __init__(self) -> None:
+        self.events: dict[
+            str,
+            EngineEventRecord,
+        ] = {}
+
+    async def append(
+        self,
+        event: EngineEventRecord,
+    ) -> bool:
+        if event.event_key in self.events:
+            return False
+
+        self.events[
+            event.event_key
+        ] = event
+
+        return True
+
+    async def exists(
+        self,
+        event_key: str,
+    ) -> bool:
+        return (
+            event_key
+            in self.events
+        )
+
+
+class FakeStateStore:
+    def __init__(self) -> None:
+        self.values: dict[
+            str,
+            str,
+        ] = {}
+
+    async def load(
+        self,
+        context_key: str,
+    ) -> str | None:
+        return self.values.get(
+            context_key
+        )
+
+    async def save(
+        self,
+        context_key: str,
+        payload: str,
+    ) -> None:
+        self.values[
+            context_key
+        ] = payload
+
+    async def delete(
+        self,
+        context_key: str,
+    ) -> None:
+        self.values.pop(
+            context_key,
+            None,
+        )
+
+
+def make_candle(
+    index: int,
+    *,
+    high: str,
+    low: str,
+) -> Candle:
+    high_value = Decimal(high)
+    low_value = Decimal(low)
+
+    midpoint = (
+        high_value + low_value
+    ) / Decimal("2")
+
+    return Candle(
+        symbol="BTCUSDT",
+        timeframe=Timeframe.H1,
+        open_time=datetime(
+            2026,
+            8,
+            1,
+            tzinfo=UTC,
+        )
+        + timedelta(
+            hours=index
+        ),
+        open=midpoint,
+        high=high_value,
+        low=low_value,
+        close=midpoint,
+        volume=Decimal("100"),
+        quote_volume=Decimal(
+            "10000"
+        ),
+        taker_buy_volume=Decimal(
+            "50"
+        ),
+        trade_count=10,
+        source=CandleSource.BACKFILL,
+    )
+
+
+def sample_candles() -> list[Candle]:
+    highs = [
+        "10",
+        "12",
+        "18",
+        "14",
+        "13",
+        "16",
+        "12",
+        "11",
+        "20",
+        "15",
+        "14",
+        "17",
+        "13",
+        "12",
+        "22",
+        "16",
+        "15",
+    ]
+
+    lows = [
+        "5",
+        "6",
+        "7",
+        "6",
+        "4",
+        "7",
+        "5",
+        "3",
+        "8",
+        "6",
+        "5",
+        "8",
+        "6",
+        "4",
+        "9",
+        "7",
+        "6",
+    ]
+
+    return [
+        make_candle(
+            index,
+            high=high,
+            low=low,
+        )
+        for index, (
+            high,
+            low,
+        ) in enumerate(
+            zip(
+                highs,
+                lows,
+                strict=True,
+            )
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_replay_persists_structure_events_and_state() -> None:
+    events = FakeEventRepository()
+    states = EngineStateManager(
+        FakeStateStore()
+    )
+
+    service = StructureReplayService(
+        FakeCandleRepository(
+            sample_candles()
+        ),
+        events,
+        states,
+        FakeClock(),
+    )
+
+    report = await service.run(
+        "BTCUSDT",
+        Timeframe.H1,
+        datetime(
+            2026,
+            8,
+            1,
+            tzinfo=UTC,
+        ),
+        datetime(
+            2026,
+            8,
+            3,
+            tzinfo=UTC,
+        ),
+    )
+
+    assert report.candles == 17
+    assert report.internal_swings > 0
+    assert report.events_inserted > 0
+
+    state = await states.load(
+        "BTCUSDT",
+        Timeframe.H1.value,
+        "s4-v1",
+    )
+
+    assert state is not None
+
+    assert (
+        state.last_processed_open_time
+        == sample_candles()[
+            -1
+        ].open_time.isoformat()
+    )
+
+
+@pytest.mark.asyncio
+async def test_replay_is_idempotent() -> None:
+    events = FakeEventRepository()
+
+    service = StructureReplayService(
+        FakeCandleRepository(
+            sample_candles()
+        ),
+        events,
+        EngineStateManager(
+            FakeStateStore()
+        ),
+        FakeClock(),
+    )
+
+    start = datetime(
+        2026,
+        8,
+        1,
+        tzinfo=UTC,
+    )
+
+    end = datetime(
+        2026,
+        8,
+        3,
+        tzinfo=UTC,
+    )
+
+    first = await service.run(
+        "BTCUSDT",
+        Timeframe.H1,
+        start,
+        end,
+    )
+
+    second = await service.run(
+        "BTCUSDT",
+        Timeframe.H1,
+        start,
+        end,
+    )
+
+    assert first.events_inserted > 0
+    assert second.events_inserted == 0
+
+
+@pytest.mark.asyncio
+async def test_rebuild_state_replaces_old_snapshot() -> None:
+    store = FakeStateStore()
+    states = EngineStateManager(
+        store
+    )
+
+    await store.save(
+        (
+            "structure:s4-v1:"
+            f"BTCUSDT:{Timeframe.H1.value}"
+        ),
+        (
+            '{"algo_version":"s4-v1",'
+            '"last_processed_open_time":null,'
+            '"symbol":"BTCUSDT",'
+            f'"timeframe":"{Timeframe.H1.value}",'
+            '"trend_state":"BEARISH"}'
+        ),
+    )
+
+    service = StructureReplayService(
+        FakeCandleRepository(
+            sample_candles()
+        ),
+        FakeEventRepository(),
+        states,
+        FakeClock(),
+    )
+
+    await service.run(
+        "BTCUSDT",
+        Timeframe.H1,
+        datetime(
+            2026,
+            8,
+            1,
+            tzinfo=UTC,
+        ),
+        datetime(
+            2026,
+            8,
+            3,
+            tzinfo=UTC,
+        ),
+        rebuild_state=True,
+    )
+
+    state = await states.load(
+        "BTCUSDT",
+        Timeframe.H1.value,
+        "s4-v1",
+    )
+
+    assert state is not None
+    assert (
+        state.last_processed_open_time
+        is not None
+    )
+
+
+@pytest.mark.asyncio
+async def test_empty_history_produces_empty_state() -> None:
+    states = EngineStateManager(
+        FakeStateStore()
+    )
+
+    service = StructureReplayService(
+        FakeCandleRepository([]),
+        FakeEventRepository(),
+        states,
+        FakeClock(),
+    )
+
+    report = await service.run(
+        "BTCUSDT",
+        Timeframe.H1,
+        datetime(
+            2026,
+            8,
+            1,
+            tzinfo=UTC,
+        ),
+        datetime(
+            2026,
+            8,
+            2,
+            tzinfo=UTC,
+        ),
+    )
+
+    assert report.candles == 0
+    assert report.events_inserted == 0
+    assert report.trend_state == "RANGING"
+
+
+@pytest.mark.asyncio
+async def test_invalid_range_is_rejected() -> None:
+    service = StructureReplayService(
+        FakeCandleRepository([]),
+        FakeEventRepository(),
+        EngineStateManager(
+            FakeStateStore()
+        ),
+        FakeClock(),
+    )
+
+    point = datetime(
+        2026,
+        8,
+        1,
+        tzinfo=UTC,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="end must be greater than start",
+    ):
+        await service.run(
+            "BTCUSDT",
+            Timeframe.H1,
+            point,
+            point,
+        )
