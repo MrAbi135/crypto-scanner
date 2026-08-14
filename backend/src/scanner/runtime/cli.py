@@ -67,23 +67,15 @@ async def _run_sync(
 ) -> int:
     settings = load_ingest_settings()
 
-    engine = build_engine(
-        settings.db_dsn
-    )
+    engine = build_engine(settings.db_dsn)
 
     try:
-        sessions = build_session_factory(
-            engine
-        )
+        sessions = build_session_factory(engine)
 
-        async with httpx.AsyncClient(
-            timeout=30.0
-        ) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             provider = BinanceRestAdapter(
                 client,
-                RateBudget(
-                    settings.binance_weight_capacity
-                ),
+                RateBudget(settings.binance_weight_capacity),
                 base_url=settings.binance_base_url,
             )
 
@@ -110,25 +102,17 @@ async def _run_backfill(
 ) -> int:
     settings = load_ingest_settings()
 
-    engine = build_engine(
-        settings.db_dsn
-    )
+    engine = build_engine(settings.db_dsn)
 
     try:
-        sessions = build_session_factory(
-            engine
-        )
+        sessions = build_session_factory(engine)
 
         clock = SystemClock()
 
-        async with httpx.AsyncClient(
-            timeout=30.0
-        ) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             provider = BinanceRestAdapter(
                 client,
-                RateBudget(
-                    settings.binance_weight_capacity
-                ),
+                RateBudget(settings.binance_weight_capacity),
                 base_url=settings.binance_base_url,
             )
 
@@ -138,9 +122,7 @@ async def _run_backfill(
                     sessions,
                     clock,
                 ),
-                PgIncidentRepository(
-                    sessions
-                ),
+                PgIncidentRepository(sessions),
                 clock,
             )
 
@@ -162,24 +144,13 @@ async def _run_backfill(
             f"gaps_recorded={report.gaps_recorded} "
             f"quarantined="
             f"{report.quarantined_batches}"
-            + (
-                f" resumed_from="
-                f"{report.resumed_from.isoformat()}"
-                if report.resumed_from
-                else ""
-            )
+            + (f" resumed_from={report.resumed_from.isoformat()}" if report.resumed_from else "")
         )
 
         for line in report.findings:
-            print(
-                f"  finding: {line}"
-            )
+            print(f"  finding: {line}")
 
-        return (
-            0
-            if report.quarantined_batches == 0
-            else 2
-        )
+        return 0 if report.quarantined_batches == 0 else 2
 
     finally:
         await engine.dispose()
@@ -190,23 +161,17 @@ async def _run_verify(
 ) -> int:
     settings = load_ingest_settings()
 
-    engine = build_engine(
-        settings.db_dsn
-    )
+    engine = build_engine(settings.db_dsn)
 
     try:
-        sessions = build_session_factory(
-            engine
-        )
+        sessions = build_session_factory(engine)
 
         report = await verify_continuity(
             PgCandleRepository(
                 sessions,
                 SystemClock(),
             ),
-            PgIncidentRepository(
-                sessions
-            ),
+            PgIncidentRepository(sessions),
             args.symbol,
             args.timeframe,
             args.start,
@@ -226,19 +191,10 @@ async def _run_verify(
             f"{len(report.uncovered)}"
         )
 
-        for timestamp in report.uncovered[
-            :20
-        ]:
-            print(
-                "  UNCOVERED HOLE: "
-                f"{timestamp.isoformat()}"
-            )
+        for timestamp in report.uncovered[:20]:
+            print(f"  UNCOVERED HOLE: {timestamp.isoformat()}")
 
-        return (
-            0
-            if report.ok
-            else 2
-        )
+        return 0 if report.ok else 2
 
     finally:
         await engine.dispose()
@@ -249,22 +205,14 @@ async def _run_engine(
     *,
     rebuild_state: bool,
 ) -> int:
-    settings = get_settings(
-        "engine"
-    )
+    settings = get_settings("engine")
 
-    engine = build_engine(
-        settings.db_dsn
-    )
+    engine = build_engine(settings.db_dsn)
 
-    redis_client = aioredis.from_url(
-        settings.redis_url
-    )
+    redis_client = aioredis.from_url(settings.redis_url)
 
     try:
-        sessions = build_session_factory(
-            engine
-        )
+        sessions = build_session_factory(engine)
 
         clock = SystemClock()
 
@@ -273,17 +221,11 @@ async def _run_engine(
             clock,
         )
 
-        event_repo = PgEngineEventRepository(
-            sessions
-        )
+        event_repo = PgEngineEventRepository(sessions)
 
-        state_store = RedisEngineStateStore(
-            redis_client
-        )
+        state_store = RedisEngineStateStore(redis_client)
 
-        state_manager = EngineStateManager(
-            state_store
-        )
+        state_manager = EngineStateManager(state_store)
 
         service = StructureReplayService(
             candle_repo,
@@ -300,11 +242,7 @@ async def _run_engine(
             rebuild_state=rebuild_state,
         )
 
-        operation = (
-            "engine rebuild-state"
-            if rebuild_state
-            else "engine run"
-        )
+        operation = "engine rebuild-state" if rebuild_state else "engine run"
 
         print(
             f"{operation} "
@@ -322,14 +260,8 @@ async def _run_engine(
             f"trend={report.trend_state}"
         )
 
-        if (
-            report.last_processed_open_time
-            is not None
-        ):
-            print(
-                "  last_processed="
-                f"{report.last_processed_open_time.isoformat()}"
-            )
+        if report.last_processed_open_time is not None:
+            print(f"  last_processed={report.last_processed_open_time.isoformat()}")
 
         return 0
 
@@ -374,43 +306,23 @@ async def _dispatch(
 ) -> int:
     if args.command == "engine":
         if args.engine_command == "run":
-            return await _run_engine_run(
-                args
-            )
+            return await _run_engine_run(args)
 
-        if (
-            args.engine_command
-            == "rebuild-state"
-        ):
-            return await _run_engine_rebuild(
-                args
-            )
+        if args.engine_command == "rebuild-state":
+            return await _run_engine_rebuild(args)
 
-        raise ValueError(
-            "unknown engine command: "
-            f"{args.engine_command}"
-        )
+        raise ValueError(f"unknown engine command: {args.engine_command}")
 
-    return await _HANDLERS[
-        args.command
-    ](
-        args
-    )
+    return await _HANDLERS[args.command](args)
 
 
 def main(
     argv: list[str] | None = None,
 ) -> int:
-    args = build_parser().parse_args(
-        argv
-    )
+    args = build_parser().parse_args(argv)
 
-    return asyncio.run(
-        _dispatch(args)
-    )
+    return asyncio.run(_dispatch(args))
 
 
 if __name__ == "__main__":
-    sys.exit(
-        main()
-    )
+    sys.exit(main())

@@ -27,9 +27,7 @@ def swing_window(
     if strength is SwingStrength.EXTERNAL:
         return _EXTERNAL_K
 
-    raise ValueError(
-        f"unsupported swing strength: {strength}"
-    )
+    raise ValueError(f"unsupported swing strength: {strength}")
 
 
 def detect_swings(
@@ -139,27 +137,18 @@ def _is_swing_high(
     right = candles[index + 1 : index + k + 1]
 
     # Nothing in the complete window may be materially higher.
-    if any(
-        candle.high > candidate + epsilon
-        for candle in (*left, *right)
-    ):
+    if any(candle.high > candidate + epsilon for candle in (*left, *right)):
         return False
 
     # Confirmation requires k strictly lower highs on the right.
     # Therefore earlier candles of an equal-high set cannot confirm;
     # only the final equal extreme can.
-    if any(
-        candle.high >= candidate - epsilon
-        for candle in right
-    ):
+    if any(candle.high >= candidate - epsilon for candle in right):
         return False
 
     # At least one left-side candle must be materially lower. This prevents
     # a completely flat window being treated as a swing.
-    return any(
-        candle.high < candidate - epsilon
-        for candle in left
-    )
+    return any(candle.high < candidate - epsilon for candle in left)
 
 
 def _is_swing_low(
@@ -174,20 +163,11 @@ def _is_swing_low(
     left = candles[index - k : index]
     right = candles[index + 1 : index + k + 1]
 
-    if any(
-        candle.low < candidate - epsilon
-        for candle in (*left, *right)
-    ):
+    if any(candle.low < candidate - epsilon for candle in (*left, *right)):
         return False
 
     # Mirror of equal-high handling: k strictly higher lows must follow.
-    if any(
-        candle.low <= candidate + epsilon
-        for candle in right
-    ):
+    if any(candle.low <= candidate + epsilon for candle in right):
         return False
 
-    return any(
-        candle.low > candidate + epsilon
-        for candle in left
-    )
+    return any(candle.low > candidate + epsilon for candle in left)

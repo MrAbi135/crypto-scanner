@@ -48,15 +48,12 @@ log = structlog.get_logger(__name__)
 
 async def _seconds_until_next_utc_midnight() -> float:
     now = datetime.now(UTC)
-    tomorrow = (
-        now.replace(
-            hour=0,
-            minute=0,
-            second=0,
-            microsecond=0,
-        )
-        + timedelta(days=1)
-    )
+    tomorrow = now.replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    ) + timedelta(days=1)
 
     return max(
         0.0,
@@ -69,17 +66,13 @@ async def _run_daily_universe_loop(
     symbols: PgSymbolRepository,
 ) -> None:
     while True:
-        await asyncio.sleep(
-            await _seconds_until_next_utc_midnight()
-        )
+        await asyncio.sleep(await _seconds_until_next_utc_midnight())
 
         active_symbols = await symbols.list_active()
 
         for symbol in active_symbols:
             try:
-                report = await job.run_symbol(
-                    symbol.exchange_symbol
-                )
+                report = await job.run_symbol(symbol.exchange_symbol)
 
                 if report.evaluation is None:
                     log.info(
@@ -122,32 +115,18 @@ def main() -> None:
     async def lifespan(
         app: Starlette,
     ) -> AsyncIterator[None]:
-        engine = build_engine(
-            settings.db_dsn
-        )
-        sessions = build_session_factory(
-            engine
-        )
+        engine = build_engine(settings.db_dsn)
+        sessions = build_session_factory(engine)
 
         clock = SystemClock()
 
-        symbol_repo = PgSymbolRepository(
-            sessions
-        )
-        liquidity_history_repo = (
-            PgLiquidityHistoryRepository(
-                sessions
-            )
-        )
+        symbol_repo = PgSymbolRepository(sessions)
+        liquidity_history_repo = PgLiquidityHistoryRepository(sessions)
 
-        async with httpx.AsyncClient(
-            timeout=30.0
-        ) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             rest_adapter = BinanceRestAdapter(
                 client,
-                RateBudget(
-                    settings.binance_weight_capacity
-                ),
+                RateBudget(settings.binance_weight_capacity),
                 base_url=settings.binance_base_url,
             )
 
@@ -158,13 +137,9 @@ def main() -> None:
                 clock,
             )
 
-            snapshot_builder = LiquiditySnapshotBuilder(
-                liquidity_history_repo
-            )
+            snapshot_builder = LiquiditySnapshotBuilder(liquidity_history_repo)
 
-            universe_manager = UniverseManager(
-                symbol_repo
-            )
+            universe_manager = UniverseManager(symbol_repo)
 
             job = DailyUniverseJob(
                 collector,

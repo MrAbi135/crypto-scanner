@@ -71,10 +71,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_symbols_candidate_tier",
         "symbols",
-        (
-            "candidate_tier IS NULL OR "
-            "candidate_tier IN ('T1','T2','T3','INELIGIBLE')"
-        ),
+        ("candidate_tier IS NULL OR candidate_tier IN ('T1','T2','T3','INELIGIBLE')"),
         schema="market",
     )
 
@@ -141,4 +138,3 @@ def downgrade() -> None:
         "tier",
         schema="market",
     )
-    

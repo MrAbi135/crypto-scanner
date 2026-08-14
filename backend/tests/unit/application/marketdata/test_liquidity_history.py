@@ -87,9 +87,7 @@ def seven_records() -> list[LiquidityHistoryRecord]:
 
 
 def test_build_snapshot_uses_exact_seven_day_medians() -> None:
-    snapshot = build_liquidity_snapshot(
-        seven_records()
-    )
+    snapshot = build_liquidity_snapshot(seven_records())
 
     assert snapshot.median_daily_quote_volume == Decimal("40")
     assert snapshot.median_spread_bps == Decimal("4")
@@ -101,9 +99,7 @@ def test_build_snapshot_rejects_less_than_seven_records() -> None:
         InsufficientLiquidityHistoryError,
         match="at least 7 daily liquidity observations are required",
     ):
-        build_liquidity_snapshot(
-            seven_records()[:6]
-        )
+        build_liquidity_snapshot(seven_records()[:6])
 
 
 def test_build_snapshot_ignores_records_after_first_seven() -> None:
@@ -118,9 +114,7 @@ def test_build_snapshot_ignores_records_after_first_seven() -> None:
         )
     )
 
-    snapshot = build_liquidity_snapshot(
-        records
-    )
+    snapshot = build_liquidity_snapshot(records)
 
     assert snapshot.median_daily_quote_volume == Decimal("40")
     assert snapshot.median_spread_bps == Decimal("4")
@@ -153,17 +147,11 @@ class FakeLiquidityHistoryRepository:
 
 @pytest.mark.asyncio
 async def test_builder_loads_seven_recent_records() -> None:
-    repo = FakeLiquidityHistoryRepository(
-        seven_records()
-    )
+    repo = FakeLiquidityHistoryRepository(seven_records())
 
-    builder = LiquiditySnapshotBuilder(
-        repo
-    )
+    builder = LiquiditySnapshotBuilder(repo)
 
-    snapshot = await builder.build(
-        "BTCUSDT"
-    )
+    snapshot = await builder.build("BTCUSDT")
 
     assert repo.calls == [
         (
@@ -179,17 +167,11 @@ async def test_builder_loads_seven_recent_records() -> None:
 
 @pytest.mark.asyncio
 async def test_builder_propagates_insufficient_history() -> None:
-    repo = FakeLiquidityHistoryRepository(
-        seven_records()[:5]
-    )
+    repo = FakeLiquidityHistoryRepository(seven_records()[:5])
 
-    builder = LiquiditySnapshotBuilder(
-        repo
-    )
+    builder = LiquiditySnapshotBuilder(repo)
 
     with pytest.raises(
         InsufficientLiquidityHistoryError,
     ):
-        await builder.build(
-            "BTCUSDT"
-        )
+        await builder.build("BTCUSDT")

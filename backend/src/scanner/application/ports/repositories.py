@@ -47,14 +47,12 @@ class SymbolRepository(Protocol):
         """Insert new registry rows and update lifecycle facts."""
         ...
 
-    async def list_active(self) -> Sequence[Symbol]:
-        ...
+    async def list_active(self) -> Sequence[Symbol]: ...
 
     async def get(
         self,
         exchange_symbol: str,
-    ) -> Symbol | None:
-        ...
+    ) -> Symbol | None: ...
 
     async def get_universe_state(
         self,
@@ -83,8 +81,7 @@ class CandleRepository(Protocol):
         self,
         symbol: str,
         timeframe: Timeframe,
-    ) -> datetime | None:
-        ...
+    ) -> datetime | None: ...
 
     async def fetch_series(
         self,
@@ -102,16 +99,14 @@ class CandleRepository(Protocol):
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
-    ) -> int:
-        ...
+    ) -> int: ...
 
 
 class IncidentRepository(Protocol):
     async def record(
         self,
         incident: IncidentRecord,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     async def resolve(
         self,
@@ -119,14 +114,12 @@ class IncidentRepository(Protocol):
         *,
         resolution: str,
         resolved_at: datetime,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     async def list_open(
         self,
         symbol: str | None = None,
-    ) -> Sequence[IncidentRecord]:
-        ...
+    ) -> Sequence[IncidentRecord]: ...
 
     async def list_for_series(
         self,
@@ -135,4 +128,3 @@ class IncidentRepository(Protocol):
     ) -> Sequence[IncidentRecord]:
         """Return all incidents for one series."""
         ...
-        

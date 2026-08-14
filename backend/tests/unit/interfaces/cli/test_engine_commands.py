@@ -47,9 +47,6 @@ def test_engine_rebuild_state_command_parses() -> None:
     )
 
     assert args.command == "engine"
-    assert (
-        args.engine_command
-        == "rebuild-state"
-    )
+    assert args.engine_command == "rebuild-state"
     assert args.symbol == "ETHUSDT"
     assert args.timeframe is Timeframe.H4

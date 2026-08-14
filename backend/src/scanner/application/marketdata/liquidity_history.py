@@ -31,15 +31,9 @@ def build_liquidity_snapshot(
     recent = records[:_REQUIRED_DAYS]
 
     return LiquiditySnapshot(
-        median_daily_quote_volume=_decimal_median(
-            [record.daily_quote_volume for record in recent]
-        ),
-        median_spread_bps=_decimal_median(
-            [record.spread_bps for record in recent]
-        ),
-        median_depth_2pct=_decimal_median(
-            [record.depth_2pct for record in recent]
-        ),
+        median_daily_quote_volume=_decimal_median([record.daily_quote_volume for record in recent]),
+        median_spread_bps=_decimal_median([record.spread_bps for record in recent]),
+        median_depth_2pct=_decimal_median([record.depth_2pct for record in recent]),
     )
 
 
@@ -63,9 +57,7 @@ class LiquiditySnapshotBuilder:
             limit=_REQUIRED_DAYS,
         )
 
-        return build_liquidity_snapshot(
-            list(records)
-        )
+        return build_liquidity_snapshot(list(records))
 
 
 def _decimal_median(

@@ -47,9 +47,7 @@ class FakeSnapshotBuilder:
         self.calls.append(exchange_symbol)
 
         if self.snapshot is None:
-            raise InsufficientLiquidityHistoryError(
-                "not enough history"
-            )
+            raise InsufficientLiquidityHistoryError("not enough history")
 
         return self.snapshot
 
@@ -96,9 +94,7 @@ async def test_job_collects_before_building_snapshot() -> None:
         median_depth_2pct=Decimal("2000000"),
     )
 
-    snapshots = FakeSnapshotBuilder(
-        snapshot
-    )
+    snapshots = FakeSnapshotBuilder(snapshot)
     manager = FakeUniverseManager()
 
     job = DailyUniverseJob(
@@ -107,16 +103,10 @@ async def test_job_collects_before_building_snapshot() -> None:
         manager,
     )
 
-    report = await job.run_symbol(
-        "BTCUSDT"
-    )
+    report = await job.run_symbol("BTCUSDT")
 
-    assert collector.calls == [
-        "BTCUSDT"
-    ]
-    assert snapshots.calls == [
-        "BTCUSDT"
-    ]
+    assert collector.calls == ["BTCUSDT"]
+    assert snapshots.calls == ["BTCUSDT"]
     assert manager.calls == [
         (
             "BTCUSDT",
@@ -132,9 +122,7 @@ async def test_job_collects_before_building_snapshot() -> None:
 @pytest.mark.asyncio
 async def test_job_skips_evaluation_until_seven_day_history_exists() -> None:
     collector = FakeCollector()
-    snapshots = FakeSnapshotBuilder(
-        None
-    )
+    snapshots = FakeSnapshotBuilder(None)
     manager = FakeUniverseManager()
 
     job = DailyUniverseJob(
@@ -143,16 +131,10 @@ async def test_job_skips_evaluation_until_seven_day_history_exists() -> None:
         manager,
     )
 
-    report = await job.run_symbol(
-        "BTCUSDT"
-    )
+    report = await job.run_symbol("BTCUSDT")
 
-    assert collector.calls == [
-        "BTCUSDT"
-    ]
-    assert snapshots.calls == [
-        "BTCUSDT"
-    ]
+    assert collector.calls == ["BTCUSDT"]
+    assert snapshots.calls == ["BTCUSDT"]
     assert manager.calls == []
 
     assert report.exchange_symbol == "BTCUSDT"
@@ -172,15 +154,11 @@ async def test_job_returns_universe_evaluation_report() -> None:
 
     job = DailyUniverseJob(
         FakeCollector(),
-        FakeSnapshotBuilder(
-            snapshot
-        ),
+        FakeSnapshotBuilder(snapshot),
         manager,
     )
 
-    report = await job.run_symbol(
-        "ETHUSDT"
-    )
+    report = await job.run_symbol("ETHUSDT")
 
     assert report.evaluation is not None
     assert report.evaluation.exchange_symbol == "ETHUSDT"

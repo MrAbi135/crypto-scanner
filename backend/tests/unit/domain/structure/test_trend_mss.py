@@ -15,64 +15,37 @@ from scanner.domain.structure import (
 
 
 def test_bullish_choch_enters_caution_without_flipping() -> None:
-    machine = TrendStateMachine(
-        TrendState.BULLISH
-    )
+    machine = TrendStateMachine(TrendState.BULLISH)
 
-    state = machine.apply_choch(
-        BreakDirection.DOWN
-    )
+    state = machine.apply_choch(BreakDirection.DOWN)
 
     assert state is TrendState.BULLISH_CAUTION
 
 
 def test_bearish_choch_enters_caution_without_flipping() -> None:
-    machine = TrendStateMachine(
-        TrendState.BEARISH
-    )
+    machine = TrendStateMachine(TrendState.BEARISH)
 
-    state = machine.apply_choch(
-        BreakDirection.UP
-    )
+    state = machine.apply_choch(BreakDirection.UP)
 
     assert state is TrendState.BEARISH_CAUTION
 
 
 def test_mss_down_flips_bullish_caution_to_bearish() -> None:
-    machine = TrendStateMachine(
-        TrendState.BULLISH_CAUTION
-    )
+    machine = TrendStateMachine(TrendState.BULLISH_CAUTION)
 
-    assert (
-        machine.apply_mss(
-            BreakDirection.DOWN
-        )
-        is TrendState.BEARISH
-    )
+    assert machine.apply_mss(BreakDirection.DOWN) is TrendState.BEARISH
 
 
 def test_mss_up_flips_bearish_caution_to_bullish() -> None:
-    machine = TrendStateMachine(
-        TrendState.BEARISH_CAUTION
-    )
+    machine = TrendStateMachine(TrendState.BEARISH_CAUTION)
 
-    assert (
-        machine.apply_mss(
-            BreakDirection.UP
-        )
-        is TrendState.BULLISH
-    )
+    assert machine.apply_mss(BreakDirection.UP) is TrendState.BULLISH
 
 
 def test_failed_mss_restores_previous_bullish_state() -> None:
-    machine = TrendStateMachine(
-        TrendState.BULLISH_CAUTION
-    )
+    machine = TrendStateMachine(TrendState.BULLISH_CAUTION)
 
-    assert (
-        machine.fail_mss_candidate()
-        is TrendState.BULLISH
-    )
+    assert machine.fail_mss_candidate() is TrendState.BULLISH
 
 
 def test_complete_sweep_based_mss_confirms() -> None:
@@ -173,9 +146,7 @@ def test_incomplete_mss_does_not_confirm(
     evidence: MssEvidence,
     reason: str,
 ) -> None:
-    decision = evaluate_mss(
-        evidence
-    )
+    decision = evaluate_mss(evidence)
 
     assert decision.confirmed is False
     assert decision.reason == reason

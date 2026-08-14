@@ -55,9 +55,7 @@ def snapshot(
 
 @pytest.mark.asyncio
 async def test_unknown_symbol_raises_lookup_error() -> None:
-    manager = UniverseManager(
-        FakeSymbolRepository(None)
-    )
+    manager = UniverseManager(FakeSymbolRepository(None))
 
     with pytest.raises(
         LookupError,

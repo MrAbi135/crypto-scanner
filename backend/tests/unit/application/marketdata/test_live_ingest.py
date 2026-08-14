@@ -233,14 +233,20 @@ async def test_unfillable_gap_marks_series_degraded() -> None:
         now - timedelta(seconds=1),
     )
 
-    assert service.freshness(
-        "BTCUSDT",
-        Timeframe.M5,
-    ) is FreshnessState.DEGRADED
-    assert service.detection_allowed(
-        "BTCUSDT",
-        Timeframe.M5,
-    ) is False
+    assert (
+        service.freshness(
+            "BTCUSDT",
+            Timeframe.M5,
+        )
+        is FreshnessState.DEGRADED
+    )
+    assert (
+        service.detection_allowed(
+            "BTCUSDT",
+            Timeframe.M5,
+        )
+        is False
+    )
 
 
 @pytest.mark.asyncio
@@ -265,14 +271,20 @@ async def test_quarantined_backfill_marks_series_suspect() -> None:
         now - timedelta(seconds=1),
     )
 
-    assert service.freshness(
-        "BTCUSDT",
-        Timeframe.M5,
-    ) is FreshnessState.SUSPECT
-    assert service.detection_allowed(
-        "BTCUSDT",
-        Timeframe.M5,
-    ) is False
+    assert (
+        service.freshness(
+            "BTCUSDT",
+            Timeframe.M5,
+        )
+        is FreshnessState.SUSPECT
+    )
+    assert (
+        service.detection_allowed(
+            "BTCUSDT",
+            Timeframe.M5,
+        )
+        is False
+    )
 
 
 @pytest.mark.asyncio
@@ -289,11 +301,17 @@ async def test_stale_event_marks_series_stale() -> None:
         now - timedelta(seconds=6),
     )
 
-    assert service.freshness(
-        "BTCUSDT",
-        Timeframe.M5,
-    ) is FreshnessState.STALE
-    assert service.detection_allowed(
-        "BTCUSDT",
-        Timeframe.M5,
-    ) is False
+    assert (
+        service.freshness(
+            "BTCUSDT",
+            Timeframe.M5,
+        )
+        is FreshnessState.STALE
+    )
+    assert (
+        service.detection_allowed(
+            "BTCUSDT",
+            Timeframe.M5,
+        )
+        is False
+    )

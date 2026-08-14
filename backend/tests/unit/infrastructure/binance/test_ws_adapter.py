@@ -20,10 +20,7 @@ def test_build_combined_stream_url() -> None:
         ],
     )
 
-    assert url == (
-        "wss://stream.binance.com:9443/stream"
-        "?streams=btcusdt@kline_5m/ethusdt@kline_5m"
-    )
+    assert url == ("wss://stream.binance.com:9443/stream?streams=btcusdt@kline_5m/ethusdt@kline_5m")
 
 
 def test_build_combined_stream_url_strips_trailing_slash() -> None:
@@ -32,10 +29,7 @@ def test_build_combined_stream_url_strips_trailing_slash() -> None:
         ["BTCUSDT@kline_5m"],
     )
 
-    assert url == (
-        "wss://stream.binance.com:9443/stream"
-        "?streams=btcusdt@kline_5m"
-    )
+    assert url == ("wss://stream.binance.com:9443/stream?streams=btcusdt@kline_5m")
 
 
 def test_unwrap_combined_stream_event() -> None:

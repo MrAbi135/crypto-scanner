@@ -41,8 +41,7 @@ class SymbolRow(Base):
             name="ck_symbols_tier",
         ),
         CheckConstraint(
-            "candidate_tier IS NULL OR "
-            "candidate_tier IN ('T1','T2','T3','INELIGIBLE')",
+            "candidate_tier IS NULL OR candidate_tier IN ('T1','T2','T3','INELIGIBLE')",
             name="ck_symbols_candidate_tier",
         ),
         CheckConstraint(

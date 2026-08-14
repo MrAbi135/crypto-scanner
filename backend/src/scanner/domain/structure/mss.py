@@ -54,10 +54,7 @@ def evaluate_mss(
             reason="missing_displacement",
         )
 
-    if not (
-        evidence.has_external_sweep
-        or evidence.has_failure_swing
-    ):
+    if not (evidence.has_external_sweep or evidence.has_failure_swing):
         return MssDecision(
             confirmed=False,
             reason="missing_origin_evidence",
@@ -70,9 +67,7 @@ def evaluate_mss(
         )
 
     if evidence.followthrough_candles < 1:
-        raise ValueError(
-            "followthrough_candles must be positive"
-        )
+        raise ValueError("followthrough_candles must be positive")
 
     if evidence.followthrough_candles > _MSS_FOLLOWTHROUGH_MAX:
         return MssDecision(
@@ -94,12 +89,8 @@ def mss_is_low_quality(
     """Apply the SLS post-MSS 10-candle quality invalidation rule."""
 
     if candles_since_confirmation < 0:
-        raise ValueError(
-            "candles_since_confirmation must be non-negative"
-        )
+        raise ValueError("candles_since_confirmation must be non-negative")
 
     return (
-        closes_back_beyond_pre_mss_extreme
-        and candles_since_confirmation
-        <= _MSS_INVALIDATION_MAX
+        closes_back_beyond_pre_mss_extreme and candles_since_confirmation <= _MSS_INVALIDATION_MAX
     )

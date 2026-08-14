@@ -37,9 +37,7 @@ def build_event_key(
         )
     )
 
-    return hashlib.sha256(
-        raw.encode("utf-8")
-    ).hexdigest()
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 class DetectionOrchestrator:
@@ -67,9 +65,7 @@ class DetectionOrchestrator:
             produced = await detector(candle)
 
             for event in produced:
-                if await self._events.append(
-                    event
-                ):
+                if await self._events.append(event):
                     inserted += 1
 
         return inserted

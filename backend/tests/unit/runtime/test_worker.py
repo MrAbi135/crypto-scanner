@@ -42,9 +42,7 @@ async def test_daily_loop_waits_until_midnight_before_loading_symbols() -> None:
     job = AsyncMock()
 
     symbols = AsyncMock()
-    symbols.list_active = AsyncMock(
-        side_effect=asyncio.CancelledError
-    )
+    symbols.list_active = AsyncMock(side_effect=asyncio.CancelledError)
 
     with (
         patch.object(
@@ -56,7 +54,8 @@ async def test_daily_loop_waits_until_midnight_before_loading_symbols() -> None:
             worker.asyncio,
             "sleep",
             AsyncMock(),
-        ) as sleep_mock,pytest.raises(asyncio.CancelledError)
+        ) as sleep_mock,
+        pytest.raises(asyncio.CancelledError),
     ):
         await worker._run_daily_universe_loop(
             job,
@@ -79,9 +78,7 @@ async def test_daily_loop_runs_job_for_each_active_symbol() -> None:
     report.evaluation = None
 
     job = AsyncMock()
-    job.run_symbol = AsyncMock(
-        return_value=report
-    )
+    job.run_symbol = AsyncMock(return_value=report)
 
     symbols = AsyncMock()
     symbols.list_active = AsyncMock(
@@ -104,7 +101,8 @@ async def test_daily_loop_runs_job_for_each_active_symbol() -> None:
             worker.asyncio,
             "sleep",
             AsyncMock(),
-        ),pytest.raises(asyncio.CancelledError)
+        ),
+        pytest.raises(asyncio.CancelledError),
     ):
         await worker._run_daily_universe_loop(
             job,
@@ -113,9 +111,5 @@ async def test_daily_loop_runs_job_for_each_active_symbol() -> None:
 
     assert job.run_symbol.await_count == 2
 
-    job.run_symbol.assert_any_await(
-        "BTCUSDT"
-    )
-    job.run_symbol.assert_any_await(
-        "ETHUSDT"
-    )
+    job.run_symbol.assert_any_await("BTCUSDT")
+    job.run_symbol.assert_any_await("ETHUSDT")

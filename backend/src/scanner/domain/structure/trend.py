@@ -28,16 +28,10 @@ class TrendStateMachine:
     ) -> TrendState:
         """CHoCH warns; it never directly flips prevailing trend."""
 
-        if (
-            self.state is TrendState.BULLISH
-            and direction is BreakDirection.DOWN
-        ):
+        if self.state is TrendState.BULLISH and direction is BreakDirection.DOWN:
             self.state = TrendState.BULLISH_CAUTION
 
-        elif (
-            self.state is TrendState.BEARISH
-            and direction is BreakDirection.UP
-        ):
+        elif self.state is TrendState.BEARISH and direction is BreakDirection.UP:
             self.state = TrendState.BEARISH_CAUTION
 
         return self.state
@@ -48,16 +42,10 @@ class TrendStateMachine:
     ) -> TrendState:
         """Only confirmed MSS flips the prevailing trend."""
 
-        if (
-            self.state is TrendState.BULLISH_CAUTION
-            and direction is BreakDirection.DOWN
-        ):
+        if self.state is TrendState.BULLISH_CAUTION and direction is BreakDirection.DOWN:
             self.state = TrendState.BEARISH
 
-        elif (
-            self.state is TrendState.BEARISH_CAUTION
-            and direction is BreakDirection.UP
-        ):
+        elif self.state is TrendState.BEARISH_CAUTION and direction is BreakDirection.UP:
             self.state = TrendState.BULLISH
 
         return self.state

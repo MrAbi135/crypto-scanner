@@ -61,14 +61,9 @@ def test_highs_classify_hh_lh_and_eqh() -> None:
         ),
     ]
 
-    result = classify_swings(
-        swings
-    )
+    result = classify_swings(swings)
 
-    assert [
-        item.label
-        for item in result
-    ] == [
+    assert [item.label for item in result] == [
         StructureLabel.HH,
         StructureLabel.LH,
         StructureLabel.EQH,
@@ -99,14 +94,9 @@ def test_lows_classify_hl_ll_and_eql() -> None:
         ),
     ]
 
-    result = classify_swings(
-        swings
-    )
+    result = classify_swings(swings)
 
-    assert [
-        item.label
-        for item in result
-    ] == [
+    assert [item.label for item in result] == [
         StructureLabel.HL,
         StructureLabel.LL,
         StructureLabel.EQL,
@@ -137,14 +127,9 @@ def test_highs_and_lows_use_separate_predecessors() -> None:
         ),
     ]
 
-    result = classify_swings(
-        swings
-    )
+    result = classify_swings(swings)
 
-    assert [
-        item.label
-        for item in result
-    ] == [
+    assert [item.label for item in result] == [
         StructureLabel.HH,
         StructureLabel.HL,
     ]
@@ -179,10 +164,7 @@ def test_epsilon_creates_equal_high_and_low_band() -> None:
         epsilon=Decimal("0.1"),
     )
 
-    assert [
-        item.label
-        for item in result
-    ] == [
+    assert [item.label for item in result] == [
         StructureLabel.EQH,
         StructureLabel.EQL,
     ]

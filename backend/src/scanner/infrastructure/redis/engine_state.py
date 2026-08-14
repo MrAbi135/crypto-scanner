@@ -19,9 +19,7 @@ class RedisEngineStateStore:
         context_key: str,
     ) -> str:
         if not context_key:
-            raise ValueError(
-                "context_key must not be empty"
-            )
+            raise ValueError("context_key must not be empty")
 
         return f"{_PREFIX}{context_key}"
 
@@ -29,9 +27,7 @@ class RedisEngineStateStore:
         self,
         context_key: str,
     ) -> str | None:
-        value = await self._client.get(
-            self._key(context_key)
-        )
+        value = await self._client.get(self._key(context_key))
 
         if value is None:
             return None
@@ -55,6 +51,4 @@ class RedisEngineStateStore:
         self,
         context_key: str,
     ) -> None:
-        await self._client.delete(
-            self._key(context_key)
-        )
+        await self._client.delete(self._key(context_key))

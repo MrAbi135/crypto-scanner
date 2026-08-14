@@ -18,9 +18,7 @@ depends_on = None
 def upgrade() -> None:
     """Create detection schema and S4 persistence tables."""
 
-    op.execute(
-        "CREATE SCHEMA IF NOT EXISTS detection"
-    )
+    op.execute("CREATE SCHEMA IF NOT EXISTS detection")
 
     op.create_table(
         "algo_versions",
@@ -148,6 +146,4 @@ def downgrade() -> None:
         schema="detection",
     )
 
-    op.execute(
-        "DROP SCHEMA IF EXISTS detection"
-    )
+    op.execute("DROP SCHEMA IF EXISTS detection")

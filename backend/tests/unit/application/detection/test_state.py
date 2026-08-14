@@ -41,9 +41,7 @@ async def test_state_round_trip() -> None:
         symbol="BTCUSDT",
         timeframe="1h",
         algo_version="s4-v1",
-        last_processed_open_time=(
-            "2026-08-10T00:00:00+00:00"
-        ),
+        last_processed_open_time=("2026-08-10T00:00:00+00:00"),
         trend_state="BULLISH",
     )
 
@@ -90,9 +88,7 @@ async def test_rebuild_discards_old_snapshot() -> None:
 
 
 async def test_missing_snapshot_returns_none() -> None:
-    manager = EngineStateManager(
-        FakeStore()
-    )
+    manager = EngineStateManager(FakeStore())
 
     assert (
         await manager.load(

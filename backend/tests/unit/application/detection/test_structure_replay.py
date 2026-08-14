@@ -53,11 +53,8 @@ class FakeCandleRepository:
             for candle in self.candles
             if (
                 candle.symbol == symbol
-                and candle.timeframe
-                is timeframe
-                and start
-                <= candle.open_time
-                < end
+                and candle.timeframe is timeframe
+                and start <= candle.open_time < end
             )
         ]
 
@@ -76,9 +73,7 @@ class FakeEventRepository:
         if event.event_key in self.events:
             return False
 
-        self.events[
-            event.event_key
-        ] = event
+        self.events[event.event_key] = event
 
         return True
 
@@ -86,10 +81,7 @@ class FakeEventRepository:
         self,
         event_key: str,
     ) -> bool:
-        return (
-            event_key
-            in self.events
-        )
+        return event_key in self.events
 
 
 class FakeStateStore:
@@ -103,18 +95,14 @@ class FakeStateStore:
         self,
         context_key: str,
     ) -> str | None:
-        return self.values.get(
-            context_key
-        )
+        return self.values.get(context_key)
 
     async def save(
         self,
         context_key: str,
         payload: str,
     ) -> None:
-        self.values[
-            context_key
-        ] = payload
+        self.values[context_key] = payload
 
     async def delete(
         self,
@@ -135,9 +123,7 @@ def make_candle(
     high_value = Decimal(high)
     low_value = Decimal(low)
 
-    midpoint = (
-        high_value + low_value
-    ) / Decimal("2")
+    midpoint = (high_value + low_value) / Decimal("2")
 
     return Candle(
         symbol="BTCUSDT",
@@ -148,20 +134,14 @@ def make_candle(
             1,
             tzinfo=UTC,
         )
-        + timedelta(
-            hours=index
-        ),
+        + timedelta(hours=index),
         open=midpoint,
         high=high_value,
         low=low_value,
         close=midpoint,
         volume=Decimal("100"),
-        quote_volume=Decimal(
-            "10000"
-        ),
-        taker_buy_volume=Decimal(
-            "50"
-        ),
+        quote_volume=Decimal("10000"),
+        taker_buy_volume=Decimal("50"),
         trade_count=10,
         source=CandleSource.BACKFILL,
     )
@@ -230,14 +210,10 @@ def sample_candles() -> list[Candle]:
 @pytest.mark.asyncio
 async def test_replay_persists_structure_events_and_state() -> None:
     events = FakeEventRepository()
-    states = EngineStateManager(
-        FakeStateStore()
-    )
+    states = EngineStateManager(FakeStateStore())
 
     service = StructureReplayService(
-        FakeCandleRepository(
-            sample_candles()
-        ),
+        FakeCandleRepository(sample_candles()),
         events,
         states,
         FakeClock(),
@@ -272,12 +248,7 @@ async def test_replay_persists_structure_events_and_state() -> None:
 
     assert state is not None
 
-    assert (
-        state.last_processed_open_time
-        == sample_candles()[
-            -1
-        ].open_time.isoformat()
-    )
+    assert state.last_processed_open_time == sample_candles()[-1].open_time.isoformat()
 
 
 @pytest.mark.asyncio
@@ -285,13 +256,9 @@ async def test_replay_is_idempotent() -> None:
     events = FakeEventRepository()
 
     service = StructureReplayService(
-        FakeCandleRepository(
-            sample_candles()
-        ),
+        FakeCandleRepository(sample_candles()),
         events,
-        EngineStateManager(
-            FakeStateStore()
-        ),
+        EngineStateManager(FakeStateStore()),
         FakeClock(),
     )
 
@@ -330,15 +297,10 @@ async def test_replay_is_idempotent() -> None:
 @pytest.mark.asyncio
 async def test_rebuild_state_replaces_old_snapshot() -> None:
     store = FakeStateStore()
-    states = EngineStateManager(
-        store
-    )
+    states = EngineStateManager(store)
 
     await store.save(
-        (
-            "structure:s4-v1:"
-            f"BTCUSDT:{Timeframe.H1.value}"
-        ),
+        (f"structure:s4-v1:BTCUSDT:{Timeframe.H1.value}"),
         (
             '{"algo_version":"s4-v1",'
             '"last_processed_open_time":null,'
@@ -349,9 +311,7 @@ async def test_rebuild_state_replaces_old_snapshot() -> None:
     )
 
     service = StructureReplayService(
-        FakeCandleRepository(
-            sample_candles()
-        ),
+        FakeCandleRepository(sample_candles()),
         FakeEventRepository(),
         states,
         FakeClock(),
@@ -382,17 +342,12 @@ async def test_rebuild_state_replaces_old_snapshot() -> None:
     )
 
     assert state is not None
-    assert (
-        state.last_processed_open_time
-        is not None
-    )
+    assert state.last_processed_open_time is not None
 
 
 @pytest.mark.asyncio
 async def test_empty_history_produces_empty_state() -> None:
-    states = EngineStateManager(
-        FakeStateStore()
-    )
+    states = EngineStateManager(FakeStateStore())
 
     service = StructureReplayService(
         FakeCandleRepository([]),
@@ -428,9 +383,7 @@ async def test_invalid_range_is_rejected() -> None:
     service = StructureReplayService(
         FakeCandleRepository([]),
         FakeEventRepository(),
-        EngineStateManager(
-            FakeStateStore()
-        ),
+        EngineStateManager(FakeStateStore()),
         FakeClock(),
     )
 

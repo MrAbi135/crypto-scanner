@@ -92,23 +92,15 @@ class PgSymbolRepository:
             set_={
                 "status": stmt.excluded.status,
             },
-            where=(
-                stmt.excluded.status
-                == SymbolStatus.DELISTED.value
-            )
-            & (
-                SymbolRow.status
-                != SymbolStatus.DELISTED.value
-            ),
+            where=(stmt.excluded.status == SymbolStatus.DELISTED.value)
+            & (SymbolRow.status != SymbolStatus.DELISTED.value),
         )
 
         async with self._sessions() as session:
             result = await session.execute(stmt)
             await session.commit()
 
-            return int(
-                result.rowcount or 0
-            )  # type: ignore[attr-defined]
+            return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
     async def list_active(
         self,
@@ -116,17 +108,11 @@ class PgSymbolRepository:
         async with self._sessions() as session:
             rows = (
                 await session.execute(
-                    select(SymbolRow).where(
-                        SymbolRow.status
-                        == SymbolStatus.ACTIVE.value
-                    )
+                    select(SymbolRow).where(SymbolRow.status == SymbolStatus.ACTIVE.value)
                 )
             ).scalars()
 
-            return [
-                _to_symbol(row)
-                for row in rows
-            ]
+            return [_to_symbol(row) for row in rows]
 
     async def get(
         self,
@@ -135,10 +121,7 @@ class PgSymbolRepository:
         async with self._sessions() as session:
             row = (
                 await session.execute(
-                    select(SymbolRow).where(
-                        SymbolRow.exchange_symbol
-                        == exchange_symbol
-                    )
+                    select(SymbolRow).where(SymbolRow.exchange_symbol == exchange_symbol)
                 )
             ).scalar_one_or_none()
 
@@ -154,10 +137,7 @@ class PgSymbolRepository:
         async with self._sessions() as session:
             row = (
                 await session.execute(
-                    select(SymbolRow).where(
-                        SymbolRow.exchange_symbol
-                        == exchange_symbol
-                    )
+                    select(SymbolRow).where(SymbolRow.exchange_symbol == exchange_symbol)
                 )
             ).scalar_one_or_none()
 
@@ -165,9 +145,7 @@ class PgSymbolRepository:
                 return None
 
             candidate_tier = (
-                UniverseTier(row.candidate_tier)
-                if row.candidate_tier is not None
-                else None
+                UniverseTier(row.candidate_tier) if row.candidate_tier is not None else None
             )
 
             return UniverseStateRecord(
@@ -185,32 +163,21 @@ class PgSymbolRepository:
         async with self._sessions() as session:
             row = (
                 await session.execute(
-                    select(SymbolRow).where(
-                        SymbolRow.exchange_symbol
-                        == state.exchange_symbol
-                    )
+                    select(SymbolRow).where(SymbolRow.exchange_symbol == state.exchange_symbol)
                 )
             ).scalar_one_or_none()
 
             if row is None:
-                raise LookupError(
-                    f"Unknown symbol: {state.exchange_symbol}"
-                )
+                raise LookupError(f"Unknown symbol: {state.exchange_symbol}")
 
             row.tier = state.tier.value
 
             row.candidate_tier = (
-                state.candidate_tier.value
-                if state.candidate_tier is not None
-                else None
+                state.candidate_tier.value if state.candidate_tier is not None else None
             )
 
-            row.consecutive_passes = (
-                state.consecutive_passes
-            )
-            row.consecutive_failures = (
-                state.consecutive_failures
-            )
+            row.consecutive_passes = state.consecutive_passes
+            row.consecutive_failures = state.consecutive_failures
 
             await session.commit()
 
@@ -307,12 +274,9 @@ class PgCandleRepository:
                     select(CandleRow.open_time)
                     .where(
                         CandleRow.symbol == symbol,
-                        CandleRow.timeframe
-                        == timeframe.value,
+                        CandleRow.timeframe == timeframe.value,
                     )
-                    .order_by(
-                        CandleRow.open_time.desc()
-                    )
+                    .order_by(CandleRow.open_time.desc())
                     .limit(1)
                 )
             ).scalar_one_or_none()
@@ -330,16 +294,11 @@ class PgCandleRepository:
                     select(CandleRow)
                     .where(
                         CandleRow.symbol == symbol,
-                        CandleRow.timeframe
-                        == timeframe.value,
-                        CandleRow.open_time
-                        >= bindparam("start"),
-                        CandleRow.open_time
-                        < bindparam("end"),
+                        CandleRow.timeframe == timeframe.value,
+                        CandleRow.open_time >= bindparam("start"),
+                        CandleRow.open_time < bindparam("end"),
                     )
-                    .order_by(
-                        CandleRow.open_time.asc()
-                    ),
+                    .order_by(CandleRow.open_time.asc()),
                     {
                         "start": start,
                         "end": end,
@@ -347,10 +306,7 @@ class PgCandleRepository:
                 )
             ).scalars()
 
-            return [
-                _to_candle(row)
-                for row in rows
-            ]
+            return [_to_candle(row) for row in rows]
 
     async def count_series(
         self,
@@ -377,9 +333,7 @@ class PgCandleRepository:
                 },
             )
 
-            return int(
-                value.scalar_one()
-            )
+            return int(value.scalar_one())
 
 
 class PgIncidentRepository:
@@ -400,9 +354,7 @@ class PgIncidentRepository:
                     scope_type=incident.scope_type,
                     symbol=incident.symbol,
                     timeframe=(
-                        incident.timeframe.value
-                        if incident.timeframe is not None
-                        else None
+                        incident.timeframe.value if incident.timeframe is not None else None
                     ),
                     incident_type=incident.incident_type,
                     started_at=incident.started_at,
@@ -424,11 +376,7 @@ class PgIncidentRepository:
     ) -> None:
         async with self._sessions() as session:
             row = (
-                await session.execute(
-                    select(IncidentRow).where(
-                        IncidentRow.id == incident_id
-                    )
-                )
+                await session.execute(select(IncidentRow).where(IncidentRow.id == incident_id))
             ).scalar_one()
 
             row.resolution = resolution
@@ -440,28 +388,15 @@ class PgIncidentRepository:
         self,
         symbol: str | None = None,
     ) -> Sequence[IncidentRecord]:
-        stmt = select(IncidentRow).where(
-            IncidentRow.resolved_at.is_(None)
-        )
+        stmt = select(IncidentRow).where(IncidentRow.resolved_at.is_(None))
 
         if symbol is not None:
-            stmt = stmt.where(
-                IncidentRow.symbol == symbol
-            )
+            stmt = stmt.where(IncidentRow.symbol == symbol)
 
         async with self._sessions() as session:
-            rows = (
-                await session.execute(
-                    stmt.order_by(
-                        IncidentRow.started_at
-                    )
-                )
-            ).scalars()
+            rows = (await session.execute(stmt.order_by(IncidentRow.started_at))).scalars()
 
-            return [
-                _to_incident(row)
-                for row in rows
-            ]
+            return [_to_incident(row) for row in rows]
 
     async def list_for_series(
         self,
@@ -474,19 +409,13 @@ class PgIncidentRepository:
                     select(IncidentRow)
                     .where(
                         IncidentRow.symbol == symbol,
-                        IncidentRow.timeframe
-                        == timeframe.value,
+                        IncidentRow.timeframe == timeframe.value,
                     )
-                    .order_by(
-                        IncidentRow.started_at
-                    )
+                    .order_by(IncidentRow.started_at)
                 )
             ).scalars()
 
-            return [
-                _to_incident(row)
-                for row in rows
-            ]
+            return [_to_incident(row) for row in rows]
 
 
 class PgLiquidityHistoryRepository:
@@ -536,21 +465,13 @@ class PgLiquidityHistoryRepository:
             rows = (
                 await session.execute(
                     select(LiquidityHistoryRow)
-                    .where(
-                        LiquidityHistoryRow.exchange_symbol
-                        == exchange_symbol
-                    )
-                    .order_by(
-                        LiquidityHistoryRow.observed_at.desc()
-                    )
+                    .where(LiquidityHistoryRow.exchange_symbol == exchange_symbol)
+                    .order_by(LiquidityHistoryRow.observed_at.desc())
                     .limit(limit)
                 )
             ).scalars()
 
-            return [
-                _to_liquidity_history(row)
-                for row in rows
-            ]
+            return [_to_liquidity_history(row) for row in rows]
 
 
 def _to_symbol(
@@ -595,11 +516,7 @@ def _to_incident(
         incident_type=row.incident_type,
         started_at=row.started_at,
         symbol=row.symbol,
-        timeframe=(
-            Timeframe(row.timeframe)
-            if row.timeframe is not None
-            else None
-        ),
+        timeframe=(Timeframe(row.timeframe) if row.timeframe is not None else None),
         candle_span=row.candle_span,
         resolution=row.resolution,
         resolved_at=row.resolved_at,

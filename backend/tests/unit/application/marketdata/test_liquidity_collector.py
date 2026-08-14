@@ -199,9 +199,7 @@ async def test_collect_persists_daily_liquidity_observation() -> None:
         ),
     )
 
-    record = await collector.collect(
-        "BTCUSDT"
-    )
+    record = await collector.collect("BTCUSDT")
 
     assert market_data.calls == [
         (
@@ -223,9 +221,7 @@ async def test_collect_persists_daily_liquidity_observation() -> None:
         )
     ]
 
-    assert liquidity_data.top_calls == [
-        "BTCUSDT"
-    ]
+    assert liquidity_data.top_calls == ["BTCUSDT"]
     assert liquidity_data.book_calls == [
         (
             "BTCUSDT",
@@ -246,9 +242,7 @@ async def test_collect_persists_daily_liquidity_observation() -> None:
         depth_2pct=Decimal("1402"),
     )
 
-    assert history.saved == [
-        record
-    ]
+    assert history.saved == [record]
 
 
 @pytest.mark.asyncio
@@ -283,9 +277,7 @@ async def test_collect_uses_previous_closed_utc_day() -> None:
         ),
     )
 
-    await collector.collect(
-        "BTCUSDT"
-    )
+    await collector.collect("BTCUSDT")
 
     call = market_data.calls[0]
 
@@ -307,9 +299,7 @@ async def test_collect_uses_previous_closed_utc_day() -> None:
 async def test_collect_converts_clock_time_to_utc_midnight() -> None:
     from datetime import timedelta, timezone
 
-    pakistan_time = timezone(
-        timedelta(hours=5)
-    )
+    pakistan_time = timezone(timedelta(hours=5))
 
     market_data = FakeMarketDataProvider(
         [
@@ -335,9 +325,7 @@ async def test_collect_converts_clock_time_to_utc_midnight() -> None:
         ),
     )
 
-    record = await collector.collect(
-        "BTCUSDT"
-    )
+    record = await collector.collect("BTCUSDT")
 
     assert record.observed_at == datetime(
         2026,
@@ -367,9 +355,7 @@ async def test_collect_rejects_missing_daily_candle() -> None:
         ValueError,
         match="expected exactly one closed D1 candle for BTCUSDT",
     ):
-        await collector.collect(
-            "BTCUSDT"
-        )
+        await collector.collect("BTCUSDT")
 
 
 @pytest.mark.asyncio
@@ -397,9 +383,7 @@ async def test_collect_rejects_multiple_daily_candles() -> None:
         ValueError,
         match="expected exactly one closed D1 candle for BTCUSDT",
     ):
-        await collector.collect(
-            "BTCUSDT"
-        )
+        await collector.collect("BTCUSDT")
 
 
 @pytest.mark.asyncio
@@ -425,6 +409,4 @@ async def test_collect_rejects_naive_clock_datetime() -> None:
         ValueError,
         match="clock must return timezone-aware datetime",
     ):
-        await collector.collect(
-            "BTCUSDT"
-        )
+        await collector.collect("BTCUSDT")

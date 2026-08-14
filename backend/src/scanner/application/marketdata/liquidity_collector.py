@@ -39,9 +39,7 @@ class DailyLiquidityCollector:
     ) -> LiquidityHistoryRecord:
         """Collect and persist the previous closed UTC day's metrics."""
 
-        observed_at = _utc_day_start(
-            self._clock.now()
-        )
+        observed_at = _utc_day_start(self._clock.now())
 
         day_start = observed_at - timedelta(days=1)
         day_end = observed_at
@@ -55,16 +53,11 @@ class DailyLiquidityCollector:
         )
 
         if len(candles) != 1:
-            raise ValueError(
-                "expected exactly one closed D1 candle for "
-                f"{exchange_symbol}"
-            )
+            raise ValueError(f"expected exactly one closed D1 candle for {exchange_symbol}")
 
         candle = candles[0]
 
-        top = await self._liquidity_data.fetch_top_of_book(
-            exchange_symbol
-        )
+        top = await self._liquidity_data.fetch_top_of_book(exchange_symbol)
 
         book = await self._liquidity_data.fetch_order_book(
             exchange_symbol,
@@ -95,9 +88,7 @@ def _utc_day_start(
     """Return the UTC midnight containing value."""
 
     if value.tzinfo is None:
-        raise ValueError(
-            "clock must return timezone-aware datetime"
-        )
+        raise ValueError("clock must return timezone-aware datetime")
 
     utc_value = value.astimezone(UTC)
 

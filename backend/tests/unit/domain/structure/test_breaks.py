@@ -94,11 +94,14 @@ def test_upward_wick_only_penetration_is_not_bos() -> None:
         kind=SwingKind.HIGH,
     )
 
-    assert detect_bos(
-        source,
-        level,
-        direction=BreakDirection.UP,
-    ) is None
+    assert (
+        detect_bos(
+            source,
+            level,
+            direction=BreakDirection.UP,
+        )
+        is None
+    )
 
     assert is_wick_only_penetration(
         source,
@@ -136,11 +139,14 @@ def test_downward_wick_only_penetration_is_not_bos() -> None:
         kind=SwingKind.LOW,
     )
 
-    assert detect_bos(
-        source,
-        level,
-        direction=BreakDirection.DOWN,
-    ) is None
+    assert (
+        detect_bos(
+            source,
+            level,
+            direction=BreakDirection.DOWN,
+        )
+        is None
+    )
 
     assert is_wick_only_penetration(
         source,

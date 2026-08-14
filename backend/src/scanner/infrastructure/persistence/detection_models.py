@@ -53,9 +53,7 @@ class EngineEventRow(Base):
     """Immutable detection event fact."""
 
     __tablename__ = "engine_events"
-    __table_args__ = (
-        {"schema": "detection"},
-    )
+    __table_args__ = ({"schema": "detection"},)
 
     event_key: Mapped[str] = mapped_column(
         String(160),

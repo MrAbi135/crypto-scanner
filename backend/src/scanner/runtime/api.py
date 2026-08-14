@@ -30,6 +30,5 @@ def main() -> None:
     run_asgi(build_api_app(settings), settings.api_port)
 
 
-
 if __name__ == "__main__":
     main()

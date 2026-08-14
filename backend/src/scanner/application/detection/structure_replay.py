@@ -70,9 +70,7 @@ class StructureReplayService:
         rebuild_state: bool = False,
     ) -> StructureReplayReport:
         if end <= start:
-            raise ValueError(
-                "end must be greater than start"
-            )
+            raise ValueError("end must be greater than start")
 
         if rebuild_state:
             await self._states.rebuild(
@@ -111,19 +109,11 @@ class StructureReplayService:
                 last_processed_open_time=None,
             )
 
-        internal_swings = detect_internal_swings(
-            candles
-        )
-        external_swings = detect_external_swings(
-            candles
-        )
+        internal_swings = detect_internal_swings(candles)
+        external_swings = detect_external_swings(candles)
 
-        internal_classified = classify_swings(
-            internal_swings
-        )
-        external_classified = classify_swings(
-            external_swings
-        )
+        internal_classified = classify_swings(internal_swings)
+        external_classified = classify_swings(external_swings)
 
         inserted = 0
 
@@ -149,9 +139,7 @@ class StructureReplayService:
             ):
                 inserted += 1
 
-        trend_state = _infer_external_trend(
-            external_classified
-        )
+        trend_state = _infer_external_trend(external_classified)
 
         last_open_time = candles[-1].open_time
 
@@ -159,9 +147,7 @@ class StructureReplayService:
             symbol=symbol,
             timeframe=timeframe.value,
             algo_version=self._algo_version,
-            last_processed_open_time=(
-                last_open_time.isoformat()
-            ),
+            last_processed_open_time=(last_open_time.isoformat()),
             trend_state=trend_state,
         )
 
@@ -173,10 +159,7 @@ class StructureReplayService:
             candles=len(candles),
             internal_swings=len(internal_swings),
             external_swings=len(external_swings),
-            classified_events=(
-                len(internal_classified)
-                + len(external_classified)
-            ),
+            classified_events=(len(internal_classified) + len(external_classified)),
             events_inserted=inserted,
             trend_state=trend_state,
             last_processed_open_time=last_open_time,
@@ -188,10 +171,7 @@ class StructureReplayService:
         timeframe: Timeframe,
         swing: SwingPoint,
     ) -> bool:
-        event_type = (
-            f"SWING_{swing.strength.value}_"
-            f"{swing.kind.value}"
-        )
+        event_type = f"SWING_{swing.strength.value}_{swing.kind.value}"
 
         payload = json.dumps(
             {
@@ -231,10 +211,7 @@ class StructureReplayService:
     ) -> bool:
         swing = classified.swing
 
-        event_type = (
-            f"STRUCTURE_{swing.strength.value}_"
-            f"{classified.label.value}"
-        )
+        event_type = f"STRUCTURE_{swing.strength.value}_{classified.label.value}"
 
         payload = json.dumps(
             {

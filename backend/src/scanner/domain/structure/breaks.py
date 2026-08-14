@@ -39,18 +39,14 @@ def detect_bos(
 
     if direction is BreakDirection.UP:
         if swing.kind is not SwingKind.HIGH:
-            raise ValueError(
-                "upward BOS must reference a swing high"
-            )
+            raise ValueError("upward BOS must reference a swing high")
 
         if candle.close <= swing.price + epsilon:
             return None
 
     else:
         if swing.kind is not SwingKind.LOW:
-            raise ValueError(
-                "downward BOS must reference a swing low"
-            )
+            raise ValueError("downward BOS must reference a swing low")
 
         if candle.close >= swing.price - epsilon:
             return None
@@ -77,21 +73,11 @@ def is_wick_only_penetration(
 
     if direction is BreakDirection.UP:
         if swing.kind is not SwingKind.HIGH:
-            raise ValueError(
-                "upward penetration must reference a swing high"
-            )
+            raise ValueError("upward penetration must reference a swing high")
 
-        return (
-            candle.high > swing.price
-            and candle.close <= swing.price + epsilon
-        )
+        return candle.high > swing.price and candle.close <= swing.price + epsilon
 
     if swing.kind is not SwingKind.LOW:
-        raise ValueError(
-            "downward penetration must reference a swing low"
-        )
+        raise ValueError("downward penetration must reference a swing low")
 
-    return (
-        candle.low < swing.price
-        and candle.close >= swing.price - epsilon
-    )
+    return candle.low < swing.price and candle.close >= swing.price - epsilon

@@ -45,14 +45,10 @@ class DailyUniverseJob:
     ) -> DailyUniverseJobReport:
         """Run the complete daily S3 workflow for one symbol."""
 
-        await self._collector.collect(
-            exchange_symbol
-        )
+        await self._collector.collect(exchange_symbol)
 
         try:
-            snapshot = await self._snapshots.build(
-                exchange_symbol
-            )
+            snapshot = await self._snapshots.build(exchange_symbol)
         except InsufficientLiquidityHistoryError:
             return DailyUniverseJobReport(
                 exchange_symbol=exchange_symbol,

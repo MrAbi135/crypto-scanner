@@ -33,10 +33,7 @@ class EngineStateManager:
         timeframe: str,
         algo_version: str,
     ) -> str:
-        return (
-            f"structure:{algo_version}:"
-            f"{symbol}:{timeframe}"
-        )
+        return f"structure:{algo_version}:{symbol}:{timeframe}"
 
     async def load(
         self,
@@ -60,12 +57,8 @@ class EngineStateManager:
         return StructureEngineState(
             symbol=str(data["symbol"]),
             timeframe=str(data["timeframe"]),
-            algo_version=str(
-                data["algo_version"]
-            ),
-            last_processed_open_time=data.get(
-                "last_processed_open_time"
-            ),
+            algo_version=str(data["algo_version"]),
+            last_processed_open_time=data.get("last_processed_open_time"),
             trend_state=str(
                 data.get(
                     "trend_state",

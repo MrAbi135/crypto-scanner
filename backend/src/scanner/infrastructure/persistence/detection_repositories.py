@@ -52,9 +52,7 @@ class PgEngineEventRepository:
             result = await session.execute(stmt)
             await session.commit()
 
-            return bool(
-                result.rowcount
-            )  # type: ignore[attr-defined]
+            return bool(result.rowcount)  # type: ignore[attr-defined]
 
     async def exists(
         self,
@@ -62,17 +60,9 @@ class PgEngineEventRepository:
     ) -> bool:
         async with self._sessions() as session:
             result = await session.execute(
-                select(
-                    EngineEventRow.event_key
-                )
-                .where(
-                    EngineEventRow.event_key
-                    == event_key
-                )
+                select(EngineEventRow.event_key)
+                .where(EngineEventRow.event_key == event_key)
                 .limit(1)
             )
 
-            return (
-                result.scalar_one_or_none()
-                is not None
-            )
+            return result.scalar_one_or_none() is not None

@@ -53,9 +53,7 @@ def _depth_weight(limit: int) -> int:
     """Return Binance request weight for one order-book depth request."""
 
     if limit < 1 or limit > 5000:
-        raise ValueError(
-            "order book limit must be between 1 and 5000"
-        )
+        raise ValueError("order book limit must be between 1 and 5000")
 
     if limit <= 100:
         return 5
@@ -157,15 +155,10 @@ class BinanceRestAdapter(
             TypeError,
             IndexError,
         ) as exc:
-            detail = (
-                exc.message
-                if isinstance(exc, ScannerError)
-                else str(exc)
-            )
+            detail = exc.message if isinstance(exc, ScannerError) else str(exc)
 
             raise ExternalError(
-                "klines: unparseable/insane row from venue "
-                f"for {exchange_symbol}: {detail}",
+                f"klines: unparseable/insane row from venue for {exchange_symbol}: {detail}",
                 code="BINANCE_MALFORMED",
                 retryable=True,
             ) from exc
@@ -221,15 +214,10 @@ class BinanceRestAdapter(
             ValueError,
             TypeError,
         ) as exc:
-            detail = (
-                exc.message
-                if isinstance(exc, ScannerError)
-                else str(exc)
-            )
+            detail = exc.message if isinstance(exc, ScannerError) else str(exc)
 
             raise ExternalError(
-                "bookTicker: malformed payload for "
-                f"{exchange_symbol}: {detail}",
+                f"bookTicker: malformed payload for {exchange_symbol}: {detail}",
                 code="BINANCE_MALFORMED",
                 retryable=True,
             ) from exc
@@ -292,15 +280,10 @@ class BinanceRestAdapter(
             TypeError,
             IndexError,
         ) as exc:
-            detail = (
-                exc.message
-                if isinstance(exc, ScannerError)
-                else str(exc)
-            )
+            detail = exc.message if isinstance(exc, ScannerError) else str(exc)
 
             raise ExternalError(
-                "depth: malformed level for "
-                f"{exchange_symbol}: {detail}",
+                f"depth: malformed level for {exchange_symbol}: {detail}",
                 code="BINANCE_MALFORMED",
                 retryable=True,
             ) from exc
@@ -312,9 +295,7 @@ class BinanceRestAdapter(
         side: str,
     ) -> OrderBookLevel:
         if not isinstance(row, (list, tuple)) or len(row) < 2:
-            raise ValueError(
-                f"{side} order-book level malformed: {row!r}"
-            )
+            raise ValueError(f"{side} order-book level malformed: {row!r}")
 
         return OrderBookLevel(
             price=parse_decimal(
@@ -400,10 +381,7 @@ class BinanceRestAdapter(
             except httpx.HTTPError as exc:
                 last_error = exc
 
-                await asyncio.sleep(
-                    _BACKOFF_BASE_S
-                    * (2 ** (attempt - 1))
-                )
+                await asyncio.sleep(_BACKOFF_BASE_S * (2 ** (attempt - 1)))
 
                 continue
 
@@ -428,50 +406,36 @@ class BinanceRestAdapter(
                     )
                 )
 
-                self._budget.penalize(
-                    retry_after
-                )
+                self._budget.penalize(retry_after)
 
                 last_error = ExternalError(
-                    "binance rate limited "
-                    f"({response.status_code}), "
-                    f"retry_after={retry_after}s",
+                    f"binance rate limited ({response.status_code}), retry_after={retry_after}s",
                     code="BINANCE_RATE_LIMITED",
                     retryable=True,
                 )
 
-                await asyncio.sleep(
-                    retry_after
-                )
+                await asyncio.sleep(retry_after)
 
                 continue
 
             if response.status_code >= 500:
                 last_error = ExternalError(
-                    "binance server error "
-                    f"{response.status_code}",
+                    f"binance server error {response.status_code}",
                     code="BINANCE_SERVER_ERROR",
                     retryable=True,
                 )
 
-                await asyncio.sleep(
-                    _BACKOFF_BASE_S
-                    * (2 ** (attempt - 1))
-                )
+                await asyncio.sleep(_BACKOFF_BASE_S * (2 ** (attempt - 1)))
 
                 continue
 
             raise ExternalError(
-                "binance rejected request "
-                f"({response.status_code}): "
-                f"{response.text[:200]}",
+                f"binance rejected request ({response.status_code}): {response.text[:200]}",
                 code="BINANCE_REJECTED",
             )
 
         raise ExternalError(
-            "binance unreachable after "
-            f"{_MAX_ATTEMPTS} attempts: "
-            f"{last_error}",
+            f"binance unreachable after {_MAX_ATTEMPTS} attempts: {last_error}",
             code="BINANCE_UNREACHABLE",
             retryable=True,
         ) from last_error

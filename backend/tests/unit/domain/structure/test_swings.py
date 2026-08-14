@@ -27,9 +27,7 @@ def candle(
 ) -> Candle:
     high_value = Decimal(high)
     low_value = Decimal(low)
-    midpoint = (
-        high_value + low_value
-    ) / Decimal("2")
+    midpoint = (high_value + low_value) / Decimal("2")
 
     return Candle(
         symbol="BTCUSDT",
@@ -54,13 +52,9 @@ def candle(
 
 
 def test_internal_and_external_windows_match_spec() -> None:
-    assert swing_window(
-        SwingStrength.INTERNAL
-    ) == 2
+    assert swing_window(SwingStrength.INTERNAL) == 2
 
-    assert swing_window(
-        SwingStrength.EXTERNAL
-    ) == 5
+    assert swing_window(SwingStrength.EXTERNAL) == 5
 
 
 def test_internal_swing_high_confirms_after_two_right_candles() -> None:
@@ -72,15 +66,9 @@ def test_internal_swing_high_confirms_after_two_right_candles() -> None:
         candle(4, high="11", low="5"),
     ]
 
-    swings = detect_internal_swings(
-        candles
-    )
+    swings = detect_internal_swings(candles)
 
-    highs = [
-        swing
-        for swing in swings
-        if swing.kind is SwingKind.HIGH
-    ]
+    highs = [swing for swing in swings if swing.kind is SwingKind.HIGH]
 
     assert len(highs) == 1
     assert highs[0].index == 2
@@ -96,15 +84,9 @@ def test_internal_swing_low_confirms_after_two_right_candles() -> None:
         candle(4, high="15", low="9"),
     ]
 
-    swings = detect_internal_swings(
-        candles
-    )
+    swings = detect_internal_swings(candles)
 
-    lows = [
-        swing
-        for swing in swings
-        if swing.kind is SwingKind.LOW
-    ]
+    lows = [swing for swing in swings if swing.kind is SwingKind.LOW]
 
     assert len(lows) == 1
     assert lows[0].index == 2
@@ -121,15 +103,9 @@ def test_equal_high_confirms_last_member_of_equal_set() -> None:
         candle(5, high="12", low="6"),
     ]
 
-    swings = detect_internal_swings(
-        candles
-    )
+    swings = detect_internal_swings(candles)
 
-    highs = [
-        swing
-        for swing in swings
-        if swing.kind is SwingKind.HIGH
-    ]
+    highs = [swing for swing in swings if swing.kind is SwingKind.HIGH]
 
     assert [swing.index for swing in highs] == [3]
 
@@ -144,15 +120,9 @@ def test_equal_low_confirms_last_member_of_equal_set() -> None:
         candle(5, high="16", low="8"),
     ]
 
-    swings = detect_internal_swings(
-        candles
-    )
+    swings = detect_internal_swings(candles)
 
-    lows = [
-        swing
-        for swing in swings
-        if swing.kind is SwingKind.LOW
-    ]
+    lows = [swing for swing in swings if swing.kind is SwingKind.LOW]
 
     assert [swing.index for swing in lows] == [3]
 
@@ -165,34 +135,22 @@ def test_unconfirmed_right_edge_never_emits_swing() -> None:
         candle(3, high="20", low="8"),
     ]
 
-    assert detect_internal_swings(
-        candles
-    ) == ()
+    assert detect_internal_swings(candles) == ()
 
 
 def test_external_swing_requires_five_candles_each_side() -> None:
     candles = [
         candle(
             index,
-            high=str(
-                20 - abs(5 - index)
-            ),
-            low=str(
-                5 + abs(5 - index)
-            ),
+            high=str(20 - abs(5 - index)),
+            low=str(5 + abs(5 - index)),
         )
         for index in range(11)
     ]
 
-    swings = detect_external_swings(
-        candles
-    )
+    swings = detect_external_swings(candles)
 
-    assert any(
-        swing.index == 5
-        and swing.kind is SwingKind.HIGH
-        for swing in swings
-    )
+    assert any(swing.index == 5 and swing.kind is SwingKind.HIGH for swing in swings)
 
 
 def test_negative_epsilon_is_rejected() -> None:
@@ -216,9 +174,7 @@ def test_append_only_detection_does_not_repaint_confirmed_swing() -> None:
         candle(4, high="13", low="5"),
     ]
 
-    before = detect_internal_swings(
-        initial
-    )
+    before = detect_internal_swings(initial)
 
     extended = [
         *initial,
@@ -226,22 +182,14 @@ def test_append_only_detection_does_not_repaint_confirmed_swing() -> None:
         candle(6, high="20", low="9"),
     ]
 
-    after = detect_internal_swings(
-        extended
-    )
+    after = detect_internal_swings(extended)
 
     confirmed_before = [
-        swing
-        for swing in before
-        if swing.index == 2
-        and swing.kind is SwingKind.HIGH
+        swing for swing in before if swing.index == 2 and swing.kind is SwingKind.HIGH
     ]
 
     confirmed_after = [
-        swing
-        for swing in after
-        if swing.index == 2
-        and swing.kind is SwingKind.HIGH
+        swing for swing in after if swing.index == 2 and swing.kind is SwingKind.HIGH
     ]
 
     assert confirmed_before == confirmed_after

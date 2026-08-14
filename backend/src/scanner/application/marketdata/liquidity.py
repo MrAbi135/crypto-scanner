@@ -37,11 +37,7 @@ def calculate_spread_bps(top: TopOfBook) -> Decimal:
 
     midpoint = (top.bid_price + top.ask_price) / _TWO
 
-    return (
-        (top.ask_price - top.bid_price)
-        / midpoint
-        * _BPS
-    )
+    return (top.ask_price - top.bid_price) / midpoint * _BPS
 
 
 def calculate_depth_2pct(
@@ -51,21 +47,15 @@ def calculate_depth_2pct(
     """Calculate total quote-value depth within ±2% of the midpoint."""
 
     if book.exchange_symbol != top.exchange_symbol:
-        raise ValueError(
-            "top-of-book and order-book symbols must match"
-        )
+        raise ValueError("top-of-book and order-book symbols must match")
 
     midpoint = (top.bid_price + top.ask_price) / _TWO
 
     if midpoint <= 0:
         raise ValueError("midpoint must be positive")
 
-    lower_bound = midpoint * (
-        Decimal("1") - _TWO_PERCENT
-    )
-    upper_bound = midpoint * (
-        Decimal("1") + _TWO_PERCENT
-    )
+    lower_bound = midpoint * (Decimal("1") - _TWO_PERCENT)
+    upper_bound = midpoint * (Decimal("1") + _TWO_PERCENT)
 
     bid_depth = sum(
         (

@@ -15,11 +15,7 @@ from scanner.shared import Timeframe
 def parse_date(
     raw: str,
 ) -> datetime:
-    return datetime.fromisoformat(
-        raw
-    ).replace(
-        tzinfo=UTC
-    )
+    return datetime.fromisoformat(raw).replace(tzinfo=UTC)
 
 
 def _add_structure_range_arguments(
@@ -140,20 +136,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replay structure engine over stored candles",
     )
 
-    _add_structure_range_arguments(
-        engine_run
-    )
+    _add_structure_range_arguments(engine_run)
 
     rebuild_state = engine_sub.add_parser(
         "rebuild-state",
-        help=(
-            "Discard structure snapshot and rebuild "
-            "from stored candle history"
-        ),
+        help=("Discard structure snapshot and rebuild from stored candle history"),
     )
 
-    _add_structure_range_arguments(
-        rebuild_state
-    )
+    _add_structure_range_arguments(rebuild_state)
 
     return parser

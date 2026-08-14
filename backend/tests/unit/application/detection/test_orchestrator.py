@@ -89,12 +89,8 @@ async def test_repeated_processing_is_idempotent() -> None:
         [detector],
     )
 
-    first = await orchestrator.process(
-        candle()
-    )
-    second = await orchestrator.process(
-        candle()
-    )
+    first = await orchestrator.process(candle())
+    second = await orchestrator.process(candle())
 
     assert first == 1
     assert second == 0
@@ -121,9 +117,7 @@ async def test_detector_order_is_sequential() -> None:
         [first, second],
     )
 
-    await orchestrator.process(
-        candle()
-    )
+    await orchestrator.process(candle())
 
     assert calls == [
         "first",

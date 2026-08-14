@@ -55,9 +55,7 @@ class UniverseManager:
         )
 
         if persisted is None:
-            raise LookupError(
-                f"Unknown symbol: {exchange_symbol}"
-            )
+            raise LookupError(f"Unknown symbol: {exchange_symbol}")
 
         observed_tier = classify_tier(snapshot)
         previous_tier = persisted.tier
