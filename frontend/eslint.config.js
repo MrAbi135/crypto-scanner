@@ -11,21 +11,26 @@ export default tseslint.config(
   { ignores: ['dist', '.vite', 'coverage'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+
   {
     files: ['src/**/*.{ts,tsx}'],
     plugins: { boundaries, 'react-hooks': reactHooks },
     settings: {
       'boundaries/elements': [
-        { type: 'app', pattern: 'src/app/*' },
-        { type: 'features', pattern: 'src/features/*' },
-        { type: 'services', pattern: 'src/services/*' },
-        { type: 'entities', pattern: 'src/entities/*' },
-        { type: 'shared', pattern: 'src/shared/*' },
+        { type: 'app', pattern: 'src/app/**', partialMatch: false },
+        { type: 'features', pattern: 'src/features/**', partialMatch: false },
+        { type: 'services', pattern: 'src/services/**', partialMatch: false },
+        { type: 'entities', pattern: 'src/entities/**', partialMatch: false },
+        { type: 'shared', pattern: 'src/shared/**', partialMatch: false },
+      ],
+      'boundaries/files': [
+        { category: 'test', pattern: '**/*.test.{ts,tsx}' },
       ],
     },
     rules: {
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
+
       'no-restricted-imports': [
         'error',
         {
@@ -37,20 +42,78 @@ export default tseslint.config(
           ],
         },
       ],
-      'boundaries/no-unknown': 'error',
-      'boundaries/element-types': [
+
+      'boundaries/no-unknown-dependencies': 'error',
+
+      'boundaries/dependencies': [
         'error',
         {
           default: 'disallow',
-          rules: [
-            { from: 'app', allow: ['features', 'services', 'entities', 'shared'] },
-            { from: 'features', allow: ['services', 'entities', 'shared'] },
-            { from: 'services', allow: ['entities', 'shared'] },
-            { from: 'entities', allow: ['shared'] },
-            { from: 'shared', allow: ['shared'] },
+          policies: [
+            {
+              from: { element: { type: 'app' } },
+              allow: {
+                to: {
+                  element: {
+                    types: {
+                      anyOf: ['features', 'services', 'entities', 'shared', 'app'],
+                    },
+                  },
+                },
+              },
+            },
+            {
+              from: { element: { type: 'features' } },
+              allow: {
+                to: {
+                  element: {
+                    types: {
+                      anyOf: ['services', 'entities', 'shared', 'features'],
+                    },
+                  },
+                },
+              },
+            },
+            {
+              from: { element: { type: 'services' } },
+              allow: {
+                to: {
+                  element: {
+                    types: {
+                      anyOf: ['entities', 'shared', 'services'],
+                    },
+                  },
+                },
+              },
+            },
+            {
+              from: { element: { type: 'entities' } },
+              allow: {
+                to: {
+                  element: {
+                    types: {
+                      anyOf: ['shared', 'entities'],
+                    },
+                  },
+                },
+              },
+            },
+            {
+              from: { element: { type: 'shared' } },
+              allow: {
+                to: { element: { type: 'shared' } },
+              },
+            },
           ],
         },
       ],
+    },
+  },
+
+  {
+    files: ['src/**/*.test.{ts,tsx}'],
+    rules: {
+      'boundaries/no-unknown-dependencies': 'off',
     },
   },
 )

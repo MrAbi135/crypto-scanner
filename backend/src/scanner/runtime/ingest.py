@@ -14,6 +14,7 @@ from starlette.applications import Starlette
 from scanner.application.marketdata import BackfillService
 from scanner.application.marketdata.live_ingest import LiveIngestService
 from scanner.config import get_settings
+from scanner.config.processes import IngestSettings
 from scanner.domain.common import Candle
 from scanner.infrastructure.clock import SystemClock
 from scanner.infrastructure.exchanges.binance import BinanceRestAdapter, RateBudget
@@ -47,7 +48,7 @@ _FEEDS = (
 
 
 async def _run_websocket(
-    settings,
+    settings: IngestSettings,
     live_ingest: LiveIngestService,
 ) -> None:
     url = build_combined_stream_url(

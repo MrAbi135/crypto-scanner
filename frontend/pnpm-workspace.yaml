@@ -5,3 +5,8 @@
 packages:
   - "."
   # - "packages/*"   # future: shared design-system / entities / services extraction
+
+overrides:
+  "nanoid@<3.3.18": "3.3.18"
+  "micromatch@<4.0.8": "4.0.8"
+  
