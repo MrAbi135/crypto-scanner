@@ -19,6 +19,9 @@ from datetime import UTC, datetime
 import httpx
 import redis.asyncio as aioredis
 
+from scanner.application.detection.liquidity_replay import (
+    LiquidityReplayService,
+)
 from scanner.application.detection.state import (
     EngineStateManager,
 )
@@ -45,6 +48,10 @@ from scanner.infrastructure.persistence.database import (
 from scanner.infrastructure.persistence.detection_repositories import (
     PgEngineEventRepository,
 )
+from scanner.infrastructure.persistence.liquidity_detection_repositories import (
+    PgLiquidityPoolRepository,
+    PgLiquidityTransitionRepository,
+)
 from scanner.infrastructure.persistence.repositories import (
     PgCandleRepository,
     PgIncidentRepository,
@@ -52,6 +59,9 @@ from scanner.infrastructure.persistence.repositories import (
 )
 from scanner.infrastructure.redis.engine_state import (
     RedisEngineStateStore,
+)
+from scanner.infrastructure.redis.liquidity_state import (
+    RedisLiquidityStateStore,
 )
 from scanner.interfaces.cli.main import build_parser
 
@@ -66,7 +76,6 @@ async def _run_sync(
     args: argparse.Namespace,
 ) -> int:
     settings = load_ingest_settings()
-
     engine = build_engine(settings.db_dsn)
 
     try:
@@ -76,7 +85,7 @@ async def _run_sync(
             provider = BinanceRestAdapter(
                 client,
                 RateBudget(settings.binance_weight_capacity),
-                base_url=settings.binance_base_url,
+                base_url=(settings.binance_base_url),
             )
 
             report = await SymbolSyncService(
@@ -86,7 +95,8 @@ async def _run_sync(
             ).sync()
 
         print(
-            f"sync-symbols: seen={report.seen} "
+            f"sync-symbols: "
+            f"seen={report.seen} "
             f"eligible_usdt={report.eligible} "
             f"upserted={report.upserted}"
         )
@@ -101,7 +111,6 @@ async def _run_backfill(
     args: argparse.Namespace,
 ) -> int:
     settings = load_ingest_settings()
-
     engine = build_engine(settings.db_dsn)
 
     try:
@@ -113,7 +122,7 @@ async def _run_backfill(
             provider = BinanceRestAdapter(
                 client,
                 RateBudget(settings.binance_weight_capacity),
-                base_url=settings.binance_base_url,
+                base_url=(settings.binance_base_url),
             )
 
             service = BackfillService(
@@ -141,7 +150,8 @@ async def _run_backfill(
             f"{report.requested_end.isoformat()}) "
             f"fetched={report.fetched} "
             f"inserted={report.inserted} "
-            f"gaps_recorded={report.gaps_recorded} "
+            f"gaps_recorded="
+            f"{report.gaps_recorded} "
             f"quarantined="
             f"{report.quarantined_batches}"
             + (f" resumed_from={report.resumed_from.isoformat()}" if report.resumed_from else "")
@@ -160,7 +170,6 @@ async def _run_verify(
     args: argparse.Namespace,
 ) -> int:
     settings = load_ingest_settings()
-
     engine = build_engine(settings.db_dsn)
 
     try:
@@ -223,45 +232,87 @@ async def _run_engine(
 
         event_repo = PgEngineEventRepository(sessions)
 
-        state_store = RedisEngineStateStore(redis_client)
+        structure_state_store = RedisEngineStateStore(redis_client)
 
-        state_manager = EngineStateManager(state_store)
+        state_manager = EngineStateManager(structure_state_store)
 
-        service = StructureReplayService(
+        structure_service = StructureReplayService(
             candle_repo,
             event_repo,
             state_manager,
             clock,
         )
 
-        report = await service.run(
+        structure_report = await structure_service.run(
             args.symbol,
             args.timeframe,
             args.start,
             args.end,
-            rebuild_state=rebuild_state,
+            rebuild_state=(rebuild_state),
+        )
+
+        pool_repo = PgLiquidityPoolRepository(sessions)
+
+        transition_repo = PgLiquidityTransitionRepository(sessions)
+
+        liquidity_state_store = RedisLiquidityStateStore(redis_client)
+
+        liquidity_service = LiquidityReplayService(
+            candle_repo,
+            pool_repo,
+            transition_repo,
+            event_repo,
+            liquidity_state_store,
+            clock,
+        )
+
+        liquidity_report = await liquidity_service.run(
+            args.symbol,
+            args.timeframe,
+            args.start,
+            args.end,
         )
 
         operation = "engine rebuild-state" if rebuild_state else "engine run"
 
         print(
             f"{operation} "
-            f"{report.symbol} "
-            f"{report.timeframe.value}: "
-            f"candles={report.candles} "
+            f"{structure_report.symbol} "
+            f"{structure_report.timeframe.value}: "
+            f"candles="
+            f"{structure_report.candles} "
             f"internal_swings="
-            f"{report.internal_swings} "
+            f"{structure_report.internal_swings} "
             f"external_swings="
-            f"{report.external_swings} "
+            f"{structure_report.external_swings} "
             f"classified="
-            f"{report.classified_events} "
+            f"{structure_report.classified_events} "
             f"events_inserted="
-            f"{report.events_inserted} "
-            f"trend={report.trend_state}"
+            f"{structure_report.events_inserted} "
+            f"trend="
+            f"{structure_report.trend_state}"
         )
 
-        if report.last_processed_open_time is not None:
-            print(f"  last_processed={report.last_processed_open_time.isoformat()}")
+        print(
+            "  liquidity: "
+            f"internal_pools="
+            f"{liquidity_report.internal_pools} "
+            f"external_pools="
+            f"{liquidity_report.external_pools} "
+            f"upserted="
+            f"{liquidity_report.pools_upserted} "
+            f"active="
+            f"{liquidity_report.active_pools} "
+            f"sweeps="
+            f"{liquidity_report.sweeps} "
+            f"broken="
+            f"{liquidity_report.broken_pools} "
+            f"expired="
+            f"{liquidity_report.expired_pools}"
+        )
+
+        if structure_report.last_processed_open_time is not None:
+            print(f"  last_processed={structure_report.last_processed_open_time.isoformat()}")
 
         return 0
 
