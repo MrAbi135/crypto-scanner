@@ -75,3 +75,18 @@ class LiquidityTransitionRepository(Protocol):
         self,
         transition: LiquidityTransitionRecord,
     ) -> bool: ...
+
+
+class LiquidityStateStore(Protocol):
+    async def save(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        pools: tuple[LiquidityPoolRecord, ...],
+    ) -> None: ...
+
+    async def delete(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+    ) -> None: ...

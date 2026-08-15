@@ -20,6 +20,7 @@ from scanner.application.ports.detection import (
 from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRecord,
     LiquidityPoolRepository,
+    LiquidityStateStore,
     LiquidityTransitionRecord,
     LiquidityTransitionRepository,
 )
@@ -42,9 +43,6 @@ from scanner.domain.structure import (
     detect_external_swings,
     detect_internal_swings,
     swing_window,
-)
-from scanner.infrastructure.redis.liquidity_state import (
-    RedisLiquidityStateStore,
 )
 from scanner.shared import Timeframe
 
@@ -79,7 +77,7 @@ class LiquidityReplayService:
         pools: LiquidityPoolRepository,
         transitions: LiquidityTransitionRepository,
         events: EngineEventRepository,
-        snapshots: RedisLiquidityStateStore,
+        snapshots: LiquidityStateStore,
         clock: Clock,
         *,
         algo_version: str = LIQUIDITY_ALGO_VERSION,
