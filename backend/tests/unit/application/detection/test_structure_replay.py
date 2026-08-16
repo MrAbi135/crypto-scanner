@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from tests.support.builders import pad_for_warmup
 
 from scanner.application.detection.state import (
     EngineStateManager,
@@ -218,7 +219,7 @@ async def test_replay_persists_structure_events_and_state() -> None:
     states = EngineStateManager(FakeStateStore())
 
     service = StructureReplayService(
-        FakeCandleRepository(sample_candles()),
+        FakeCandleRepository(pad_for_warmup(sample_candles())),
         events,
         states,
         FakeClock(),
@@ -229,7 +230,7 @@ async def test_replay_persists_structure_events_and_state() -> None:
         Timeframe.H1,
         datetime(
             2026,
-            8,
+            1,
             1,
             tzinfo=UTC,
         ),
@@ -241,7 +242,7 @@ async def test_replay_persists_structure_events_and_state() -> None:
         ),
     )
 
-    assert report.candles == 17
+    assert report.candles == 300
     assert report.internal_swings > 0
     assert report.events_inserted > 0
 
@@ -261,7 +262,7 @@ async def test_replay_is_idempotent() -> None:
     events = FakeEventRepository()
 
     service = StructureReplayService(
-        FakeCandleRepository(sample_candles()),
+        FakeCandleRepository(pad_for_warmup(sample_candles())),
         events,
         EngineStateManager(FakeStateStore()),
         FakeClock(),
@@ -269,7 +270,7 @@ async def test_replay_is_idempotent() -> None:
 
     start = datetime(
         2026,
-        8,
+        1,
         1,
         tzinfo=UTC,
     )
@@ -316,7 +317,7 @@ async def test_rebuild_state_replaces_old_snapshot() -> None:
     )
 
     service = StructureReplayService(
-        FakeCandleRepository(sample_candles()),
+        FakeCandleRepository(pad_for_warmup(sample_candles())),
         FakeEventRepository(),
         states,
         FakeClock(),
@@ -327,7 +328,7 @@ async def test_rebuild_state_replaces_old_snapshot() -> None:
         Timeframe.H1,
         datetime(
             2026,
-            8,
+            1,
             1,
             tzinfo=UTC,
         ),
@@ -366,7 +367,7 @@ async def test_empty_history_produces_empty_state() -> None:
         Timeframe.H1,
         datetime(
             2026,
-            8,
+            1,
             1,
             tzinfo=UTC,
         ),
@@ -394,7 +395,7 @@ async def test_invalid_range_is_rejected() -> None:
 
     point = datetime(
         2026,
-        8,
+        1,
         1,
         tzinfo=UTC,
     )

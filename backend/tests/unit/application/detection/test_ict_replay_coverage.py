@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import ClassVar
 
 import pytest
+from tests.support.builders import pad_for_warmup
 
 import scanner.application.detection.ict_ob_replay as ob_mod
 import scanner.application.detection.ict_replay as ict_mod
@@ -320,7 +321,7 @@ def zone_record(
 
 @pytest.mark.asyncio
 async def test_full_ict_replay_fixture_exercises_detection_and_lifecycle() -> None:
-    candles = fixture_series()
+    candles = pad_for_warmup(fixture_series())
     zones = FakeZoneRepository()
     transitions = FakeTransitionRepository()
     snapshots = FakeSnapshotStore()
@@ -340,7 +341,7 @@ async def test_full_ict_replay_fixture_exercises_detection_and_lifecycle() -> No
         candles[-1].close_time,
     )
 
-    assert report.candles == 55
+    assert report.candles == 300
     assert report.fvgs_detected > 0
     assert report.zones_upserted > 0
     assert snapshots.saved == await zones.list_live(
@@ -351,7 +352,7 @@ async def test_full_ict_replay_fixture_exercises_detection_and_lifecycle() -> No
 
 @pytest.mark.asyncio
 async def test_full_ob_replay_fixture_exercises_detection() -> None:
-    candles = fixture_series()
+    candles = pad_for_warmup(fixture_series())
     zones = FakeZoneRepository()
     snapshots = FakeSnapshotStore()
 
@@ -430,7 +431,7 @@ async def test_full_ob_replay_fixture_exercises_detection() -> None:
         candles[-1].close_time,
     )
 
-    assert report.candles == 55
+    assert report.candles == 300
     assert report.displacements >= 1
     assert snapshots.saved == await zones.list_live(
         "S6COVUSDT",
@@ -785,7 +786,7 @@ async def test_transition_helpers_cover_success_and_failure() -> None:
     zones = FakeZoneRepository()
     transitions = FakeTransitionRepository()
     snapshots = FakeSnapshotStore()
-    candles = fixture_series()
+    candles = pad_for_warmup(fixture_series())
 
     record = zone_record(
         zone_id="fvg-transition",

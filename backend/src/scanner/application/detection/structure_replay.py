@@ -16,7 +16,7 @@ from scanner.application.ports.detection import (
     EngineEventRecord,
     EngineEventRepository,
 )
-from scanner.domain.common import Candle
+from scanner.domain.common import Candle, detection_is_warm
 from scanner.domain.structure import (
     BreakDirection,
     ClassifiedSwing,
@@ -49,6 +49,14 @@ class StructureReplayReport:
     events_inserted: int
     trend_state: str
     last_processed_open_time: datetime | None
+    warmup_satisfied: bool = True
+    """False when SLS §1.9's closed-candle floor was not met.
+
+    Reported rather than raised: §1.9 calls warm-up "visible, honest, not
+    scored", so a caller must be able to tell a genuinely quiet market from a
+    series the engine declined to analyse. Zero detections mean different
+    things in those two cases.
+    """
 
 
 class StructureReplayService:
@@ -97,7 +105,7 @@ class StructureReplayService:
             )
         )
 
-        if not candles:
+        if not detection_is_warm(len(candles)):
             state = StructureEngineState(
                 symbol=symbol,
                 timeframe=timeframe.value,
@@ -109,13 +117,14 @@ class StructureReplayService:
             return StructureReplayReport(
                 symbol=symbol,
                 timeframe=timeframe,
-                candles=0,
+                candles=len(candles),
                 internal_swings=0,
                 external_swings=0,
                 classified_events=0,
                 events_inserted=0,
                 trend_state=state.trend_state,
-                last_processed_open_time=None,
+                last_processed_open_time=(candles[-1].open_time if candles else None),
+                warmup_satisfied=False,
             )
 
         internal_swings = detect_internal_swings(candles)
