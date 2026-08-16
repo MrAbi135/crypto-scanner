@@ -97,9 +97,23 @@ draft a dataset; the developer owns the label.
 
 | Engine | Datasets | Roadmap DoD | State |
 |---|---|---|---|
-| structure (S4) | 3 | ≥ 60 | clean swing, equal-extreme tie, flat-window absence |
+| structure (S4) | 4 | ≥ 60 | clean swing, equal-extreme tie, flat-window absence, HH/HL classification |
 | liquidity (S5) | 3 | ≥ 50 | single-candle sweep, close-through break, two-candle sweep |
 | ict zones (S6) | 3 | ≥ 80 | FVG wick-fill progression, sub-filter rejection, bearish mirror. **Only the FVG/IFVG/BPR pass is wired** — the order-block, OTE and interaction services have their own ports and land later, so a dataset expecting their output would silently see nothing. |
+
+### Detectors with no golden case yet
+
+Breadth before depth: a detector with *zero* cases is more dangerous than one
+with three instead of sixty, because Constitution §32.3 says it may not ship at
+all. Current gaps, and what each needs:
+
+| Detector | Blocked on |
+|---|---|
+| BOS / CHoCH / MSS (§3.5–§3.6) | A series long enough to confirm three external swings per side (`k_ext = 5`), since the trend gate that arms BOS needs two consecutive HH/HL pairs — roughly 50+ hand-built candles |
+| Trend state machine (§3.4) | Same: no external swing has ever confirmed in a golden series |
+| EQH/EQL clusters (§4.3), stop hunts (§4.7) | Reachable through wired services; not yet written |
+| IFVG (§5.5), BPR (§5.6) | Reachable through the wired `IctReplayService`; not yet written |
+| Order blocks (§5.1), Breaker (§5.2), Mitigation (§5.3), OTE (§5.7), PD arrays | Their services (`ict_ob_replay`, `ict_ote_replay`, `ict_interaction_replay`) are not wired into the harness yet |
 
 This is the beginning of that debt being paid, not the end of it.
 `run_dataset` raises on an unsupported `engine` value rather than skipping, so
