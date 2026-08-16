@@ -4,7 +4,7 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.3
+**Version:** 1.0.4
 **Ratified:** 2026-07-12 · **Last amended:** 2026-08-17 (see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
@@ -474,7 +474,8 @@ Definition: the *current* unconsumed pool map — all `ACTIVE` pools, both sides
 
 **Inputs.** Confirmed sweeps (§4.6); displacement (§5.10); structure state.
 
-**Detection Logic.** Stop Hunt confirms when, for a confirmed **external** sweep: a displacement candle (§5.10) in the reversal direction closes within `P.liquidity.stophunt_window = 3` closed candles of sweep confirmation, **and** that displacement leg closes back through at least 50% of the sweep candle's total range. Records: sweep id, displacement id, elapsed candles.
+**Detection Logic.** Stop Hunt confirms when, for a confirmed **external** sweep: a displacement candle (§5.10) in the reversal direction closes within `P.liquidity.stophunt_window = 3` closed candles of sweep confirmation, **and** that displacement leg closes back through at least 50% of the **penetration candle's** total range. Records: sweep id, displacement id, elapsed candles.
+**Which candle is measured (two-candle sweeps).** The reference is always the candle that *penetrated* the pool, never the candle that confirmed the rejection. For a single-candle sweep (§4.6) these are the same candle, so one rule covers both windows. For a two-candle sweep the penetration candle sits one index before `confirmed_index`. *Rationale:* the stop-run is the penetration — that is the move that took the resting orders, and §4.6 already treats that candle as authoritative by recording `penetration_price` from it. The confirmation candle merely records the market declining to accept the level. Measuring against the confirmation candle would also make the 50% threshold easier to clear precisely where the evidence is weakest, since it is the narrower range.
 
 **Validation.** Underlying sweep not `reclaimed`; displacement direction opposes sweep penetration direction. **Invalidation.** If within `P.liquidity.stophunt_invalid = 5` closed candles price closes beyond the sweep extreme, the stop hunt is marked `failed: true` (fact, preserved, penalized in scoring).
 
@@ -1058,6 +1059,51 @@ dependent sections, version increment, recorded rationale. Each row below links
 the golden dataset that surfaced the defect, so the reasoning is reproducible
 from the test suite rather than from memory.
 
+### v1.0.4 — 2026-08-17
+
+Resolves an ambiguity in §4.7 that has been latent since ratification and had
+never surfaced, because the detector it governs has no caller.
+
+**The ambiguity.** §4.7 required a stop hunt's displacement leg to reclaim
+*"at least 50% of the sweep candle's total range"*. For a single-candle sweep
+that phrase is unambiguous. For a **two-candle** sweep (§4.6 step 3) it is not:
+the penetration candle and the confirmation candle are different candles with
+different ranges, and the section never says which one it means. The choice
+moves the 50% mark and therefore flips whether a stop hunt confirms.
+
+**The decision: the penetration candle**, always.
+
+- The stop-run *is* the penetration — that is the move which took the resting
+  orders. §4.7's own purpose statement calls a stop hunt *"an institutional
+  stop-run followed by the real move"*.
+- §4.6 already treats that candle as authoritative, recording
+  `penetration_price` from it.
+- It unifies the two windows rather than splitting them. In a single-candle
+  sweep the penetration candle *is* the confirmation candle, so one rule covers
+  both cases instead of two rules that must be kept in agreement.
+- Where the rule is genuinely close, it errs toward caution: the confirmation
+  candle is the narrower range, so measuring against it would make the
+  threshold *easier* to clear exactly where the evidence is weakest.
+
+**Why it stayed hidden.** `detect_stop_hunt` takes `sweep_candle_high` and
+`sweep_candle_low` from its caller rather than deriving them, so the decision
+has always belonged to the caller — and no caller exists. The stop-hunt
+detector is implemented, unit-tested, exported, and invoked by nothing (see
+`docs/evidence/S5/CHECKLIST.md`). The question could not arise until someone
+tried to wire it, which is what surfaced it now.
+
+**Impact review.**
+
+- §4.7 only. §4.6 sweep confirmation is untouched, as is the `failed` flag rule
+  (`P.liquidity.stophunt_invalid = 5`), which measures against the sweep
+  *extreme* rather than a candle range and was never ambiguous.
+- No parameter changes; `param_set_version` unaffected.
+- No existing behaviour changes, because nothing currently produces stop hunts.
+  The implementing release bumps `algo_version` on the liquidity engine as the
+  detector comes online (Constitution §44.5).
+- Golden datasets: none cover stop hunts today, for the reason above. The
+  implementing release adds them.
+
 ### v1.0.3 — 2026-08-17
 
 Adds §0.4's **recorded precision** rule for derived measurements. Fills a
@@ -1181,4 +1227,4 @@ belongs in its own amendment, not folded into an unrelated one.
 
 *This document is the complete detection doctrine of the Institutional AI Crypto Scanner. An engineering team implementing it makes zero trading-logic decisions: where a question is not answered here, the answer is an amendment to this document — never a guess in code.*
 
-**— End of Scanner Logic Specification v1.0.3 —**
+**— End of Scanner Logic Specification v1.0.4 —**

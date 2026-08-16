@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -390,3 +391,62 @@ async def test_terminal_pool_cannot_transition_twice() -> None:
     assert len(transitions.items) == 1
 
     assert len(events.items) == 1
+
+
+@pytest.mark.asyncio
+async def test_external_sweep_plus_reversal_displacement_records_a_stop_hunt() -> None:
+    """SLS §4.7 composite, wired for the first time.
+
+    The detector has existed and been unit-tested since S5 but had no caller,
+    so nothing ever produced a stop hunt. This drives the real service.
+
+    Note the padding candle carries a body of 1. `mean_body_20` is the
+    denominator of §5.10's displacement test, and flat padding would make it
+    zero, so displacement could never confirm and the composite could never
+    fire — the fixture would pass while testing nothing.
+    """
+
+    candles = pad_for_warmup(
+        [
+            make_candle(0, open_="97", high="99", low="97", close="98"),
+            # Penetrates the 100 pool and closes back below: a sweep (§4.6).
+            make_candle(1, open_="99", high="102", low="98", close="99"),
+            # Reversal displacement one candle later, closing far below the
+            # penetration candle's midpoint of 100 (§4.7's 50% reclaim).
+            make_candle(2, open_="99", high="99", low="94", close="94.5"),
+        ]
+    )
+
+    pools = FakePools(make_pool())
+    transitions = FakeTransitions()
+    events = FakeEvents()
+    snapshots = FakeSnapshots()
+
+    service = LiquidityReplayService(
+        FakeCandles(candles),  # type: ignore[arg-type]
+        pools,  # type: ignore[arg-type]
+        transitions,
+        events,
+        snapshots,  # type: ignore[arg-type]
+        FakeClock(),
+    )
+
+    result = await service._replay_pool_lifecycle(pools.pool, candles)
+
+    assert result == "SWEPT"
+
+    kinds = [event.event_type for event in events.items]
+
+    assert "LIQUIDITY_SWEEP" in kinds
+    assert "LIQUIDITY_STOP_HUNT" in kinds, (
+        f"expected a stop hunt after the reversal displacement, got {kinds}"
+    )
+
+    hunt = next(e for e in events.items if e.event_type == "LIQUIDITY_STOP_HUNT")
+    payload = json.loads(hunt.payload)
+
+    # Measured against the PENETRATION candle, per SLS v1.0.4 §4.7.
+    assert payload["penetration_high"] == "102"
+    assert payload["penetration_low"] == "98"
+    assert payload["elapsed_candles"] == 1
+    assert payload["failed"] is False
