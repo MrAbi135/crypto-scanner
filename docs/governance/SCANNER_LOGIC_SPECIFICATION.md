@@ -4,7 +4,7 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.1
+**Version:** 1.0.2
 **Ratified:** 2026-07-12 · **Last amended:** 2026-08-17 (see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
@@ -296,7 +296,7 @@ The structural skeleton of all doctrine. One shared swing implementation feeds e
 
 **Detection Logic.** At confirmation of swing high `s_new` with previous swing high `s_prev`: `HH` if `H[s_new] > H[s_prev] + ε`; `LH` if `H[s_new] < H[s_prev] − ε`; `EQH` if within `ε` (also forwarded to Liquidity Engine). Mirror for lows (`HL` / `LL` / `EQL`). Consecutive same-type swings: each is classified against its immediate same-type predecessor; pairing for trend evaluation always uses the **most recent confirmed** high and low.
 
-**Validation / Invalidation.** Labels are immutable once assigned (facts). **Edge Cases.** First swing of a series has no label (`SEED`). After a `DEGRADED` gap, the first post-gap swing is `SEED` (no cross-gap comparisons — §2.15.4).
+**Validation / Invalidation.** Labels are immutable once assigned (facts). **Edge Cases.** The first swing of each kind in a series has no same-kind predecessor and is assigned the label `SEED`, which is **emitted as a classification event like any other label** — it is a recorded fact that a reference point was established, not a silent omission. `SEED` asserts no direction and is excluded from every directional set: it never participates in trend evaluation (§3.4), CHoCH/MSS failure-swing tests (§3.6), or any pairing rule. After a `DEGRADED` gap, the first post-gap swing of each kind is likewise `SEED` (no cross-gap comparisons — §2.15.4).
 
 ### 3.4 Trend State Machine
 
@@ -1054,6 +1054,47 @@ dependent sections, version increment, recorded rationale. Each row below links
 the golden dataset that surfaced the defect, so the reasoning is reproducible
 from the test suite rather than from memory.
 
+### v1.0.2 — 2026-08-17
+
+**This one changes detector output**, unlike v1.0.1. It resolves an ambiguity in
+§3.3 by a deliberate doctrine decision rather than by correcting a slip.
+
+**The ambiguity.** §3.3 read: *"First swing of a series has no label (`SEED`)."*
+That sentence supports two incompatible readings — either the swing carries no
+label and we merely *name* that condition SEED, or it carries a label whose
+value is `SEED`. The implementation had silently taken the first reading and
+emitted nothing at all, which meant the enum had no `SEED` member and the
+condition left no trace in the event stream.
+
+**The decision.** `SEED` is now an **emitted label**, on the reasoning that a
+reference point which leaves no record is indistinguishable from a swing that
+was never confirmed. An evidence chain should be able to state *why* a
+comparison could not be made, not merely fall silent.
+
+**Scope of the label.** `SEED` asserts no direction. It is excluded from every
+directional set and therefore never participates in trend evaluation (§3.4),
+the CHoCH/MSS failure-swing tests (§3.6), or any pairing rule. The amendment
+adds a fact to the record; it does not add a signal.
+
+**Impact review.**
+
+- §3.4 trend: unaffected. Trend inference filters on `{HH, LH, EQH}` and
+  `{HL, LL, EQL}`; `SEED` is in neither, so the sequences it evaluates are
+  byte-identical to before.
+- §3.6 CHoCH/MSS: unaffected. Both failure-swing tests select by explicit label
+  (`is LH` / `is HL`) or take the latest same-kind swing by index. A `SEED`
+  entry never matches the former, and can only be the latter when it is the
+  sole entry — a case that already evaluated false.
+- §4 liquidity: unaffected. The liquidity engine consumes swings, not
+  classifications.
+- **`algo_version` increments `s4-v1 → s4-v2`** (Constitution §44.5: any output
+  difference reclassifies work as a logic change requiring versioning). No
+  parameter changes, so `param_set_version` is untouched.
+- Golden datasets with at least one confirmed swing gain one `SEED` event per
+  kind and are relabelled accordingly. `s4-flat-window-emits-nothing` confirms
+  no swings and is unchanged, which is the correct signal that the amendment
+  adds nothing where there is nothing to seed.
+
 ### v1.0.1 — 2026-08-17
 
 Two editorial corrections. **Neither changes detection behaviour**: in both
@@ -1099,4 +1140,4 @@ belongs in its own amendment, not folded into an unrelated one.
 
 *This document is the complete detection doctrine of the Institutional AI Crypto Scanner. An engineering team implementing it makes zero trading-logic decisions: where a question is not answered here, the answer is an amendment to this document — never a guess in code.*
 
-**— End of Scanner Logic Specification v1.0.1 —**
+**— End of Scanner Logic Specification v1.0.2 —**

@@ -58,7 +58,7 @@ strings. Volume fields default sensibly so a labeller only writes OHLC.
   "labelling_rationale": "why the SLS requires this exact output",
   "labelled_by": "name",
   "labelled_at": "2026-08-16",
-  "algo_version": "s4-v1",
+  "algo_version": "s4-v2",
   "symbol": "GOLDENSTRUCT",
   "timeframe": "M5",
   "candles": [{ "open_time": "...", "open": "9.5", "high": "10", "low": "9", "close": "9.8" }],

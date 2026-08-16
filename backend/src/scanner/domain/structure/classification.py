@@ -18,7 +18,14 @@ def classify_swings(
     *,
     epsilon: Decimal = Decimal("0"),
 ) -> tuple[ClassifiedSwing, ...]:
-    """Classify swings against their immediate same-kind predecessor."""
+    """Classify swings against their immediate same-kind predecessor.
+
+    The first swing of each kind has no predecessor and is labelled ``SEED``
+    (SLS §3.3). It is emitted rather than skipped: a reference point that
+    leaves no trace is indistinguishable from a swing that was never
+    confirmed, and downstream evidence chains need to be able to say *why* a
+    comparison could not be made.
+    """
 
     if epsilon < 0:
         raise ValueError("epsilon must be non-negative")
@@ -35,32 +42,38 @@ def classify_swings(
         ),
     ):
         if swing.kind is SwingKind.HIGH:
-            if previous_high is not None:
-                classified.append(
-                    ClassifiedSwing(
-                        swing=swing,
-                        label=_classify_high(
+            classified.append(
+                ClassifiedSwing(
+                    swing=swing,
+                    label=(
+                        _classify_high(
                             previous_high.price,
                             swing.price,
                             epsilon,
-                        ),
-                    )
+                        )
+                        if previous_high is not None
+                        else StructureLabel.SEED
+                    ),
                 )
+            )
 
             previous_high = swing
             continue
 
-        if previous_low is not None:
-            classified.append(
-                ClassifiedSwing(
-                    swing=swing,
-                    label=_classify_low(
+        classified.append(
+            ClassifiedSwing(
+                swing=swing,
+                label=(
+                    _classify_low(
                         previous_low.price,
                         swing.price,
                         epsilon,
-                    ),
-                )
+                    )
+                    if previous_low is not None
+                    else StructureLabel.SEED
+                ),
             )
+        )
 
         previous_low = swing
 
