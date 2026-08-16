@@ -1,0 +1,107 @@
+{
+  "dataset_id": "s5-bsl-sweep-single-candle",
+  "engine": "liquidity",
+  "sls_sections": ["4.2", "4.6"],
+  "description": "Price wicks through a BSL pool and closes back below it. Penetration plus rejection close is a sweep, confirmed on that same close.",
+  "labelling_rationale": "SLS §4.6 step 1 requires penetration H[i] > Pl + e, and step 2 requires a rejection close Cl[i] < Pl; step 3 says the sweep then confirms immediately at that close as a single-candle sweep. The series carries a confirmed internal swing high of 106 at index 2 (k_int = 2 per §3.1), which §4.2 turns into a BSL pool once the swing confirms at index 4. Candle 6 has high 109 and closes at 104. Per §0.4 the tolerance is e = 0.05 x ATR(14); the true ranges of candles 0..6 are 2, 2, 4, 3, 2, 2, 6, summing to 21 over 7 candles, so ATR = 3 exactly and e = 0.15. Penetration holds because 109 > 106.15, and the rejection close holds because 104 < 106, so the pool transitions ACTIVE -> SWEPT with sweep_depth = (109 - 106) / 3 = 1 ATR. The candle opened at 104, below the level, so gap_sweep is false (§4.6 Edge Case 4). A second pool exists: the confirmed internal swing low of 101 at index 4 becomes an SSL pool at index 6, but its lifecycle scan would start at index 7 which is past the end of the series, so it stays ACTIVE and untouched. Pool strength follows §4.2's four-component formula: touches 0 gives 0, H1 is rank 3 of 6 giving 12.5, age 2 candles gives 25 x 2 / 200 = 0.25, and a single-swing pool gives cluster 6.25 — total 19.00 for the BSL pool and 18.75 for the newer SSL pool whose age component is 0.",
+  "labelled_by": "Claude Opus 5 (spec-derived; pending developer verification per Constitution §5)",
+  "labelled_at": "2026-08-16",
+  "algo_version": "s5-v1",
+  "symbol": "GOLDENSWEEP",
+  "timeframe": "H1",
+  "candles": [
+    { "open_time": "2026-01-05T00:00:00+00:00", "open": "101", "high": "102", "low": "100", "close": "101" },
+    { "open_time": "2026-01-05T01:00:00+00:00", "open": "101", "high": "103", "low": "101", "close": "102" },
+    { "open_time": "2026-01-05T02:00:00+00:00", "open": "104", "high": "106", "low": "104", "close": "105" },
+    { "open_time": "2026-01-05T03:00:00+00:00", "open": "104", "high": "104", "low": "102", "close": "103" },
+    { "open_time": "2026-01-05T04:00:00+00:00", "open": "103", "high": "103", "low": "101", "close": "102" },
+    { "open_time": "2026-01-05T05:00:00+00:00", "open": "103", "high": "104", "low": "102", "close": "104" },
+    { "open_time": "2026-01-05T06:00:00+00:00", "open": "104", "high": "109", "low": "103", "close": "104" }
+  ],
+  "expected": {
+    "report": {
+      "candles": 7,
+      "internal_pools": 2,
+      "external_pools": 0,
+      "pools_upserted": 2,
+      "active_pools": 1,
+      "sweeps": 1,
+      "broken_pools": 0,
+      "expired_pools": 0
+    },
+    "pools": [
+      {
+        "pool": "pool:BSL:4",
+        "side": "BSL",
+        "liquidity_class": "INTERNAL",
+        "source": "SWING",
+        "state": "SWEPT",
+        "price": "106",
+        "band_low": "106",
+        "band_high": "106",
+        "strength": "19.00",
+        "member_count": 1,
+        "created_index": 4,
+        "created_at": "2026-01-05T05:00:00+00:00"
+      },
+      {
+        "pool": "pool:SSL:6",
+        "side": "SSL",
+        "liquidity_class": "INTERNAL",
+        "source": "SWING",
+        "state": "ACTIVE",
+        "price": "101",
+        "band_low": "101",
+        "band_high": "101",
+        "strength": "18.75",
+        "member_count": 1,
+        "created_index": 6,
+        "created_at": "2026-01-05T07:00:00+00:00"
+      }
+    ],
+    "transitions": [
+      {
+        "pool": "pool:BSL:4",
+        "from_state": "ACTIVE",
+        "to_state": "SWEPT",
+        "reason": "liquidity_sweep",
+        "candle_index": 6,
+        "transitioned_at": "2026-01-05T07:00:00+00:00",
+        "evidence": {
+          "pool_id": "pool:BSL:4",
+          "side": "BSL",
+          "liquidity_class": "INTERNAL",
+          "reference_level": "106",
+          "penetration_price": "109",
+          "close_back_price": "104",
+          "sweep_depth_atr": "1",
+          "confirmation_window": 1,
+          "gap_sweep": false,
+          "reclaimed": false,
+          "displaced_after": false,
+          "setup_expiry_index": 21
+        }
+      }
+    ],
+    "events": [
+      {
+        "event_type": "LIQUIDITY_SWEEP",
+        "event_at": "2026-01-05T07:00:00+00:00",
+        "payload": {
+          "pool_id": "pool:BSL:4",
+          "side": "BSL",
+          "liquidity_class": "INTERNAL",
+          "reference_level": "106",
+          "penetration_price": "109",
+          "close_back_price": "104",
+          "sweep_depth_atr": "1",
+          "confirmation_window": 1,
+          "gap_sweep": false,
+          "reclaimed": false,
+          "displaced_after": false,
+          "setup_expiry_index": 21
+        }
+      }
+    ]
+  }
+}
