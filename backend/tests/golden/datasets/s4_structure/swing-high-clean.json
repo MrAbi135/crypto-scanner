@@ -9,6 +9,7 @@
   "algo_version": "s4-v2",
   "symbol": "GOLDENSTRUCT",
   "timeframe": "M5",
+  "filler": { "count": 293, "open": "9.5", "high": "10", "low": "9", "close": "9.8" },
   "candles": [
     { "open_time": "2026-01-05T00:00:00+00:00", "open": "9.5", "high": "10", "low": "9", "close": "9.8" },
     { "open_time": "2026-01-05T00:05:00+00:00", "open": "10.2", "high": "11", "low": "10", "close": "10.8" },
@@ -20,7 +21,7 @@
   ],
   "expected": {
     "report": {
-      "candles": 7,
+      "candles": 300,
       "internal_swings": 1,
       "external_swings": 0,
       "classified_events": 1,
@@ -32,7 +33,7 @@
         "event_type": "STRUCTURE_INTERNAL_SEED",
         "event_at": "2026-01-05T00:10:00+00:00",
         "payload": {
-          "index": 2,
+          "index": 295,
           "kind": "HIGH",
           "label": "SEED",
           "price": "15",
@@ -43,7 +44,7 @@
         "event_type": "SWING_INTERNAL_HIGH",
         "event_at": "2026-01-05T00:10:00+00:00",
         "payload": {
-          "index": 2,
+          "index": 295,
           "kind": "HIGH",
           "price": "15",
           "strength": "INTERNAL"
