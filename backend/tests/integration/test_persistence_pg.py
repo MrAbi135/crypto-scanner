@@ -4,28 +4,23 @@ Proves what unit fakes cannot: the COPY→staging→conflict-skip bulk path,
 the storage CHECK tripwires, hypertable creation via the real migration,
 and incident round-trips. Requires Docker (testcontainers).
 
+The `pg_dsn` / `engine` fixtures live in `tests/integration/conftest.py`.
+
 Run: pytest -m integration tests/integration
 """
 
 from __future__ import annotations
 
-import os
 from datetime import timedelta
 
 import pytest
 
 pytest.importorskip("testcontainers")
-from alembic import command as alembic_command
-from alembic.config import Config as AlembicConfig
 from sqlalchemy import text
-from testcontainers.postgres import PostgresContainer
 
 from scanner.application.ports import IncidentRecord
 from scanner.domain.common import Symbol, SymbolStatus
-from scanner.infrastructure.persistence.database import (
-    build_engine,
-    build_session_factory,
-)
+from scanner.infrastructure.persistence.database import build_session_factory
 from scanner.infrastructure.persistence.repositories import (
     PgCandleRepository,
     PgIncidentRepository,
@@ -36,26 +31,6 @@ from tests.support.builders import BASE_TIME, make_series
 from tests.support.clock import FakeClock
 
 pytestmark = pytest.mark.integration
-
-_IMAGE = "timescale/timescaledb:2.15.2-pg16"
-
-
-@pytest.fixture(scope="module")
-def pg_dsn():
-    with PostgresContainer(_IMAGE, username="scanner", password="scanner", dbname="scanner") as pg:
-        sync_dsn = pg.get_connection_url()  # psycopg2 form
-        async_dsn = sync_dsn.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
-        os.environ["SCANNER_DB_DSN"] = async_dsn
-        cfg = AlembicConfig("alembic.ini")
-        alembic_command.upgrade(cfg, "head")
-        yield async_dsn
-
-
-@pytest.fixture()
-async def engine(pg_dsn):
-    engine = build_engine(pg_dsn, pool_size=2)
-    yield engine
-    await engine.dispose()
 
 
 async def test_migration_created_hypertable(engine) -> None:
