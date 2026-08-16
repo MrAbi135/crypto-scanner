@@ -4,7 +4,8 @@
 
 **Document Status:** Official Development Roadmap — the executable build sequence for the frozen governance stack
 **Authority:** Subordinate to all eight governance documents (Constitution, SLS, TDR, PRD, TAD, DDD, API Specification, UI/UX Blueprint — frozen; each document's current version is stated in its own header); authoritative over build order, sprint scope, and release gating
-**Version:** 1.0.1 | **Ratified:** 2026-07-12 · **Last amended:** 2026-08-17 (consequential edit under SLS v1.0.1; see that document's Amendment History)
+**Version:** 2.0.0 | **Ratified:** 2026-07-12 · **Last amended:** 2026-08-17 (resequenced for time-to-first-value; see Amendment History at the end of this document)
+**Sprint IDs are stable identifiers, not an execution order.** S0–S22 keep the numbers they were ratified with — they are cited by the SLS, the ADRs, and code docstrings, and renumbering them would edit a frozen document to no purpose. §7 is the only authority on what runs when. A `b` suffix (S4b) means *reopened*: scope that its original sprint was declared done without.
 **Team model:** One developer + AI assistance (Claude / ChatGPT), full-time equivalent
 **Amendment Rule:** Scope moves between sprints via roadmap revision; governance documents are never modified by scheduling pressure (Constitution §8)
 
@@ -30,6 +31,23 @@
 
 Sprint length: **2 weeks**, 23 sprints (S0–S22) to beta. The timeline carries **~15% integration reserve** inside phases (Constitution §41.7: schedules include reality). Detection (Phase 2) is deliberately the longest phase — it is the product; nothing downstream can compensate for weakness there.
 
+### 1.1 Revised milestones (v2.0.0)
+
+The milestone *contents* above are unchanged. What changed is when the product becomes **observable**, and the removal of two items from the beta cut.
+
+| Milestone | Old | New | What moved |
+|---|---|---|---|
+| **M-live — the engine runs by itself** | *(never existed)* | **+1 mo** | S4's orchestrator deliverable, reopened as S4b |
+| **M-visible — the doctrine drawn on a live chart** | implicit at M4, +8 mo | **+2 mo** | A thin slice of S10/S13 pulled forward |
+| M2 — Detection complete, golden-verified | +5 mo | +6 mo | Slips one month; buys M-live and M-visible |
+| M6 — beta | +11 mo | **+8–9 mo** | AI engine and the full admin console deferred past beta |
+
+The headline is not that the total shrinks — it shrinks modestly. It is that **time-to-first-visible-product falls from about eight months to about two**, and every month after that is spent looking at real output instead of at test fixtures.
+
+### 1.2 Why this reordering, in one paragraph
+
+An audit on 2026-08-17 established that `runtime/engine.py` is a 21-line health-server skeleton, that `DetectionOrchestrator` has no production caller, and that `xadd` appears zero times in the source tree. Detection therefore runs **only** when a human types `engine run --symbol … --start … --end …`. Roughly seventeen thousand lines of doctrine — structure, liquidity, and the ICT zone engine — exist as a library with a manual replay tool attached. Under the v1 order the next three sprints add three more engines to that library and the developer first *sees* the product around month eight. That back-loads the single largest unknown in the project (does this doctrine produce sane output on real Binance data at scale?) behind eight months of work that assumes the answer is yes.
+
 ## 2. Development Phases
 
 | Phase | Sprints | Theme | Exit gate (§9) |
@@ -43,6 +61,8 @@ Sprint length: **2 weeks**, 23 sprints (S0–S22) to beta. The timeline carries 
 | **P6 — Production Readiness** | S20–S22 | Admin, hardening, DR, beta launch | G6 |
 
 Phase rules: no phase begins until the previous gate passes; inside a phase, sprints are strictly ordered; R2 scope (billing, portfolio, journal) is **designed everywhere but built after R1 beta feedback** (PRD §10 sequencing — the track record must exist before it sells).
+
+**v2.0.0 amendment to this table.** A phase named **P1b — The Spine** now sits between P1 and P2, holding S4b, S3b, S10a and S13a, and exiting at the new gate **G1b**. The phase-gate law above is unchanged and still binding; what changed is that two of P1b's four blocks are *reopened P1/P2 scope* (work their sprint was closed without) and two are thin slices of P3/P4 pulled forward for the reason given in §8.2. P2's sprint contents are untouched — only their position in §7.2 and their golden-coverage bar in §8.1. This is scope moving between sprints, which §Amendment Rule assigns to this document.
 
 ## 3. Sprint Structure
 
@@ -94,11 +114,50 @@ flowchart TB
 
 ## 7. Build Order (Binding Sequence)
 
-1. Foundations before data; data before doctrine; doctrine before access; access before interface; interface before reach (alerts/AI); everything before hardening claims.
+### 7.1 Standing dependency laws (unchanged from v1.0.1)
+
+1. Foundations before data; data before doctrine; everything before hardening claims.
 2. Within detection: **shared swing engine first** (Constitution §30.3 — everything cites it), then structure → liquidity/ICT (structure-dependent) → volume/momentum (independent, parallelizable) → confluence → lifecycle.
-3. Frontend starts only after the API contract is contract-tested (S11) — the generated client is the frontend's foundation (TAD §3.2), and building UI against an unstable API is solo-team suicide.
-4. Alerts before AI: alerts are R1-critical path (J3); AI degrades gracefully by design (SLS §11.2.5), so it lands last among features.
-5. Admin/quality console after both, because it *reads* them.
+3. No screen is built against an uncontracted endpoint. The generated client is the frontend's foundation (TAD §3.2).
+4. Alerts before AI: alerts are R1-critical path (J3); AI degrades gracefully by design (SLS §11.2.5).
+5. Admin/quality console after the things it *reads*.
+
+> **v2.0.0 note on law 3.** v1 stated this as *"frontend starts only after the API contract is contract-tested (S11)"*. That conflated two different things: building UI against an **unstable** API (genuinely reckless) and building UI against a **frozen spec that has not been implemented yet** (ordinary contract-first development). The API Specification is one of the eight frozen documents. A screen written against a frozen contract is safe; what is unsafe is a screen written against an endpoint somebody is still designing. Law 3 now says what was meant.
+
+### 7.2 Execution order (v2.0.0 — binding)
+
+Sprint IDs are labels; this table is the order. `b` = reopened scope.
+
+| # | Sprint | Scope | Why it sits here |
+|---|---|---|---|
+| 1 | **S4b** | Engine process: candle-close → Redis Stream (T39) → `DetectionOrchestrator` → existing detectors → events. Idempotent, resumable, HTF-first. | The S4 orchestrator deliverable, never built. **Nothing else in this table is reachable without it.** |
+| 2 | **S3b** | Populate `market.symbols`; backfill ≥ 300 closed candles per context so the SLS §1.9 warm-up gate opens; ingest running continuously. | The engine has nothing to chew on otherwise. |
+| 3 | **S10a** | Thin read API — symbols, candles, detected objects for one symbol+timeframe. Contract-exact against the frozen API Spec, but only the endpoints step 4 consumes. | Minimum surface to get output out of the database. |
+| 4 | **S13a** | One screen: candlestick chart with the doctrine drawn on it (swings, pools, sweeps, zones). | ⭐ **First visible product.** Also the verification instrument — see §8.1. |
+| 5 | **S6b** | ICT completion: `ict_ob_replay`, `ict_ote_replay`, `ict_interaction_replay` into the golden harness. | Now checkable against a chart instead of by hand. |
+| 6 | **S5b** | Wire EQH/EQL clustering; unpin `cluster_factor` from its constant 0.25. | Changes pool strength, so it wants the chart to confirm against. |
+| 7 | S7 | Volume + momentum. | Independent of 5–6; first genuinely new doctrine. |
+| 8 | S8 | Confluence, factors, archetypes, ranking. | Needs every engine above. |
+| 9 | S9 | Signal lifecycle, immutability, budgets → **Gate G2**. | Detection is done here. |
+| 10 | S10–S12 | Full API + WS gateway + identity → **G3**. | |
+| 11 | S13–S16 | Full terminal → **G4**. | S13a already proved the chart plumbing. |
+| 12 | S17–S18 | Watchlists, settings, alerts + Telegram → **G5** (revised, see §9). | |
+| 13 | S20–S21 | Hardening, DR drills, thin admin → **G6**. | |
+| 14 | S22 | Beta cutover. | |
+| — | ~~S19~~ | **AI engine — deferred past beta.** | Scope cut, not a quality cut. See §7.3. |
+
+### 7.3 What was cut from the beta line, and why that is legitimate
+
+Constitution §43.5 permits exactly one response to time pressure: *"when time is short, scope shrinks — quality never does."* These are scope cuts. Nothing kept has had its bar lowered.
+
+| Cut | Rationale | Cost of deferring |
+|---|---|---|
+| **S19 — AI engine** | It narrates and explains signals. The signals are the product; the narration is a layer on top, and SLS §11.2.5 already requires it to degrade gracefully to absent. | Beta users see evidence trees rather than prose. |
+| **Full admin console (part of S20)** | A private beta's user administration is a handful of SQL statements and existing CLI commands. A console is for when strangers self-serve. | The developer runs SQL for the beta. Honest, not elegant. |
+| **SSE fallback transport** | API Spec §12 calls it a degraded mirror of WS. Beta cohorts are invited, small, and can be told to use a modern browser. | Restrictive corporate networks are unsupported at beta. |
+| **Endpoints no screen consumes** | The API Spec is frozen and complete; that does not oblige us to implement it in one pass. Endpoints land when a screen needs them. | The OpenAPI surface at beta is a subset. Documented as such. |
+
+None of these are deleted. They re-enter after R1 beta feedback, alongside R2.
 
 ---
 
@@ -158,6 +217,60 @@ flowchart TB
 
 ---
 
+## Phase 1b — The Spine (v2.0.0, runs before everything below)
+
+> These four blocks are positions 1–4 of §7.2. Three of them are **reopened scope** — work their original sprint was declared complete without. The fourth is a deliberate slice pulled forward. None of them is new scope: every deliverable here is already mandated by the TAD, the DDD, or the API Specification.
+
+### Sprint S4b — Make the Engine Run By Itself
+
+- **Objective:** The detection pipeline runs unattended on candle closes. Today `runtime/engine.py` is a 21-line health-server skeleton and `DetectionOrchestrator` has no production caller; detection happens only when a human types `engine run --symbol … --start … --end …`.
+- **Features to build:** No user-facing feature. This is the S4 deliverable *"detection orchestrator: shard consumers, HTF-first ordering, per-context sequential execution, idempotent processing"*, which was never built.
+- **Backend work:** Ingest publishes a closed-candle event to a Redis Stream (**T39 outbox** — `xadd` currently appears zero times in the source tree); engine process consumes with a consumer group, per-context sequential execution, HTF-first ordering; `DetectionOrchestrator` wired to the real structure/liquidity/structure-shift/ICT detectors instead of to tests only; at-least-once delivery made safe by the existing persistence uniqueness; resume from last acknowledged entry after a kill; per-stage timing emitted.
+- **Frontend work:** None.
+- **Database work:** T39 outbox; consumer-group offsets recorded; `docs/cache-registry.md` entry for every Redis key touched (Roadmap §12 — an S5 debt already outstanding for `RedisLiquidityStateStore`).
+- **APIs:** None. `engine run` survives as a backfill/replay tool, no longer as the only path.
+- **Testing:** Integration: stream → orchestrator → events against real Redis and PG; **kill -9 mid-batch loses no closes and duplicates none** (asserted, not reasoned about); ordering property — HTF before LTF within a context, under shuffled arrival; idempotency under deliberate double-delivery.
+- **Expected output:** Start the stack, walk away, return to detection events accumulating without a keystroke.
+- **DoD:** 72 h unattended run on the dev stack with zero manual invocations; resume proven by kill; every Redis key registered; S4 evidence checklist finally written, recording honestly what the original S4 did not do.
+
+### Sprint S3b — Give It Something To Chew On
+
+- **Objective:** A real universe with real history, continuously fed. `market.symbols` currently has zero rows — `symbol_sync` has never run — so the warm-up gate could not open even if the engine were live.
+- **Features to build:** None user-facing.
+- **Backend work:** Run and schedule `symbol_sync`; backfill ≥ 300 closed candles per active context so SLS §1.9's detection gate opens; keep live ingest running continuously; verify gap recovery against a deliberately interrupted feed.
+- **Frontend work:** None.
+- **Database work:** Populated `market.symbols`; candle coverage report per context.
+- **APIs:** CLI: a coverage/readiness command that answers *"which contexts are warm?"* in one line.
+- **Testing:** Warm-up gate integration test against real backfilled data (today it is only unit-tested against synthetic padding); gap-recovery drill.
+- **Expected output:** A named set of symbols, warm, ingesting live.
+- **DoD:** Every active context reports warm; 72 h ingest with gap incidents recorded rather than silently absent; S3 evidence checklist written.
+
+### Sprint S10a — A Thin Way Out Of The Database
+
+- **Objective:** The minimum contract-exact API surface needed to draw a chart. Not the whole API Specification.
+- **Features to build:** Read-only access to symbols, candles, and detected objects for one symbol + timeframe + window.
+- **Backend work:** FastAPI routers for exactly the endpoint rows S13a consumes; envelopes, error codes, and pagination exactly as the frozen API Spec defines them — a subset of rows, never a variation on them.
+- **Frontend work:** Generated client from the emitted OpenAPI.
+- **Database work:** Read paths and indexes for the object queries.
+- **APIs:** The chosen subset, marked `IMPLEMENTED` in the Spec's lifecycle; everything else stays `DESIGNED`.
+- **Testing:** Contract tests asserting the implemented rows against the Spec, row for row — the same suite S11 will extend, not a throwaway.
+- **Expected output:** `curl` returns real detected objects.
+- **DoD:** Implemented rows contract-green; OpenAPI diff gate active; unimplemented rows explicitly listed so the subset is never mistaken for the whole.
+
+### Sprint S13a — See The Doctrine
+
+- **Objective:** One screen: a candlestick chart with the engine's own output drawn on it. **This is the project's first visible product and, per §8.2, the verification instrument for Gate G2.**
+- **Features to build:** Symbol + timeframe selection; candles; overlays for swings, pools, sweeps, and zones, each carrying its evidence on inspection.
+- **Frontend work:** Chart component against the generated client; design tokens per Blueprint §20 (tokens only — the full design system remains S13); overlay rendering driven by object type and state.
+- **Backend work:** Only what S10a left missing.
+- **Database work:** None.
+- **APIs:** Consumes S10a.
+- **Testing:** Component tests for overlay placement; one E2E that loads a known window and asserts a known object renders at a known price; a11y (axe) clean on the screen.
+- **Expected output:** The developer opens a browser, picks BTCUSDT H1, and looks at their own doctrine on a live chart.
+- **DoD:** **Gate G1b.** Plus: the first disagreement between the chart and the developer's reading of the SLS is written up as a golden case — proving the instrument works by using it once.
+
+---
+
 ## Phase 2 — Detection Doctrine
 
 > Working method for every engine sprint: (1) transcribe the SLS section into test cases *first* (the spec is the test plan); (2) build the pure domain module; (3) verify against golden datasets; (4) wire into the orchestrator; (5) extend datasets with discovered edges. AI assists at steps 1–2; the developer owns 3–5 personally — detector correctness is never delegated (Constitution §5).
@@ -170,7 +283,7 @@ flowchart TB
 - **Frontend work:** None.
 - **Database work:** `detection` schema: T10 algo_versions, T11 engine_events hypertable; state snapshot storage (Redis).
 - **APIs:** CLI: `engine run`, `engine rebuild-state`, `golden verify structure`.
-- **Testing:** Golden dataset: ≥ 60 hand-labeled structure cases across 5 symbols × 3 TFs (incl. every SLS §3 edge listed); property tests (no swing repaint under append-only streams — the no-repaint theorem as executable property); replay determinism ×3.
+- **Testing:** Golden coverage map over SLS §3 per §8.1 — every rule and named edge holds ≥ 1 hand-labelled case, CI-enforced, across 5 symbols × 3 TFs; property tests (no swing repaint under append-only streams — the no-repaint theorem as executable property); replay determinism ×3.
 - **Expected output:** Live staging structure events for the universe; a labeled BTC chart section reproduced exactly by the engine.
 - **DoD:** 100% golden pass; zero-repaint property holds over 10k-candle random streams; orchestrator recovers cleanly from kill (idempotency proven); `algo_version` stamped on every event.
 
@@ -182,7 +295,7 @@ flowchart TB
 - **Frontend work:** None.
 - **Database work:** T14 pools + T15 transitions; resting-liquidity Redis snapshot (cache registry entry).
 - **APIs:** CLI golden extensions.
-- **Testing:** Golden dataset ≥ 50 liquidity cases (sweep vs break disambiguation heavily represented — the doctrine's hardest call); strength-component attribution tests; state-resurrection prohibition tests.
+- **Testing:** Golden coverage map over SLS §4 per §8.1 (sweep vs break disambiguation carries extra cases beyond the one-per-rule floor — the doctrine's hardest call); strength-component attribution tests; state-resurrection prohibition tests.
 - **Expected output:** Live pools/sweeps on staging; sweep events feeding the (future) dashboard panel verified via CLI.
 - **DoD:** Golden 100%; every pool/sweep carries full evidence (SLS §15.2 slice); terminal states proven permanent.
 
@@ -194,7 +307,7 @@ flowchart TB
 - **Frontend work:** None.
 - **Database work:** T12 zones + T13 transitions; live-zone partial indexes; zone Redis working set.
 - **APIs:** CLI golden extensions.
-- **Testing:** Golden dataset ≥ 80 zone cases (largest dataset — every zone type × state transition × edge case incl. gap-adjacent flags); state-machine exhaustive transition tests (illegal transitions must hard-error); interaction grammar property tests.
+- **Testing:** Golden coverage map over SLS §5 per §8.1 — every zone type × state transition × named edge incl. gap-adjacent flags (still the largest map); state-machine exhaustive transition tests (illegal transitions must hard-error); interaction grammar property tests.
 - **Expected output:** Staging maintains live zone maps; a full ICT markup of a known chart section reproduced object-for-object.
 - **DoD:** Golden 100%; bounded object counts enforced (SLS §5.1 caps); contradictory-transition quarantine path tested; zone evidence chains complete.
 
@@ -206,7 +319,7 @@ flowchart TB
 - **Frontend work:** None.
 - **Database work:** RVOL baseline aggregates (continuous aggregate); engine events extended.
 - **APIs:** CLI golden extensions.
-- **Testing:** Golden ≥ 40 cases each; wash-trading fixture suite (synthetic manipulated tapes must cap scores); NEUTRAL-forcing property (no-dominance windows never emit direction).
+- **Testing:** Golden coverage maps over SLS §6 and §7 per §8.1; wash-trading fixture suite (synthetic manipulated tapes must cap scores); NEUTRAL-forcing property (no-dominance windows never emit direction).
 - **Expected output:** Live RVOL classes + momentum readings + coil flags for the universe on staging.
 - **DoD:** Golden 100%; wash caps demonstrably bound scores; baselines rebuild deterministically from history.
 
@@ -218,7 +331,7 @@ flowchart TB
 - **Frontend work:** None.
 - **Database work:** T16 setups (published + below-floor); versioned param-set records (T10 payloads).
 - **APIs:** CLI: `rank snapshot`, golden extensions.
-- **Testing:** Golden ≥ 60 confluence cases (each archetype × pass/floor-reject boundaries); SLS §8.7 exact-math test (base 82.25 → final 95); determinism: identical inputs across shuffled symbol order → identical ranking; missing-factor ⇒ gate-fail tests (absence never defaults neutral).
+- **Testing:** Golden coverage map over SLS §8 and §9 per §8.1 (each archetype × pass/floor-reject boundary is a named edge, so each holds a case); SLS §8.7 exact-math test (base 82.25 → final 95); determinism: identical inputs across shuffled symbol order → identical ranking; missing-factor ⇒ gate-fail tests (absence never defaults neutral).
 - **Expected output:** Staging produces ranked setup candidates market-wide each close; floor-rejects recorded for calibration.
 - **DoD:** Golden 100%; ranking proven order-independent; every published candidate carries the full factor evidence tree; weights/version exposed for the API.
 
@@ -424,16 +537,43 @@ flowchart TB
 
 Testing philosophy for solo+AI: AI writes test *scaffolding* freely, but every golden dataset label and every assertion about doctrine behavior is developer-verified against the SLS by hand — tests are the developer's contract with their future self.
 
+### 8.1 The golden bar is rule coverage, not case count (v2.0.0)
+
+The row above already states the real law: *"every SLS section has a curated, versioned dataset."* The per-sprint Testing fields then restate it as raw counts — ≥ 60 structure cases, ≥ 50 liquidity, ≥ 80 zone, ≥ 40 each for volume and momentum, ≥ 60 confluence. Those two are not the same requirement, and where they disagree the row above governs.
+
+**A count is a proxy that can be satisfied without satisfying the thing it proxies for.** Sixty structure cases that all exercise the same three rules leave the other rules unproven while reporting 60/60. The count is also the single largest line item left in the plan, and it is the one the developer cannot delegate (Constitution §5).
+
+So the bar becomes, for every detection sprint:
+
+> **Every rule and every named edge case in the governing SLS section has at least one golden case asserting it, and the mapping from SLS clause → dataset is machine-checked in CI. A clause with no case fails the build.**
+
+Three consequences, stated plainly:
+
+1. **This is a stronger bar, not a weaker one.** A count cannot fail for the right reason; a coverage map fails precisely when a rule is unproven. It also makes the gap *visible* — today nobody can say which of SLS §3's rules are covered by the four structure datasets, and after this anybody can.
+2. **It will probably mean fewer cases** — on a first reading of §3–§8, something near 90–120 rather than 330. That is a side effect of measuring the right thing, not the goal. If a section turns out to need 70 cases, it gets 70.
+3. **The coverage map is itself a deliverable**, and writing it is the first task of each detection sprint — because enumerating a section's rules before building is just the working method in §Phase 2 restated.
+
+### 8.2 Where golden labels get verified (v2.0.0)
+
+Constitution §5 makes detector correctness the developer's personal, non-delegable responsibility, and every dataset currently in the repository carries `labelled_by: "... pending developer verification"`. That debt cannot be discharged by an assistant asserting the labels are fine.
+
+v1 offered no instrument for discharging it either: verifying a hand-written candle series in the abstract means re-deriving the arithmetic that produced it, which is the same work twice and no more trustworthy the second time.
+
+**S13a is the instrument.** Once the doctrine is drawn on a live chart, verification becomes an act the developer can actually perform — look at marked-up BTC, judge whether the markup is right, and turn every disagreement into a golden case. This is why a charting screen sits at position 4 in §7.2 rather than in Phase 4: it is not an interface deliverable pulled forward for morale, it is **the verification tooling for Gate G2**, and G2 cannot honestly be certified without it.
+
+Standing rule, unchanged: **derive the expectation from the SLS; never paste the detector's output.** A chart makes a disagreement *visible* — it never supplies the correct answer. The SLS does that.
+
 ## 9. Validation Gates
 
 | Gate | After | Pass criteria (all mandatory, evidence recorded) |
 |---|---|---|
 | **G0** | S0 | Clean-clone bootstrap ≤ 15 min; CI red-blocks; staging pipeline works |
 | **G1** | S3 | 72 h clean ingest soak; replay determinism ×3; golden harness operational; all SLS §2 validation implemented |
-| **G2** | S9 | 100% golden pass across all engines; no-repaint properties hold; close→detection p95 ≤ 2 s full-universe; 7-day signal soak hand-audited; immutability attack-tested |
+| **G1b** ⭐ | S13a | **The doctrine is observable.** Engine runs unattended ≥ 72 h; every candle close for the seeded universe produces a detection pass with no manual invocation; the chart renders live structure/liquidity/zone objects for a symbol the developer did not pre-select; kill -9 on the engine loses no closes (resume proven, not assumed) |
+| **G2** | S9 | Golden **rule-coverage map complete and CI-enforced** per §8.1, 100% pass; **zero datasets left `pending developer verification`** (§8.2); no-repaint properties hold; close→detection p95 ≤ 2 s full-universe; 7-day signal soak hand-audited; immutability attack-tested |
 | **G3** | S12 | Contract suite green (row-for-row vs API Spec); WS resume/entitlement wire-proven; 1k-conn soak |
 | **G4** | S16 | J2 journey E2E; one-truth stats test; a11y clean; zero-layout-shift verified |
-| **G5** | S19 | J3 E2E ≤ 3 s alert p95; AI validator adversarial suite green; zero unvalidated AI text structurally possible |
+| **G5** | S18 | J3 E2E ≤ 3 s alert p95. *(v2.0.0: the AI validator criteria move with S19 past beta — they gate the AI release, not this one. No criterion is dropped; it is attached to the thing it actually guards.)* |
 | **G6** | S21–22 | Readiness report: all drills timed within targets, load with headroom, runbooks tested, 72 h production soak |
 
 Gate discipline: a failed gate consumes the next sprint's start until passed — gates gate, they don't advise (Constitution §8.6).
@@ -507,4 +647,41 @@ Versioning: platform SemVer; `algo_version` moves independently (SLS §0.4); rel
 
 This roadmap's sequencing encodes one belief: **the doctrine is the product, so the doctrine is built first, verified hardest, and never rushed by interface hunger.** Twenty-three sprints, each ending in something that runs; six gates that gate; one developer whose AI assistants multiply hands but never replace judgment. Where scheduling pressure meets a governance document, the document wins and the schedule moves — that is what the stack being *frozen* means.
 
-**— End of Development Roadmap v1.0.0 —**
+v2.0.0 does not soften that belief; it removes a way of failing it. Doctrine built first is not the same as doctrine built *blind*. A detector that has never met a real candle is not verified hardest — it is verified narrowly, against series written by the same mind that wrote the detector. The chart moves forward so that the doctrine can be argued with. **Interface hunger is not the reason it moves; verification is.**
+
+---
+
+## 17. Amendment History
+
+### v2.0.0 — 2026-08-17 — Resequenced for time-to-first-value
+
+**Trigger.** A full-codebase audit run before answering a scope question found that the detection pipeline has no unattended execution path: `runtime/engine.py` is a 21-line health-server skeleton, `DetectionOrchestrator` has no production caller, and `xadd` appears zero times in the source tree. Detection ran only under manual CLI invocation with an explicit symbol, timeframe and date window. Approximately seventeen thousand lines of doctrine existed as a library with a replay tool attached, and the v1 order added three more engines to that library before anything ran on its own.
+
+**Impact review against dependent sections.**
+
+| Section | Change | Nature |
+|---|---|---|
+| §1 | Added §1.1 revised milestones, §1.2 rationale | Additive |
+| §7 | Rewrote as §7.1 laws / §7.2 execution order / §7.3 cuts; law 3 reworded | Resequencing |
+| §8 | Added §8.1 rule-coverage bar, §8.2 verification instrument | Resolves an existing internal conflict |
+| §9 | Added G1b; G2 criteria strengthened; G5 moved S19 → S18 | Gate change |
+| Phase 1b | New section: S4b, S3b, S10a, S13a | Reopened + resequenced scope |
+| Phase 2 sprint blocks | Golden case counts restated as coverage maps | Conforms to §8 |
+
+**What was NOT changed.** No frozen document was touched. No feature definition, detector behaviour, schema, or API contract moved. Sprint IDs S0–S22 keep their numbers, because the SLS, the ADRs, and code docstrings cite them.
+
+**Rationale for each judgement call.**
+
+1. *Sprint IDs kept, order changed.* Renumbering would edit the frozen SLS for cosmetic gain. IDs are now explicitly labels; §7.2 is the order.
+2. *Case counts → rule coverage.* §8's own coverage law already said "every SLS section has a curated dataset"; the per-sprint counts restated it as a proxy that can be met without meeting it. This resolves a conflict in favour of the stronger reading. It is expected to reduce case volume substantially, but that is a consequence, not the objective — and it is recorded here so nobody later mistakes it for a quietly lowered bar.
+3. *Chart pulled to position 4.* Justified by §8.2, not by wanting something to look at: Constitution §5 makes label verification personal and non-delegable, and no instrument for performing it existed. G2 cannot be honestly certified without one.
+4. *S19 deferred, admin thinned, SSE and unused endpoints deferred.* Constitution §43.5 permits scope to shrink and forbids quality to. Each cut is listed in §7.3 with its cost. Nothing is deleted; all re-enter after R1 beta feedback.
+5. *G5 moved from S19 to S18.* Its AI-validator criteria travel with S19 rather than being dropped. A gate should guard the thing it names.
+
+**Known debt this amendment does not discharge.** The BPR parent-state no-op (SLS §5.6 as implemented); EQH/EQL clustering unwired, pinning `cluster_factor` at 0.25; SLS §4.6's `i−1`/`i+1` typo and §5.5's `FRESH`/`UNPROVEN` self-contradiction, both requiring SLS amendments; the open §3.5 question of whether a level left behind while RANGING stays breakable; and every golden dataset still carrying `pending developer verification`. Each is scheduled in §7.2 or is a governance amendment awaiting the developer.
+
+### v1.0.1 — 2026-08-17 — Consequential edit under SLS v1.0.1
+
+See the SLS's own Amendment History.
+
+**— End of Development Roadmap v2.0.0 —**
