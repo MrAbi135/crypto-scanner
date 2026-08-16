@@ -32,6 +32,26 @@ jobs:
       - name: no-float guard
         run: bash ../scripts/check-no-float.sh
 
+  # Runs the testcontainers suite against real PostgreSQL + TimescaleDB.
+  # This job is what makes the [tool.coverage.run] omit list honest: the
+  # persistence adapters excluded from the unit floor are proven here, so the
+  # exclusion moves the proof rather than deleting it. Keep this job green
+  # before adding anything to that list.
+  integration:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.12.1"
+      - run: uv python install 3.12
+      - run: uv sync --locked
+      - name: integration suite (testcontainers)
+        run: uv run pytest tests/integration -m integration --no-cov
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

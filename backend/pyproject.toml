@@ -74,6 +74,11 @@ markers = ["integration: requires real services", "property: hypothesis suites"]
 # tests/integration/ or by running the process): the asyncpg COPY repository +
 # engine factory, Alembic migration env, the four process entrypoints + the CLI
 # composition root, and the backward-compat settings shim. Rationale: ADR-002.
+#
+# ENTRY RULE: a file may only be listed here once real coverage for it exists
+# elsewhere. Omitting a file to make the number go green is forbidden — the
+# omission must move the proof, not delete it. Each entry below names the suite
+# that covers it.
 omit = [
   "*/runtime/api.py",
   "*/runtime/ingest.py",
@@ -84,6 +89,17 @@ omit = [
   "*/infrastructure/persistence/database.py",
   "*/infrastructure/persistence/alembic/*",
   "*/config/settings.py",
+  # S4/S5/S6 detection repositories. These push doctrine invariants into SQL
+  # (ON CONFLICT ... WHERE state-resurrection guards, optimistic transitions,
+  # ON CONFLICT DO NOTHING idempotency, numeric(38,18) exactness, total
+  # orderings), none of which a unit fake can assert. Covered by
+  # tests/integration/test_detection_persistence_pg.py against real
+  # TimescaleDB. Added 2026-08-16 with that suite, not before it.
+  "*/infrastructure/persistence/detection_repositories.py",
+  "*/infrastructure/persistence/ict_zone_repositories.py",
+  "*/infrastructure/persistence/ict_zone_interaction_repository.py",
+  "*/infrastructure/persistence/ict_evidence_repository.py",
+  "*/infrastructure/persistence/liquidity_detection_repositories.py",
 ]
 
 [tool.coverage.report]
