@@ -24,7 +24,12 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityTransitionRecord,
     LiquidityTransitionRepository,
 )
-from scanner.domain.common import Candle, detection_is_warm
+from scanner.domain.common import (
+    Candle,
+    detection_is_warm,
+    quantise_derived,
+    wilder_atr,
+)
 from scanner.domain.liquidity import (
     LiquidityClass,
     LiquidityPool,
@@ -46,7 +51,7 @@ from scanner.domain.structure import (
 )
 from scanner.shared import Timeframe
 
-LIQUIDITY_ALGO_VERSION = "s5-v1"
+LIQUIDITY_ALGO_VERSION = "s5-v2"
 
 _ATR_PERIOD = 14
 _EPSILON_ATR = Decimal("0.05")
@@ -391,7 +396,7 @@ class LiquidityReplayService:
                     evidence={
                         "close": str(candle.close),
                         "level": str(pool.sweep_level),
-                        "epsilon": str(epsilon),
+                        "epsilon": str(quantise_derived(epsilon)),
                     },
                 )
 
@@ -466,7 +471,7 @@ class LiquidityReplayService:
             "reference_level": str(sweep.reference_level),
             "penetration_price": str(sweep.penetration_price),
             "close_back_price": str(sweep.close_back_price),
-            "sweep_depth_atr": str(sweep.sweep_depth_atr),
+            "sweep_depth_atr": str(quantise_derived(sweep.sweep_depth_atr)),
             "confirmation_window": (sweep.confirmation_window),
             "gap_sweep": sweep.gap_sweep,
             "reclaimed": sweep.reclaimed,
@@ -632,39 +637,15 @@ def _atr_at(
     candles: Sequence[Candle],
     index: int,
 ) -> Decimal:
-    start = max(
-        0,
-        index - _ATR_PERIOD + 1,
-    )
+    """Wilder ATR (SLS §2), with the seeding window reported as zero.
 
-    true_ranges: list[Decimal] = []
+    The domain function returns None while ATR is still seeding. Every call
+    site in this module already guards with ``if atr <= 0``, so zero routes to
+    the same skip; this shim avoids threading Optional through them all.
+    §1.9's warm-up gate keeps production out of the seeding region.
+    """
 
-    for current_index in range(
-        start,
-        index + 1,
-    ):
-        candle = candles[current_index]
-
-        if current_index == 0:
-            true_range = candle.high - candle.low
-        else:
-            previous_close = candles[current_index - 1].close
-
-            true_range = max(
-                candle.high - candle.low,
-                abs(candle.high - previous_close),
-                abs(candle.low - previous_close),
-            )
-
-        true_ranges.append(true_range)
-
-    if not true_ranges:
-        return Decimal("0")
-
-    return sum(
-        true_ranges,
-        Decimal("0"),
-    ) / Decimal(len(true_ranges))
+    return wilder_atr(candles, index) or Decimal("0")
 
 
 def _build_pool_id(

@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from tests.support.builders import pad_for_warmup
 
 from scanner.application.detection.liquidity_replay import (
     LiquidityReplayService,
@@ -285,22 +286,24 @@ def make_pool() -> LiquidityPoolRecord:
 
 @pytest.mark.asyncio
 async def test_active_bsl_pool_sweep_becomes_terminal() -> None:
-    candles = [
-        make_candle(
-            0,
-            open_="98",
-            high="99",
-            low="97",
-            close="98",
-        ),
-        make_candle(
-            1,
-            open_="99",
-            high="102",
-            low="98",
-            close="99",
-        ),
-    ]
+    candles = pad_for_warmup(
+        [
+            make_candle(
+                0,
+                open_="98",
+                high="99",
+                low="97",
+                close="98",
+            ),
+            make_candle(
+                1,
+                open_="99",
+                high="102",
+                low="98",
+                close="99",
+            ),
+        ]
+    )
 
     pools = FakePools(make_pool())
     transitions = FakeTransitions()
@@ -337,22 +340,24 @@ async def test_active_bsl_pool_sweep_becomes_terminal() -> None:
 
 @pytest.mark.asyncio
 async def test_terminal_pool_cannot_transition_twice() -> None:
-    candles = [
-        make_candle(
-            0,
-            open_="98",
-            high="99",
-            low="97",
-            close="98",
-        ),
-        make_candle(
-            1,
-            open_="99",
-            high="102",
-            low="98",
-            close="99",
-        ),
-    ]
+    candles = pad_for_warmup(
+        [
+            make_candle(
+                0,
+                open_="98",
+                high="99",
+                low="97",
+                close="98",
+            ),
+            make_candle(
+                1,
+                open_="99",
+                high="102",
+                low="98",
+                close="99",
+            ),
+        ]
+    )
 
     pools = FakePools(make_pool())
 

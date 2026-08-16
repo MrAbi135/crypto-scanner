@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+from tests.support.builders import pad_for_warmup
 
 import scanner.application.detection.ict_interaction_replay as interaction_module
 from scanner.application.detection.ict_interaction_replay import (
@@ -174,35 +175,37 @@ def zone(
 
 @pytest.mark.asyncio
 async def test_uniform_interactions_are_persisted() -> None:
-    candles = [
-        make_candle(
-            symbol="TESTUSDT",
-            timeframe=Timeframe.M5,
-            index=0,
-            open_="115",
-            high="116",
-            low="114",
-            close="115",
-        ),
-        make_candle(
-            symbol="TESTUSDT",
-            timeframe=Timeframe.M5,
-            index=1,
-            open_="112",
-            high="113",
-            low="104",
-            close="111",
-        ),
-        make_candle(
-            symbol="TESTUSDT",
-            timeframe=Timeframe.M5,
-            index=2,
-            open_="105",
-            high="108",
-            low="95",
-            close="99",
-        ),
-    ]
+    candles = pad_for_warmup(
+        [
+            make_candle(
+                symbol="TESTUSDT",
+                timeframe=Timeframe.M5,
+                index=0,
+                open_="115",
+                high="116",
+                low="114",
+                close="115",
+            ),
+            make_candle(
+                symbol="TESTUSDT",
+                timeframe=Timeframe.M5,
+                index=1,
+                open_="112",
+                high="113",
+                low="104",
+                close="111",
+            ),
+            make_candle(
+                symbol="TESTUSDT",
+                timeframe=Timeframe.M5,
+                index=2,
+                open_="105",
+                high="108",
+                low="95",
+                close="99",
+            ),
+        ]
+    )
 
     interactions = FakeInteractionRepository()
 
@@ -232,26 +235,28 @@ async def test_uniform_interactions_are_persisted() -> None:
 
 @pytest.mark.asyncio
 async def test_interaction_replay_is_idempotent() -> None:
-    candles = [
-        make_candle(
-            symbol="TESTUSDT",
-            timeframe=Timeframe.M5,
-            index=0,
-            open_="115",
-            high="116",
-            low="114",
-            close="115",
-        ),
-        make_candle(
-            symbol="TESTUSDT",
-            timeframe=Timeframe.M5,
-            index=1,
-            open_="112",
-            high="113",
-            low="104",
-            close="111",
-        ),
-    ]
+    candles = pad_for_warmup(
+        [
+            make_candle(
+                symbol="TESTUSDT",
+                timeframe=Timeframe.M5,
+                index=0,
+                open_="115",
+                high="116",
+                low="114",
+                close="115",
+            ),
+            make_candle(
+                symbol="TESTUSDT",
+                timeframe=Timeframe.M5,
+                index=1,
+                open_="112",
+                high="113",
+                low="104",
+                close="111",
+            ),
+        ]
+    )
 
     interactions = FakeInteractionRepository()
 
@@ -322,6 +327,8 @@ async def test_respect_can_receive_ltf_confirmation(
         ),
     ]
 
+    parent = pad_for_warmup(parent)
+
     lower: list[Candle] = []
 
     for index in range(12):
@@ -341,6 +348,8 @@ async def test_respect_can_receive_ltf_confirmation(
                 close=str(close),
             )
         )
+
+    lower = pad_for_warmup(lower)
 
     internal_swing = SwingPoint(
         index=5,
