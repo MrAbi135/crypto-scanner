@@ -3,12 +3,13 @@
   "engine": "ict",
   "sls_sections": ["5.4", "5.5"],
   "description": "A bullish FVG is closed through rather than wicked through, so it INVERTS and spawns an IFVG — which is born UNPROVEN, not scoreable, until a retest it never gets here.",
-  "labelling_rationale": "This series is the deliberate twin of s6-fvg-bullish-wick-fill-progression: identical through candle 4, and differing only in candle 5's close. There the candle wicked to 99 through the zone floor of 100 but closed at 106 inside the zone, giving FILLED. Here it closes at 99, beyond the distal edge, and §5.4 is explicit that this is the polarity event: 'wick-through = FILLED (inefficiency rebalanced), close-through = INVERTED'. The bullish FVG over candles 0-2 is [100, 105] with CE at 102.5 and an ATR of exactly 7 from true ranges 2, 11 and 8, clearing the 1.75 registration floor. Candle 3 dips to 104, inside the band but above CE, giving TOUCHED; candle 4 wicks to 101 below CE, giving CE_FILLED; candle 5 closes at 99, giving INVERTED. §5.5 then requires that on the FVG to INVERTED transition an IFVG registers with the same band and flipped polarity, so a BEARISH zone over the same [100, 105] appears at index 5, parented to the FVG. Its initial state is the doctrinally important part: §5.5 says an IFVG 'becomes scoreable only after its first successful retest' and is UNPROVEN until then, requiring both a close on the far side of the band and a rejection wick of at least 0.3 x ATR into it. Nothing follows candle 5, so no retest occurs and the IFVG stays UNPROVEN — recorded but not scoreable. UNPROVEN is not terminal, so it counts as the one live zone, while the INVERTED parent does not. Historical note: until SLS v1.0.1 the §5.5 Detection Logic sentence said to register the IFVG in state FRESH, contradicting the very next sentence in the same paragraph saying it is UNPROVEN until retested. This dataset surfaced that contradiction; the amendment settled it on UNPROVEN and named the UNPROVEN to FRESH retest transition explicitly. The reading used here is unchanged.",
+  "labelling_rationale": "This series is the deliberate twin of s6-fvg-bullish-wick-fill-progression: identical through candle 4, and differing only in candle 5's close. There the candle wicked to 99 through the zone floor of 100 but closed at 106 inside the zone, giving FILLED. Here it closes at 99, beyond the distal edge, and §5.4 is explicit that this is the polarity event: 'wick-through = FILLED (inefficiency rebalanced), close-through = INVERTED'. The bullish FVG over candles 0-2 is [100, 105] with CE at 102.5 and an ATR of exactly 7 from true ranges 2, 11 and 8, clearing the 1.75 registration floor. Candle 3 dips to 104, inside the band but above CE, giving TOUCHED; candle 4 wicks to 101 below CE, giving CE_FILLED; candle 5 closes at 99, giving INVERTED. §5.5 then requires that on the FVG to INVERTED transition an IFVG registers with the same band and flipped polarity, so a BEARISH zone over the same [100, 105] appears at index 5, parented to the FVG. Its initial state is the doctrinally important part: §5.5 says an IFVG 'becomes scoreable only after its first successful retest' and is UNPROVEN until then, requiring both a close on the far side of the band and a rejection wick of at least 0.3 x ATR into it. Nothing follows candle 5, so no retest occurs and the IFVG stays UNPROVEN — recorded but not scoreable. UNPROVEN is not terminal, so it counts as the one live zone, while the INVERTED parent does not. Historical note: until SLS v1.0.1 the §5.5 Detection Logic sentence said to register the IFVG in state FRESH, contradicting the very next sentence in the same paragraph saying it is UNPROVEN until retested. This dataset surfaced that contradiction; the amendment settled it on UNPROVEN and named the UNPROVEN to FRESH retest transition explicitly. The reading used here is unchanged. Candle numbers above are scenario-relative; the 294 declared filler candles (SLS §1.9 warm-up) shift them by 294 in the expected output. The filler's high matches the scenario's first candle so the seam cannot form a swing high, and its low sits below so it cannot form a swing low; neither a bullish nor a bearish three-candle gap spans the seam, so declared history registers no zone of its own.",
   "labelled_by": "Claude Opus 5 (spec-derived; pending developer verification per Constitution §5)",
   "labelled_at": "2026-08-16",
   "algo_version": "s6-v1",
   "symbol": "GOLDENIFVG",
   "timeframe": "H1",
+  "filler": { "count": 294, "open": "100", "high": "100", "low": "93", "close": "100" },
   "candles": [
     { "open_time": "2026-01-05T00:00:00+00:00", "open": "99", "high": "100", "low": "98", "close": "99" },
     { "open_time": "2026-01-05T01:00:00+00:00", "open": "99", "high": "110", "low": "99", "close": "109" },
@@ -19,7 +20,7 @@
   ],
   "expected": {
     "report": {
-      "candles": 6,
+      "candles": 300,
       "displacements": 0,
       "fvgs_detected": 1,
       "ifvgs_created": 1,
@@ -28,58 +29,58 @@
     },
     "zones": [
       {
-        "zone": "zone:FVG:BULLISH:2",
+        "zone": "zone:FVG:BULLISH:296",
         "zone_type": "FVG",
         "polarity": "BULLISH",
         "state": "INVERTED",
         "grade": "FVG",
         "band_low": "100",
         "band_high": "105",
-        "created_index": 2,
+        "created_index": 296,
         "created_at": "2026-01-05T03:00:00+00:00",
         "gap_adjacent": false,
         "parent_zone": null
       },
       {
-        "zone": "zone:IFVG:BEARISH:5",
+        "zone": "zone:IFVG:BEARISH:299",
         "zone_type": "IFVG",
         "polarity": "BEARISH",
         "state": "UNPROVEN",
         "grade": "IFVG",
         "band_low": "100",
         "band_high": "105",
-        "created_index": 5,
+        "created_index": 299,
         "created_at": "2026-01-05T06:00:00+00:00",
         "gap_adjacent": false,
-        "parent_zone": "zone:FVG:BULLISH:2"
+        "parent_zone": "zone:FVG:BULLISH:296"
       }
     ],
     "transitions": [
       {
-        "zone": "zone:FVG:BULLISH:2",
+        "zone": "zone:FVG:BULLISH:296",
         "zone_type": "FVG",
         "from_state": "OPEN",
         "to_state": "TOUCHED",
         "reason": "zone_touch",
-        "candle_index": 3,
+        "candle_index": 297,
         "transitioned_at": "2026-01-05T04:00:00+00:00"
       },
       {
-        "zone": "zone:FVG:BULLISH:2",
+        "zone": "zone:FVG:BULLISH:296",
         "zone_type": "FVG",
         "from_state": "TOUCHED",
         "to_state": "CE_FILLED",
         "reason": "ce_fill",
-        "candle_index": 4,
+        "candle_index": 298,
         "transitioned_at": "2026-01-05T05:00:00+00:00"
       },
       {
-        "zone": "zone:FVG:BULLISH:2",
+        "zone": "zone:FVG:BULLISH:296",
         "zone_type": "FVG",
         "from_state": "CE_FILLED",
         "to_state": "INVERTED",
         "reason": "close_through",
-        "candle_index": 5,
+        "candle_index": 299,
         "transitioned_at": "2026-01-05T06:00:00+00:00"
       }
     ]

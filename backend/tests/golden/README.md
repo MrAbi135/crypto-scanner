@@ -164,7 +164,7 @@ all. Current gaps, and what each needs:
 | BPR §5.6 parent-liveness | The rule itself is **not enforced** — see `tests/unit/application/detection/test_bpr_parent_state_defect.py`, an `xfail(strict=True)` repro. A golden case cannot encode it until the ordering is fixed. |
 | Order blocks (§5.1), Breaker (§5.2), Mitigation (§5.3), OTE (§5.7), PD arrays | Their services (`ict_ob_replay`, `ict_ote_replay`, `ict_interaction_replay`) are not wired into the harness yet |
 
-This is the beginning of that debt being paid, not the end of it.
+**All 12 datasets now declare 300 candles**, so every case satisfies the §1.9 warm-up count rather than running in a regime doctrine excludes. This is the beginning of that debt being paid, not the end of it.
 `run_dataset` raises on an unsupported `engine` value rather than skipping, so
 a dataset for an unwired engine fails loudly instead of passing vacuously.
 
