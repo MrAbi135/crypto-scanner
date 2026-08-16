@@ -99,7 +99,7 @@ draft a dataset; the developer owns the label.
 |---|---|---|---|
 | structure (S4) | 3 | ≥ 60 | clean swing, equal-extreme tie, flat-window absence |
 | liquidity (S5) | 3 | ≥ 50 | single-candle sweep, close-through break, two-candle sweep |
-| ict zones (S6) | 1 | ≥ 80 | FVG wick-fill progression. **Only the FVG/IFVG/BPR pass is wired** — the order-block, OTE and interaction services have their own ports and land later, so a dataset expecting their output would silently see nothing. |
+| ict zones (S6) | 3 | ≥ 80 | FVG wick-fill progression, sub-filter rejection, bearish mirror. **Only the FVG/IFVG/BPR pass is wired** — the order-block, OTE and interaction services have their own ports and land later, so a dataset expecting their output would silently see nothing. |
 
 This is the beginning of that debt being paid, not the end of it.
 `run_dataset` raises on an unsupported `engine` value rather than skipping, so
