@@ -1,0 +1,71 @@
+{
+  "dataset_id": "s4-classification-hh-hl-uptrend",
+  "engine": "structure",
+  "sls_sections": ["3.1", "3.3", "3.4"],
+  "description": "A rising zigzag producing two swing lows and two swing highs, so each kind gets a predecessor and the HH / HL labels are actually assigned.",
+  "labelling_rationale": "The three existing structure datasets all confirm at most one swing, so §3.3 has never been exercised: a first swing has no same-kind predecessor and is SEED, which this engine represents by emitting no classification event. This series confirms four internal swings under the §3.1 k_int = 2 rule. Lows are [103,101,99,101,103,108,106,104,106,108,110,113,111,109,107]: index 2 at 99 has nothing lower in its window and two strictly higher lows to its right, and index 7 at 104 likewise sits below 108 and 106 on its left with 106 and 108 to its right. Highs are [105,103,101,103,105,110,108,106,108,110,112,115,113,111,109]: index 5 at 110 is unexceeded in its window with 108 and 106 strictly lower to its right, and index 11 at 115 has 113 and 111 strictly lower to its right. Every other evaluable index is dominated by one of these four. §3.3 then labels each swing against its immediate same-kind predecessor: the low at index 7 is 104 against the earlier 99, and 104 > 99 gives HL; the high at index 11 is 115 against the earlier 110, and 115 > 110 gives HH. The first low and the first high have no predecessor and so carry no label, leaving exactly two classification events. External strength is a separate matter: k_ext = 5 needs an eleven-candle window and every candidate here is dominated inside it — index 5's high of 110 is beaten by the 112 at index 10, and index 9's by the 115 at index 11 — so no external swing confirms. §3.4 derives trend from external structure only, and with none confirmed the state stays RANGING; for the same reason the BOS replay, which consumes external swings, emits nothing. That separation is the point of the case: internal structure can be unambiguously bullish while the external trend is honestly still unknown, and §3.2's rule of authority forbids the former from overriding the latter.",
+  "labelled_by": "Claude Opus 5 (spec-derived; pending developer verification per Constitution §5)",
+  "labelled_at": "2026-08-16",
+  "algo_version": "s4-v1",
+  "symbol": "GOLDENZIGZAG",
+  "timeframe": "H1",
+  "candles": [
+    { "open_time": "2026-01-05T00:00:00+00:00", "open": "104", "high": "105", "low": "103", "close": "104" },
+    { "open_time": "2026-01-05T01:00:00+00:00", "open": "102", "high": "103", "low": "101", "close": "102" },
+    { "open_time": "2026-01-05T02:00:00+00:00", "open": "100", "high": "101", "low": "99", "close": "100" },
+    { "open_time": "2026-01-05T03:00:00+00:00", "open": "102", "high": "103", "low": "101", "close": "102" },
+    { "open_time": "2026-01-05T04:00:00+00:00", "open": "104", "high": "105", "low": "103", "close": "104" },
+    { "open_time": "2026-01-05T05:00:00+00:00", "open": "109", "high": "110", "low": "108", "close": "109" },
+    { "open_time": "2026-01-05T06:00:00+00:00", "open": "107", "high": "108", "low": "106", "close": "107" },
+    { "open_time": "2026-01-05T07:00:00+00:00", "open": "105", "high": "106", "low": "104", "close": "105" },
+    { "open_time": "2026-01-05T08:00:00+00:00", "open": "107", "high": "108", "low": "106", "close": "107" },
+    { "open_time": "2026-01-05T09:00:00+00:00", "open": "109", "high": "110", "low": "108", "close": "109" },
+    { "open_time": "2026-01-05T10:00:00+00:00", "open": "111", "high": "112", "low": "110", "close": "111" },
+    { "open_time": "2026-01-05T11:00:00+00:00", "open": "114", "high": "115", "low": "113", "close": "114" },
+    { "open_time": "2026-01-05T12:00:00+00:00", "open": "112", "high": "113", "low": "111", "close": "112" },
+    { "open_time": "2026-01-05T13:00:00+00:00", "open": "110", "high": "111", "low": "109", "close": "110" },
+    { "open_time": "2026-01-05T14:00:00+00:00", "open": "108", "high": "109", "low": "107", "close": "108" }
+  ],
+  "expected": {
+    "report": {
+      "candles": 15,
+      "internal_swings": 4,
+      "external_swings": 0,
+      "classified_events": 2,
+      "events_inserted": 6,
+      "trend_state": "RANGING"
+    },
+    "events": [
+      {
+        "event_type": "SWING_INTERNAL_LOW",
+        "event_at": "2026-01-05T02:00:00+00:00",
+        "payload": { "index": 2, "kind": "LOW", "price": "99", "strength": "INTERNAL" }
+      },
+      {
+        "event_type": "SWING_INTERNAL_HIGH",
+        "event_at": "2026-01-05T05:00:00+00:00",
+        "payload": { "index": 5, "kind": "HIGH", "price": "110", "strength": "INTERNAL" }
+      },
+      {
+        "event_type": "STRUCTURE_INTERNAL_HL",
+        "event_at": "2026-01-05T07:00:00+00:00",
+        "payload": { "index": 7, "kind": "LOW", "label": "HL", "price": "104", "strength": "INTERNAL" }
+      },
+      {
+        "event_type": "SWING_INTERNAL_LOW",
+        "event_at": "2026-01-05T07:00:00+00:00",
+        "payload": { "index": 7, "kind": "LOW", "price": "104", "strength": "INTERNAL" }
+      },
+      {
+        "event_type": "STRUCTURE_INTERNAL_HH",
+        "event_at": "2026-01-05T11:00:00+00:00",
+        "payload": { "index": 11, "kind": "HIGH", "label": "HH", "price": "115", "strength": "INTERNAL" }
+      },
+      {
+        "event_type": "SWING_INTERNAL_HIGH",
+        "event_at": "2026-01-05T11:00:00+00:00",
+        "payload": { "index": 11, "kind": "HIGH", "price": "115", "strength": "INTERNAL" }
+      }
+    ]
+  }
+}
