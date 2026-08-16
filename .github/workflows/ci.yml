@@ -7,7 +7,12 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseding a pull request run costs nothing: the newer push is the only
+  # revision anyone will merge. Superseding a main run can abort the docker job
+  # mid-push, leaving a half-written image in GHCR for a commit that is already
+  # part of history. Two merges landed 32s apart on 2026-08-16 and did exactly
+  # that. On main, queue behind the running job instead of killing it.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   backend:
