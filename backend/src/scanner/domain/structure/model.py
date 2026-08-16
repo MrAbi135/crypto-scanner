@@ -25,6 +25,11 @@ class StructureLabel(str, Enum):
     HL = "HL"
     LL = "LL"
     EQL = "EQL"
+    # The first swing of its kind in a series has no same-kind predecessor to
+    # compare against, so it carries SEED rather than a directional label
+    # (SLS §3.3). SEED is deliberately excluded from every directional set —
+    # it establishes a reference point, it does not assert a direction.
+    SEED = "SEED"
 
 
 @dataclass(frozen=True, slots=True)

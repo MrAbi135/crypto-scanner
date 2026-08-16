@@ -32,7 +32,10 @@ from scanner.domain.structure import (
 )
 from scanner.shared import Timeframe
 
-STRUCTURE_ALGO_VERSION = "s4-v1"
+# s4-v2 (2026-08-17): first swing of each kind now emits an explicit SEED
+# classification event. Output-changing, hence the increment — Constitution
+# §44.5. Ratified as SLS v1.0.2 §3.3.
+STRUCTURE_ALGO_VERSION = "s4-v2"
 
 
 @dataclass(frozen=True, slots=True)

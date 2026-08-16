@@ -6,7 +6,7 @@
   "labelling_rationale": "SLS §3.1 Edge Case 3 requires honest absence in a flat market — no forced swings. Every candle here has the identical high of 10 and low of 9. For a swing high at any evaluable index, §3.1 requires k strictly lower highs on the right; every right-hand high is equal, not lower, so no index confirms. The mirror argument rejects every swing low. The rule that at least one left-hand candle must be materially lower independently rejects a fully flat window, which is the guard against treating a dead tape as a pivot. With no swings there is nothing to classify (§3.3) and nothing to break (§3.5), so no events are emitted at all, and §3.4 leaves the trend RANGING. This dataset is the regression armour for the 'detector invents structure from noise' failure, which is the most damaging class of false positive the product can ship.",
   "labelled_by": "Claude Opus 5 (spec-derived; pending developer verification per Constitution §5)",
   "labelled_at": "2026-08-16",
-  "algo_version": "s4-v1",
+  "algo_version": "s4-v2",
   "symbol": "GOLDENFLAT",
   "timeframe": "M5",
   "candles": [

@@ -3,10 +3,10 @@
   "engine": "structure",
   "sls_sections": ["3.1", "3.3"],
   "description": "A single unambiguous internal swing high, with no tie, no swing low, and too short a series for any external swing.",
-  "labelling_rationale": "SLS §3.1 defines an internal swing high at candle s as one where H[s] is not exceeded within the k_int = 2 window on either side, and is followed by k strictly lower highs. Highs are [10, 11, 15, 11, 10, 9, 8]. Only indices 2..4 have a full two-candle window on both sides. Index 2 (H=15) has 10 and 11 to its left and 11 and 10 to its right: nothing in the window is higher, both right-hand highs are strictly lower, and at least one left-hand high is strictly lower, so it confirms. Index 3 (H=11) and index 4 (H=10) are both dominated by the 15 at index 2 and cannot confirm. Lows are [9, 10, 14, 10, 9, 8, 7], which descend monotonically after index 2, so no index in 2..4 has k strictly higher lows to its right and no swing low confirms. The series is 7 candles, below the 2*k_ext+1 = 11 required by §3.1 for external strength, so external swings are empty. With one swing high and no predecessor of the same kind, §3.3 assigns no label (the first swing of a series is SEED and the engine emits no classification event for it), leaving classified_events at 0. §3.4 requires two consecutive HH/HL pairs for a trend, so the state stays RANGING.",
+  "labelling_rationale": "SLS §3.1 defines an internal swing high at candle s as one where H[s] is not exceeded within the k_int = 2 window on either side, and is followed by k strictly lower highs. Highs are [10, 11, 15, 11, 10, 9, 8]. Only indices 2..4 have a full two-candle window on both sides. Index 2 (H=15) has 10 and 11 to its left and 11 and 10 to its right: nothing in the window is higher, both right-hand highs are strictly lower, and at least one left-hand high is strictly lower, so it confirms. Index 3 (H=11) and index 4 (H=10) are both dominated by the 15 at index 2 and cannot confirm. Lows are [9, 10, 14, 10, 9, 8, 7], which descend monotonically after index 2, so no index in 2..4 has k strictly higher lows to its right and no swing low confirms. The series is 7 candles, below the 2*k_ext+1 = 11 required by §3.1 for external strength, so external swings are empty. With one swing high and no predecessor of the same kind, §3.3 assigns the label SEED, which as of SLS v1.0.2 is emitted as a classification event like any other — a recorded fact that a reference point was established rather than a silent omission. That gives one classification event and two events in total. SEED asserts no direction and is excluded from every directional set, so it cannot influence trend; §3.4 requires two consecutive HH/HL pairs on external structure, and with no external swing confirmed the state stays RANGING.",
   "labelled_by": "Claude Opus 5 (spec-derived; pending developer verification per Constitution §5)",
   "labelled_at": "2026-08-16",
-  "algo_version": "s4-v1",
+  "algo_version": "s4-v2",
   "symbol": "GOLDENSTRUCT",
   "timeframe": "M5",
   "candles": [
@@ -23,11 +23,22 @@
       "candles": 7,
       "internal_swings": 1,
       "external_swings": 0,
-      "classified_events": 0,
-      "events_inserted": 1,
+      "classified_events": 1,
+      "events_inserted": 2,
       "trend_state": "RANGING"
     },
     "events": [
+      {
+        "event_type": "STRUCTURE_INTERNAL_SEED",
+        "event_at": "2026-01-05T00:10:00+00:00",
+        "payload": {
+          "index": 2,
+          "kind": "HIGH",
+          "label": "SEED",
+          "price": "15",
+          "strength": "INTERNAL"
+        }
+      },
       {
         "event_type": "SWING_INTERNAL_HIGH",
         "event_at": "2026-01-05T00:10:00+00:00",
