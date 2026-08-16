@@ -30,6 +30,7 @@ from scanner.domain.common import (
     quantise_derived,
     wilder_atr,
 )
+from scanner.domain.ict import DisplacementDirection, detect_displacement
 from scanner.domain.liquidity import (
     LiquidityClass,
     LiquidityPool,
@@ -39,6 +40,7 @@ from scanner.domain.liquidity import (
     PoolStrength,
     SweepEvent,
     detect_single_candle_sweep,
+    detect_stop_hunt,
     detect_two_candle_sweep,
     pool_from_swing,
     should_expire_pool,
@@ -51,11 +53,12 @@ from scanner.domain.structure import (
 )
 from scanner.shared import Timeframe
 
-LIQUIDITY_ALGO_VERSION = "s5-v2"
+LIQUIDITY_ALGO_VERSION = "s5-v3"
 
 _ATR_PERIOD = 14
 _EPSILON_ATR = Decimal("0.05")
 _SWEEP_SCAN_ATR = Decimal("3")
+_STOPHUNT_WINDOW = 3  # SLS §4.7 P.liquidity.stophunt_window
 
 
 @dataclass(frozen=True, slots=True)
@@ -375,6 +378,7 @@ class LiquidityReplayService:
                 transitioned = await self._record_sweep(
                     record,
                     sweep,
+                    candles,
                 )
 
                 if transitioned:
@@ -430,6 +434,7 @@ class LiquidityReplayService:
                     transitioned = await self._record_sweep(
                         record,
                         two_candle_sweep,
+                        candles,
                     )
 
                     if transitioned:
@@ -463,6 +468,7 @@ class LiquidityReplayService:
         self,
         record: LiquidityPoolRecord,
         sweep: SweepEvent,
+        candles: Sequence[Candle],
     ) -> bool:
         evidence = {
             "pool_id": sweep.pool_id,
@@ -517,7 +523,123 @@ class LiquidityReplayService:
             )
         )
 
+        await self._record_stop_hunt(record, sweep, candles)
+
         return True
+
+    async def _record_stop_hunt(
+        self,
+        record: LiquidityPoolRecord,
+        sweep: SweepEvent,
+        candles: Sequence[Candle],
+    ) -> bool:
+        """Detect the §4.7 stop-hunt composite on a just-confirmed sweep.
+
+        Displacement lives in §5.10, which is the ICT engine. `domain.liquidity`
+        may not import `domain.ict` — the Engine-acyclicity contract puts them
+        on one layer — so the composition happens here, in the application
+        layer, which is above both. `detect_stop_hunt` was written to take
+        displacement as primitives rather than as a `Displacement`, precisely so
+        the domain never needs that import.
+
+        The measured range is the **penetration** candle's, not the
+        confirmation candle's (SLS v1.0.4 §4.7). For a single-candle sweep they
+        are the same candle, so one rule covers both windows.
+        """
+
+        penetration_index = sweep.confirmed_index - (sweep.confirmation_window - 1)
+
+        if penetration_index < 0 or sweep.confirmed_index >= len(candles):
+            return False
+
+        penetration = candles[penetration_index]
+
+        reversal = (
+            DisplacementDirection.BEARISH
+            if sweep.side is LiquiditySide.BSL
+            else DisplacementDirection.BULLISH
+        )
+
+        # §4.7: the displacement must close within stophunt_window candles of
+        # sweep confirmation. Scan forward, stop at the first qualifying leg.
+        for offset in range(1, _STOPHUNT_WINDOW + 1):
+            index = sweep.confirmed_index + offset
+
+            if index >= len(candles):
+                return False
+
+            atr = _atr_at(candles, index)
+
+            if atr <= 0:
+                continue
+
+            displacement = detect_displacement(candles, index, atr=atr)
+
+            if displacement is None or displacement.direction is not reversal:
+                continue
+
+            hunt = detect_stop_hunt(
+                sweep,
+                displacement_id=_build_displacement_id(
+                    symbol=record.symbol,
+                    timeframe=record.timeframe,
+                    index=index,
+                ),
+                displacement_at=candles[index].close_time,
+                displacement_index=index,
+                # §4.7 speaks in UP/DOWN while §5.10's enum is BULLISH/BEARISH.
+                # The two vocabularies are not interchangeable and nothing
+                # enforces the mapping, so it is made explicit here.
+                displacement_direction=(
+                    "DOWN" if displacement.direction is DisplacementDirection.BEARISH else "UP"
+                ),
+                displacement_close=candles[index].close,
+                sweep_candle_high=penetration.high,
+                sweep_candle_low=penetration.low,
+            )
+
+            if hunt is None:
+                continue
+
+            payload = json.dumps(
+                {
+                    "algo_version": self._algo_version,
+                    "sweep_pool_id": hunt.sweep_pool_id,
+                    "displacement_id": hunt.displacement_id,
+                    "elapsed_candles": hunt.elapsed_candles,
+                    "failed": hunt.failed,
+                    "penetration_index": penetration_index,
+                    "penetration_high": str(penetration.high),
+                    "penetration_low": str(penetration.low),
+                    "displacement_close": str(candles[index].close),
+                    "liquidity_class": sweep.liquidity_class.value,
+                    "side": sweep.side.value,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+
+            return await self._events.append(
+                EngineEventRecord(
+                    event_key=_build_liquidity_event_key(
+                        symbol=record.symbol,
+                        timeframe=record.timeframe,
+                        event_type="LIQUIDITY_STOP_HUNT",
+                        event_at=hunt.confirmed_at,
+                        algo_version=self._algo_version,
+                        object_id=record.pool_id,
+                    ),
+                    symbol=record.symbol,
+                    timeframe=record.timeframe,
+                    event_type="LIQUIDITY_STOP_HUNT",
+                    event_at=hunt.confirmed_at,
+                    algo_version=self._algo_version,
+                    payload=payload,
+                    created_at=self._clock.now(),
+                )
+            )
+
+        return False
 
     async def _transition_pool(
         self,
@@ -666,6 +788,26 @@ def _build_pool_id(
             str(swing.price),
         )
     )
+
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _build_displacement_id(
+    *,
+    symbol: str,
+    timeframe: Timeframe,
+    index: int,
+) -> str:
+    """Stable id for a displacement the liquidity engine observed.
+
+    Displacements are not persisted anywhere (no DISPLACEMENT event type), so
+    a stop hunt cannot reference a stored row. This derives a deterministic id
+    from the coordinates that identify the candle, which is enough for the
+    evidence chain to be followed back by hand until §5.10 gains a record of
+    its own.
+    """
+
+    raw = "|".join(("displacement", symbol, timeframe.value, str(index)))
 
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
