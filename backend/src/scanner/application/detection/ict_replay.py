@@ -20,7 +20,7 @@ from scanner.application.ports.ict_zones import (
     IctZoneTransitionRecord,
     IctZoneTransitionRepository,
 )
-from scanner.domain.common import Candle
+from scanner.domain.common import Candle, detection_is_warm
 from scanner.domain.ict import (
     BalancedPriceRange,
     FairValueGap,
@@ -58,6 +58,8 @@ class IctReplayReport:
     transitions: int
     live_zones: int
     last_processed_open_time: datetime | None
+    warmup_satisfied: bool = True
+    """False when SLS §1.9's closed-candle floor was not met."""
 
 
 class IctReplayService:
@@ -99,7 +101,7 @@ class IctReplayService:
             )
         )
 
-        if not candles:
+        if not detection_is_warm(len(candles)):
             await self._snapshots.save(
                 symbol,
                 timeframe,
@@ -109,7 +111,8 @@ class IctReplayService:
             return IctReplayReport(
                 symbol=symbol,
                 timeframe=timeframe,
-                candles=0,
+                warmup_satisfied=False,
+                candles=len(candles),
                 displacements=0,
                 fvgs_detected=0,
                 ifvgs_created=0,
@@ -117,7 +120,7 @@ class IctReplayService:
                 zones_upserted=0,
                 transitions=0,
                 live_zones=0,
-                last_processed_open_time=None,
+                last_processed_open_time=(candles[-1].open_time if candles else None),
             )
 
         displacement_indices = self._detect_displacements(candles)

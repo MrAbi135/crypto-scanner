@@ -24,7 +24,7 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityTransitionRecord,
     LiquidityTransitionRepository,
 )
-from scanner.domain.common import Candle
+from scanner.domain.common import Candle, detection_is_warm
 from scanner.domain.liquidity import (
     LiquidityClass,
     LiquidityPool,
@@ -66,6 +66,8 @@ class LiquidityReplayReport:
     broken_pools: int
     expired_pools: int
     last_processed_open_time: datetime | None
+    warmup_satisfied: bool = True
+    """False when SLS §1.9's closed-candle floor was not met."""
 
 
 class LiquidityReplayService:
@@ -109,7 +111,7 @@ class LiquidityReplayService:
             )
         )
 
-        if not candles:
+        if not detection_is_warm(len(candles)):
             await self._snapshots.save(
                 symbol,
                 timeframe,
@@ -119,7 +121,8 @@ class LiquidityReplayService:
             return LiquidityReplayReport(
                 symbol=symbol,
                 timeframe=timeframe,
-                candles=0,
+                warmup_satisfied=False,
+                candles=len(candles),
                 internal_pools=0,
                 external_pools=0,
                 pools_upserted=0,
@@ -127,7 +130,7 @@ class LiquidityReplayService:
                 sweeps=0,
                 broken_pools=0,
                 expired_pools=0,
-                last_processed_open_time=None,
+                last_processed_open_time=(candles[-1].open_time if candles else None),
             )
 
         internal_swings = detect_internal_swings(candles)

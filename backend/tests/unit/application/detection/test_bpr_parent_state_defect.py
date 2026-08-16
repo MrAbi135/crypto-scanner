@@ -36,6 +36,7 @@ from tests.golden.harness.memory import (
     InMemoryIctZoneStateStore,
     InMemoryIctZoneTransitionRepository,
 )
+from tests.support.builders import pad_for_warmup
 
 from scanner.application.detection.ict_replay import IctReplayService
 from scanner.domain.common import Candle, CandleSource
@@ -81,7 +82,7 @@ def build_candles() -> list[Candle]:
 
 
 async def run_engine() -> tuple[object, InMemoryIctZoneRepository]:
-    candles = build_candles()
+    candles = pad_for_warmup(build_candles())
     zones = InMemoryIctZoneRepository()
 
     service = IctReplayService(
@@ -121,7 +122,7 @@ async def test_premise_the_bullish_parent_is_consumed_before_the_pair_forms() ->
     ]
 
     assert len(bullish) == 1
-    assert bullish[0].created_index == 2
+    assert bullish[0].created_index == 295
     assert bullish[0].state == "FILLED", (
         "the bullish parent must be consumed at candle 3 for this repro to mean anything"
     )
