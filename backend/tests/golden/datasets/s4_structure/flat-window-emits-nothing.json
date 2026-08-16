@@ -1,0 +1,32 @@
+{
+  "dataset_id": "s4-flat-window-emits-nothing",
+  "engine": "structure",
+  "sls_sections": ["3.1", "3.4"],
+  "description": "A perfectly flat series. Honest absence: the engine must emit no swings rather than manufacture one.",
+  "labelling_rationale": "SLS §3.1 Edge Case 3 requires honest absence in a flat market — no forced swings. Every candle here has the identical high of 10 and low of 9. For a swing high at any evaluable index, §3.1 requires k strictly lower highs on the right; every right-hand high is equal, not lower, so no index confirms. The mirror argument rejects every swing low. The rule that at least one left-hand candle must be materially lower independently rejects a fully flat window, which is the guard against treating a dead tape as a pivot. With no swings there is nothing to classify (§3.3) and nothing to break (§3.5), so no events are emitted at all, and §3.4 leaves the trend RANGING. This dataset is the regression armour for the 'detector invents structure from noise' failure, which is the most damaging class of false positive the product can ship.",
+  "labelled_by": "Claude Opus 5 (spec-derived; pending developer verification per Constitution §5)",
+  "labelled_at": "2026-08-16",
+  "algo_version": "s4-v1",
+  "symbol": "GOLDENFLAT",
+  "timeframe": "M5",
+  "candles": [
+    { "open_time": "2026-01-05T00:00:00+00:00", "open": "9.5", "high": "10", "low": "9", "close": "9.5" },
+    { "open_time": "2026-01-05T00:05:00+00:00", "open": "9.5", "high": "10", "low": "9", "close": "9.5" },
+    { "open_time": "2026-01-05T00:10:00+00:00", "open": "9.5", "high": "10", "low": "9", "close": "9.5" },
+    { "open_time": "2026-01-05T00:15:00+00:00", "open": "9.5", "high": "10", "low": "9", "close": "9.5" },
+    { "open_time": "2026-01-05T00:20:00+00:00", "open": "9.5", "high": "10", "low": "9", "close": "9.5" },
+    { "open_time": "2026-01-05T00:25:00+00:00", "open": "9.5", "high": "10", "low": "9", "close": "9.5" },
+    { "open_time": "2026-01-05T00:30:00+00:00", "open": "9.5", "high": "10", "low": "9", "close": "9.5" }
+  ],
+  "expected": {
+    "report": {
+      "candles": 7,
+      "internal_swings": 0,
+      "external_swings": 0,
+      "classified_events": 0,
+      "events_inserted": 0,
+      "trend_state": "RANGING"
+    },
+    "events": []
+  }
+}
