@@ -3,12 +3,13 @@
   "engine": "liquidity",
   "sls_sections": ["4.2", "4.6"],
   "description": "Price wicks through a BSL pool and closes back below it. Penetration plus rejection close is a sweep, confirmed on that same close.",
-  "labelling_rationale": "SLS §4.6 step 1 requires penetration H[i] > Pl + e, and step 2 requires a rejection close Cl[i] < Pl; step 3 says the sweep then confirms immediately at that close as a single-candle sweep. The series carries a confirmed internal swing high of 106 at index 2 (k_int = 2 per §3.1), which §4.2 turns into a BSL pool once the swing confirms at index 4. Candle 6 has high 109 and closes at 104. Per §0.4 the tolerance is e = 0.05 x ATR(14); the true ranges of candles 0..6 are 2, 2, 4, 3, 2, 2, 6, summing to 21 over 7 candles, so ATR = 3 exactly and e = 0.15. Penetration holds because 109 > 106.15, and the rejection close holds because 104 < 106, so the pool transitions ACTIVE -> SWEPT with sweep_depth = (109 - 106) / 3 = 1 ATR. The candle opened at 104, below the level, so gap_sweep is false (§4.6 Edge Case 4). A second pool exists: the confirmed internal swing low of 101 at index 4 becomes an SSL pool at index 6, but its lifecycle scan would start at index 7 which is past the end of the series, so it stays ACTIVE and untouched. Pool strength follows §4.2's four-component formula: touches 0 gives 0, H1 is rank 3 of 6 giving 12.5, age 2 candles gives 25 x 2 / 200 = 0.25, and a single-swing pool gives cluster 6.25 — total 19.00 for the BSL pool and 18.75 for the newer SSL pool whose age component is 0.",
+  "labelling_rationale": "SLS §4.6 step 1 requires penetration H[i] > Pl + e, and step 2 requires a rejection close Cl[i] < Pl; step 3 says the sweep then confirms immediately at that close as a single-candle sweep. The series carries a confirmed internal swing high of 106 at index 2 (k_int = 2 per §3.1), which §4.2 turns into a BSL pool once the swing confirms at index 4. Candle 6 has high 109 and closes at 104. Per §0.4 the tolerance is e = 0.05 x ATR(14); the true ranges of candles 0..6 are 2, 2, 4, 3, 2, 2, 6, summing to 21 over 7 candles, so ATR = 3 exactly and e = 0.15. Penetration holds because 109 > 106.15, and the rejection close holds because 104 < 106, so the pool transitions ACTIVE -> SWEPT with sweep_depth = (109 - 106) / 3 = 1 ATR. The candle opened at 104, below the level, so gap_sweep is false (§4.6 Edge Case 4). A second pool exists: the confirmed internal swing low of 101 at index 4 becomes an SSL pool at index 6, but its lifecycle scan would start at index 7 which is past the end of the series, so it stays ACTIVE and untouched. Pool strength follows §4.2's four-component formula: touches 0 gives 0, H1 is rank 3 of 6 giving 12.5, age 2 candles gives 25 x 2 / 200 = 0.25, and a single-swing pool gives cluster 6.25 — total 19.00 for the BSL pool and 18.75 for the newer SSL pool whose age component is 0. Candle numbers above are scenario-relative; the 293 declared filler candles (SLS §1.9 warm-up) shift them by 293 in the expected output. The filler's height is deliberately 3, equal to the scenario's mean true range, so the blended 14-period ATR lands on exactly 3 at the confirming candle just as it did before history was declared — every threshold in this rationale therefore still holds unchanged. Its high matches the scenario's first candle so the seam cannot form a swing high, and its low sits below so it cannot form a swing low.",
   "labelled_by": "Claude Opus 5 (spec-derived; pending developer verification per Constitution §5)",
   "labelled_at": "2026-08-16",
   "algo_version": "s5-v1",
   "symbol": "GOLDENSWEEP",
   "timeframe": "H1",
+  "filler": { "count": 293, "open": "100", "high": "102", "low": "99", "close": "100" },
   "candles": [
     { "open_time": "2026-01-05T00:00:00+00:00", "open": "101", "high": "102", "low": "100", "close": "101" },
     { "open_time": "2026-01-05T01:00:00+00:00", "open": "101", "high": "103", "low": "101", "close": "102" },
@@ -20,7 +21,7 @@
   ],
   "expected": {
     "report": {
-      "candles": 7,
+      "candles": 300,
       "internal_pools": 2,
       "external_pools": 0,
       "pools_upserted": 2,
@@ -31,7 +32,7 @@
     },
     "pools": [
       {
-        "pool": "pool:BSL:4",
+        "pool": "pool:BSL:297",
         "side": "BSL",
         "liquidity_class": "INTERNAL",
         "source": "SWING",
@@ -41,11 +42,11 @@
         "band_high": "106",
         "strength": "19.00",
         "member_count": 1,
-        "created_index": 4,
+        "created_index": 297,
         "created_at": "2026-01-05T05:00:00+00:00"
       },
       {
-        "pool": "pool:SSL:6",
+        "pool": "pool:SSL:299",
         "side": "SSL",
         "liquidity_class": "INTERNAL",
         "source": "SWING",
@@ -55,20 +56,20 @@
         "band_high": "101",
         "strength": "18.75",
         "member_count": 1,
-        "created_index": 6,
+        "created_index": 299,
         "created_at": "2026-01-05T07:00:00+00:00"
       }
     ],
     "transitions": [
       {
-        "pool": "pool:BSL:4",
+        "pool": "pool:BSL:297",
         "from_state": "ACTIVE",
         "to_state": "SWEPT",
         "reason": "liquidity_sweep",
-        "candle_index": 6,
+        "candle_index": 299,
         "transitioned_at": "2026-01-05T07:00:00+00:00",
         "evidence": {
-          "pool_id": "pool:BSL:4",
+          "pool_id": "pool:BSL:297",
           "side": "BSL",
           "liquidity_class": "INTERNAL",
           "reference_level": "106",
@@ -79,7 +80,7 @@
           "gap_sweep": false,
           "reclaimed": false,
           "displaced_after": false,
-          "setup_expiry_index": 21
+          "setup_expiry_index": 314
         }
       }
     ],
@@ -88,7 +89,7 @@
         "event_type": "LIQUIDITY_SWEEP",
         "event_at": "2026-01-05T07:00:00+00:00",
         "payload": {
-          "pool_id": "pool:BSL:4",
+          "pool_id": "pool:BSL:297",
           "side": "BSL",
           "liquidity_class": "INTERNAL",
           "reference_level": "106",
@@ -99,7 +100,7 @@
           "gap_sweep": false,
           "reclaimed": false,
           "displaced_after": false,
-          "setup_expiry_index": 21
+          "setup_expiry_index": 314
         }
       }
     ]
