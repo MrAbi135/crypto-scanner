@@ -4,7 +4,7 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.2
+**Version:** 1.0.3
 **Ratified:** 2026-07-12 · **Last amended:** 2026-08-17 (see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
@@ -57,6 +57,9 @@ All subsequent sections depend on the definitions in this section. They are bind
 - Parameters are configuration, versioned as `param_set_version`. Every emitted detection records the `algo_version` + `param_set_version` that produced it (Constitution §14.5).
 - **Normalization doctrine:** all price-distance thresholds are expressed in ATR multiples, never fixed percentages. *Rationale (compared alternatives):* fixed-percent thresholds systematically over-trigger on high-volatility assets and under-trigger on majors; ATR normalization makes one rule set behave consistently across BTC and a mid-cap meme coin. Fixed-percent is retained only as a floor/ceiling guard where noted.
 - **Tolerance unit:** `ε = P.global.tolerance_atr × ATR` (default `0.05 × ATR(14)`) — used wherever two prices are compared for "equality."
+- **Recorded precision of derived measurements.** Every *derived* quantity written to evidence, an event payload, or any user-facing surface — ATR multiples, ratios, percentages, scores — is quantised to `P.global.derived_dp = 4` decimal places (`ROUND_HALF_EVEN`) at the moment of recording. **Comparisons, thresholds and state transitions always use unquantised values**; quantisation is a presentation rule, never a decision rule, so it cannot change a verdict.
+  *Rationale (compared alternatives):* full-context Decimal division yields 28 significant digits, so a sweep depth is recorded as `0.9854242054724053640232107909`. That is false precision — ATR is itself an estimate — and it defeats the platform's core promise that a trader can audit the evidence, since nobody can read it. (a) Recording raw was rejected on those grounds. (b) Rounding *inputs* before comparison was rejected because it would move thresholds and therefore change detections. (c) Quantising at the recording boundary only — **chosen**: evidence becomes legible, every decision is unaffected, and golden labels stay derivable by hand from the specification.
+  **Prices are not derived quantities** and are never quantised by this rule; they retain their storage scale (`numeric(38,18)`, DDD §18).
 
 ### 0.5 Detection Pipeline (Logical Order)
 
@@ -995,6 +998,7 @@ Confidence is displayed with its factor breakdown — never as a bare number. Ta
 | Parameter | Default | Defined in |
 |---|---|---|
 | P.global.tolerance_atr | 0.05 × ATR(14) | §0.4 |
+| P.global.derived_dp | 4 | §0.4 |
 | P.data.hot_window | 1000 candles | §2.1 |
 | P.data.liq_cascade_mult | 5× median | §2.7 |
 | P.data.fdv_ratio_flag | 3 | §2.10 |
@@ -1053,6 +1057,43 @@ Amendments follow Constitution §42.7: explicit proposal, impact review against
 dependent sections, version increment, recorded rationale. Each row below links
 the golden dataset that surfaced the defect, so the reasoning is reproducible
 from the test suite rather than from memory.
+
+### v1.0.3 — 2026-08-17
+
+Adds §0.4's **recorded precision** rule for derived measurements. Fills a
+genuine silence rather than correcting an error: the specification said nothing
+about the precision of quantities it asks to be recorded, so the implementation
+wrote whatever Decimal division produced.
+
+**Why it surfaced now.** Correcting ATR to the Wilder smoothing §2 already
+mandates turns it into a recursive average, and recursion on Decimals yields 28
+significant digits. A sweep depth that reads `1` under a simple mean becomes
+`0.9854242054724053640232107909`. That value is stored in evidence and is
+destined for the Signal Detail surface, where §15's whole premise is that a
+trader can audit it. Nobody can audit twenty-eight digits, and the digits are
+not information — ATR is an estimate, so precision beyond a few places is
+arithmetic noise dressed as certainty.
+
+**Scope of the rule.** Quantisation happens **only at the recording boundary**.
+Comparisons, thresholds and state transitions continue to use unquantised
+values, so no detection can change. Prices are excluded — they are measured,
+not derived, and keep their `numeric(38,18)` storage scale.
+
+**Impact review.**
+
+- No detector logic changes; no `algo_version` increment is required *by this
+  amendment*. (The separate Wilder correction does bump versions, and lands
+  with it.)
+- New parameter `P.global.derived_dp = 4`, so `param_set_version` increments
+  with the release that implements this.
+- Affected recorded fields include `sweep_depth_atr` and the `epsilon` written
+  into break evidence (§4.6), and displacement's `body_multiple`,
+  `range_multiple` and `close_position` (§5.10). The list is defined by the
+  rule, not enumerated here — anything derived and recorded is in scope.
+- Golden datasets: values become legible again and remain hand-derivable, which
+  is what makes the Wilder correction implementable under Constitution §5 at
+  all. Without this rule a labeller would have to paste detector output, which
+  §32.3's method exists to forbid.
 
 ### v1.0.2 — 2026-08-17
 
@@ -1140,4 +1181,4 @@ belongs in its own amendment, not folded into an unrelated one.
 
 *This document is the complete detection doctrine of the Institutional AI Crypto Scanner. An engineering team implementing it makes zero trading-logic decisions: where a question is not answered here, the answer is an amendment to this document — never a guess in code.*
 
-**— End of Scanner Logic Specification v1.0.2 —**
+**— End of Scanner Logic Specification v1.0.3 —**
