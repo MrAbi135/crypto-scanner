@@ -12,6 +12,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from scanner.application.detection.ict_replay import IctReplayService
 from scanner.application.detection.liquidity_replay import LiquidityReplayService
 from scanner.application.detection.state import EngineStateManager
 from scanner.application.detection.structure_replay import StructureReplayService
@@ -22,6 +23,9 @@ from tests.golden.harness.memory import (
     InMemoryCandleRepository,
     InMemoryEngineEventRepository,
     InMemoryEngineStateStore,
+    InMemoryIctZoneRepository,
+    InMemoryIctZoneStateStore,
+    InMemoryIctZoneTransitionRepository,
     InMemoryLiquidityPoolRepository,
     InMemoryLiquidityStateStore,
     InMemoryLiquidityTransitionRepository,
@@ -50,9 +54,12 @@ async def run_dataset(dataset: GoldenDataset) -> dict[str, Any]:
     if dataset.engine == "liquidity":
         return await _run_liquidity(dataset)
 
+    if dataset.engine == "ict":
+        return await _run_ict(dataset)
+
     raise ValueError(
         f"{dataset.dataset_id}: unsupported engine {dataset.engine!r}. "
-        "The ICT zone engine is wired in a later sprint increment."
+        "Supported engines: structure, liquidity, ict."
     )
 
 
@@ -189,6 +196,91 @@ async def _run_liquidity(dataset: GoldenDataset) -> dict[str, Any]:
                     for event in events.events
                 ),
                 key=lambda item: (item["event_at"], item["event_type"]),
+            ),
+        },
+        aliases,
+    )
+
+
+async def _run_ict(dataset: GoldenDataset) -> dict[str, Any]:
+    """Run the FVG / IFVG / BPR pass of the S6 zone engine.
+
+    Order-block, OTE and interaction passes are separate services with their
+    own ports; they are wired in a later increment. A dataset that expects
+    their output will simply not see it, which is why zone-type coverage is
+    tracked in the README rather than implied by a green suite.
+    """
+
+    zones = InMemoryIctZoneRepository()
+    transitions = InMemoryIctZoneTransitionRepository()
+
+    service = IctReplayService(
+        InMemoryCandleRepository(dataset.candles),
+        zones,
+        transitions,
+        InMemoryIctZoneStateStore(),
+        FixedClock(HARNESS_CLOCK),
+        algo_version=dataset.algo_version,
+    )
+
+    report = await service.run(
+        dataset.symbol,
+        dataset.timeframe,
+        dataset.start,
+        dataset.end,
+    )
+
+    aliases = {
+        zone.zone_id: f"zone:{zone.zone_type}:{zone.polarity}:{zone.created_index}"
+        for zone in zones.zones.values()
+    }
+
+    return _apply_aliases(
+        {
+            # zones_upserted and the transitions counter are implementation
+            # bookkeeping — how many write calls happened — not doctrine, and
+            # a labeller cannot derive them from the SLS. The facts they count
+            # are compared in full below.
+            "report": {
+                "candles": report.candles,
+                "displacements": report.displacements,
+                "fvgs_detected": report.fvgs_detected,
+                "ifvgs_created": report.ifvgs_created,
+                "bprs_created": report.bprs_created,
+                "live_zones": report.live_zones,
+            },
+            "zones": sorted(
+                (
+                    {
+                        "zone": zone.zone_id,
+                        "zone_type": zone.zone_type,
+                        "polarity": zone.polarity,
+                        "state": zone.state,
+                        "grade": zone.grade,
+                        "band_low": zone.band_low,
+                        "band_high": zone.band_high,
+                        "created_index": zone.created_index,
+                        "created_at": zone.created_at,
+                        "gap_adjacent": zone.gap_adjacent,
+                    }
+                    for zone in zones.zones.values()
+                ),
+                key=lambda item: (item["created_index"], item["zone_type"], item["polarity"]),
+            ),
+            "transitions": sorted(
+                (
+                    {
+                        "zone": transition.zone_id,
+                        "zone_type": transition.zone_type,
+                        "from_state": transition.from_state,
+                        "to_state": transition.to_state,
+                        "reason": transition.reason,
+                        "candle_index": transition.candle_index,
+                        "transitioned_at": transition.transitioned_at,
+                    }
+                    for transition in transitions.transitions
+                ),
+                key=lambda item: (item["candle_index"], item["to_state"], item["zone_type"]),
             ),
         },
         aliases,

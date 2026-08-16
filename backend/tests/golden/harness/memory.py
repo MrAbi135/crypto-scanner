@@ -17,6 +17,10 @@ from dataclasses import replace
 from datetime import datetime
 
 from scanner.application.ports.detection import EngineEventRecord
+from scanner.application.ports.ict_zones import (
+    IctZoneRecord,
+    IctZoneTransitionRecord,
+)
 from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRecord,
     LiquidityTransitionRecord,
@@ -25,6 +29,11 @@ from scanner.domain.common import Candle
 from scanner.shared import Timeframe
 
 _TERMINAL_POOL_STATES = frozenset({"SWEPT", "BROKEN", "EXPIRED"})
+
+# Mirrors _TERMINAL_STATES in PgIctZoneRepository. A zone in any of these is
+# permanently done; SLS §5 forbids resurrection and the real ON CONFLICT
+# clause enforces it in SQL.
+_TERMINAL_ZONE_STATES = frozenset({"INVALIDATED", "EXPIRED", "FILLED", "INVERTED", "DEAD"})
 
 
 class FixedClock:
@@ -224,6 +233,120 @@ class InMemoryLiquidityTransitionRepository:
         self._ids.add(transition.transition_id)
         self.transitions.append(transition)
         return True
+
+
+class InMemoryIctZoneRepository:
+    """Mirrors `PgIctZoneRepository`, including the resurrection guard.
+
+    `upsert` refuses to touch a zone already in a terminal state, exactly as
+    the real `ON CONFLICT ... WHERE NOT state IN (...)` clause does, and
+    `transition` matches on the expected `from_state` so a caller holding a
+    stale read is told it lost rather than clobbering a newer state. Both are
+    proven against real TimescaleDB in
+    `tests/integration/test_detection_persistence_pg.py`.
+    """
+
+    def __init__(self) -> None:
+        self.zones: dict[str, IctZoneRecord] = {}
+
+    async def upsert(self, zone: IctZoneRecord) -> None:
+        existing = self.zones.get(zone.zone_id)
+
+        if existing is None:
+            self.zones[zone.zone_id] = zone
+            return
+
+        if existing.state in _TERMINAL_ZONE_STATES:
+            return
+
+        self.zones[zone.zone_id] = replace(
+            existing,
+            grade=zone.grade,
+            band_low=zone.band_low,
+            band_high=zone.band_high,
+            refined_low=zone.refined_low,
+            refined_high=zone.refined_high,
+            updated_at=zone.updated_at,
+            parent_zone_id=zone.parent_zone_id,
+            dealing_range_id=zone.dealing_range_id,
+            stale_context=zone.stale_context,
+            gap_adjacent=zone.gap_adjacent,
+            origin_swept=zone.origin_swept,
+            evidence=zone.evidence,
+        )
+
+    async def get(self, zone_id: str) -> IctZoneRecord | None:
+        return self.zones.get(zone_id)
+
+    async def list_live(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+    ) -> tuple[IctZoneRecord, ...]:
+        matching = [
+            zone
+            for zone in self.zones.values()
+            if zone.symbol == symbol
+            and zone.timeframe is timeframe
+            and zone.state not in _TERMINAL_ZONE_STATES
+        ]
+
+        return tuple(
+            sorted(
+                matching,
+                key=lambda zone: (-zone.created_index, zone.zone_type, zone.zone_id),
+            )
+        )
+
+    async def transition(
+        self,
+        zone_id: str,
+        *,
+        from_state: str,
+        to_state: str,
+        updated_at: datetime,
+    ) -> bool:
+        existing = self.zones.get(zone_id)
+
+        if existing is None or existing.state != from_state:
+            return False
+
+        self.zones[zone_id] = replace(existing, state=to_state, updated_at=updated_at)
+        return True
+
+
+class InMemoryIctZoneTransitionRepository:
+    """Append-only zone-transition ledger, idempotent on transition_id."""
+
+    def __init__(self) -> None:
+        self.transitions: list[IctZoneTransitionRecord] = []
+        self._ids: set[str] = set()
+
+    async def append(self, transition: IctZoneTransitionRecord) -> bool:
+        if transition.transition_id in self._ids:
+            return False
+
+        self._ids.add(transition.transition_id)
+        self.transitions.append(transition)
+        return True
+
+
+class InMemoryIctZoneStateStore:
+    """Snapshot of the live zone working set, standing in for Redis."""
+
+    def __init__(self) -> None:
+        self.snapshots: dict[tuple[str, Timeframe], tuple[IctZoneRecord, ...]] = {}
+
+    async def save(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        zones: tuple[IctZoneRecord, ...],
+    ) -> None:
+        self.snapshots[(symbol, timeframe)] = zones
+
+    async def delete(self, symbol: str, timeframe: Timeframe) -> None:
+        self.snapshots.pop((symbol, timeframe), None)
 
 
 class InMemoryLiquidityStateStore:
