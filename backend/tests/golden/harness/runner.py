@@ -262,6 +262,10 @@ async def _run_ict(dataset: GoldenDataset) -> dict[str, Any]:
                         "created_index": zone.created_index,
                         "created_at": zone.created_at,
                         "gap_adjacent": zone.gap_adjacent,
+                        # Derived zones (IFVG from an inverted FVG, BPR from a
+                        # pair) carry their lineage here; the alias map makes
+                        # the link readable instead of a sha256.
+                        "parent_zone": zone.parent_zone_id,
                     }
                     for zone in zones.zones.values()
                 ),
