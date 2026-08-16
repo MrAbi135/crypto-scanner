@@ -1,0 +1,51 @@
+Sprint S2 - live ingest soak evidence (DEV stack, not staging)
+Captured: 2026-08-16T10:26:50Z by scripted capture
+Host: local Windows + Docker 29.6.2 / Compose v5.3.1
+
+== docker compose ps ==
+scanner-dev-worker-1  scanner-dev-worker  Up 6 hours (healthy)
+scanner-dev-engine-1  scanner-dev-engine  Up 6 hours (healthy)
+scanner-dev-api-1  scanner-dev-api  Up 6 hours (healthy)
+scanner-dev-ingest-1  scanner-dev-ingest  Up 6 hours (healthy)
+scanner-dev-db-1  timescale/timescaledb:2.15.2-pg16  Up 6 hours (healthy)
+scanner-dev-redis-1  redis:7.2.5-alpine  Up 6 hours (healthy)
+
+== alembic head in live DB ==
+007_ict_zone_interactions
+
+== timescale hypertables ==
+ hypertable_schema | hypertable_name | compression_enabled 
+-------------------+-----------------+---------------------
+ detection         | engine_events   | f
+ market            | candles         | t
+(2 rows)
+
+
+== live M5 continuity: actual vs expected, zero-gap assertion ==
+ symbol  |      first_candle      |      last_candle       | actual | expected | delta 
+---------+------------------------+------------------------+--------+----------+-------
+ BTCUSDT | 2026-08-09 01:25:00+00 | 2026-08-16 10:20:00+00 |   2124 |     2124 |     0
+ ETHUSDT | 2026-08-09 01:25:00+00 | 2026-08-16 10:20:00+00 |   2124 |     2124 |     0
+(2 rows)
+
+
+== gap scan (rows here = continuity violations; expect 0) ==
+ symbol | gap_after | resumed_at | gap 
+--------+-----------+------------+-----
+(0 rows)
+
+
+== data_incidents (expect 0 for a clean soak) ==
+ count 
+-------
+     0
+(1 row)
+
+
+== ingest log tail ==
+{"symbol": "ETHUSDT", "timeframe": "M5", "open_time": "2026-08-16T10:15:00+00:00", "inserted": 1, "freshness": "FRESH", "detection_allowed": true, "event": "live_candle_ingested", "service": "ingest", "release": "local", "level": "info", "timestamp": "2026-08-16T10:20:02.796700Z"}
+{"symbol": "ETHUSDT", "timeframe": "M5", "open_time": "2026-08-16T10:15:00+00:00", "source": "stream", "event": "binance_candle_processed", "service": "ingest", "release": "local", "level": "info", "timestamp": "2026-08-16T10:20:02.796921Z"}
+{"symbol": "BTCUSDT", "timeframe": "M5", "open_time": "2026-08-16T10:20:00+00:00", "inserted": 1, "freshness": "FRESH", "detection_allowed": true, "event": "live_candle_ingested", "service": "ingest", "release": "local", "level": "info", "timestamp": "2026-08-16T10:25:00.274376Z"}
+{"symbol": "BTCUSDT", "timeframe": "M5", "open_time": "2026-08-16T10:20:00+00:00", "source": "stream", "event": "binance_candle_processed", "service": "ingest", "release": "local", "level": "info", "timestamp": "2026-08-16T10:25:00.274652Z"}
+{"symbol": "ETHUSDT", "timeframe": "M5", "open_time": "2026-08-16T10:20:00+00:00", "inserted": 1, "freshness": "FRESH", "detection_allowed": true, "event": "live_candle_ingested", "service": "ingest", "release": "local", "level": "info", "timestamp": "2026-08-16T10:25:00.295024Z"}
+{"symbol": "ETHUSDT", "timeframe": "M5", "open_time": "2026-08-16T10:20:00+00:00", "source": "stream", "event": "binance_candle_processed", "service": "ingest", "release": "local", "level": "info", "timestamp": "2026-08-16T10:25:00.295341Z"}
