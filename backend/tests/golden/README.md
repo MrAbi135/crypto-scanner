@@ -111,7 +111,7 @@ all. Current gaps, and what each needs:
 |---|---|
 | BOS / CHoCH / MSS (§3.5–§3.6) | A series long enough to confirm three external swings per side (`k_ext = 5`), since the trend gate that arms BOS needs two consecutive HH/HL pairs — roughly 50+ hand-built candles |
 | Trend state machine (§3.4) | Same: no external swing has ever confirmed in a golden series |
-| EQH/EQL clusters (§4.3), stop hunts (§4.7) | Reachable through wired services; not yet written |
+| EQH/EQL clusters (§4.3), stop hunts (§4.7) | **Unreachable, not merely unwritten.** `detect_equal_level_clusters`, `detect_stop_hunt` and `mark_stop_hunt_failed` are implemented and unit-tested but have **no caller** anywhere outside `domain/liquidity/`, and no table exists for their output. A golden case cannot observe a detector the engine never runs. See `docs/evidence/S5/CHECKLIST.md`. |
 | BPR §5.6 parent-liveness | The rule itself is **not enforced** — see `tests/unit/application/detection/test_bpr_parent_state_defect.py`, an `xfail(strict=True)` repro. A golden case cannot encode it until the ordering is fixed. |
 | Order blocks (§5.1), Breaker (§5.2), Mitigation (§5.3), OTE (§5.7), PD arrays | Their services (`ict_ob_replay`, `ict_ote_replay`, `ict_interaction_replay`) are not wired into the harness yet |
 
