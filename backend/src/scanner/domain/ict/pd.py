@@ -1,0 +1,152 @@
+"""Premium/Discount dealing-range context (SLS §5.7)."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from decimal import Decimal
+from enum import Enum
+
+_ZERO = Decimal("0")
+_HALF = Decimal("0.5")
+_EXTREME_THIRD = Decimal("0.33")
+_UPPER_EXTREME_THIRD = Decimal("0.67")
+_MIN_RANGE_ATR = Decimal("1.5")
+
+
+class PdState(str, Enum):
+    PREMIUM = "PREMIUM"
+    DISCOUNT = "DISCOUNT"
+    AT_EQ = "AT_EQ"
+    SUSPENDED = "PD_SUSPENDED"
+
+
+@dataclass(frozen=True, slots=True)
+class DealingRange:
+    range_id: str
+    low: Decimal
+    high: Decimal
+    low_anchor_index: int
+    high_anchor_index: int
+
+    def __post_init__(self) -> None:
+        if self.high <= self.low:
+            raise ValueError("dealing range high must be greater than low")
+
+        if self.low_anchor_index < 0:
+            raise ValueError("low anchor index must be non-negative")
+
+        if self.high_anchor_index < 0:
+            raise ValueError("high anchor index must be non-negative")
+
+    @property
+    def height(self) -> Decimal:
+        return self.high - self.low
+
+    @property
+    def equilibrium(self) -> Decimal:
+        return self.low + self.height / Decimal("2")
+
+
+@dataclass(frozen=True, slots=True)
+class PdContext:
+    range_id: str
+    state: PdState
+    range_low: Decimal
+    range_high: Decimal
+    equilibrium: Decimal
+    close: Decimal
+    range_position: Decimal | None
+    long_gate: bool
+    short_gate: bool
+    sweep_long_gate: bool
+    sweep_short_gate: bool
+
+
+def evaluate_pd_context(
+    dealing_range: DealingRange,
+    *,
+    close: Decimal,
+    atr: Decimal,
+    epsilon: Decimal = Decimal("0"),
+) -> PdContext:
+    """Evaluate premium/discount context for one closed candle."""
+
+    if atr <= _ZERO:
+        raise ValueError("atr must be positive")
+
+    if epsilon < _ZERO:
+        raise ValueError("epsilon must be non-negative")
+
+    if dealing_range.height < _MIN_RANGE_ATR * atr:
+        return PdContext(
+            range_id=dealing_range.range_id,
+            state=PdState.SUSPENDED,
+            range_low=dealing_range.low,
+            range_high=dealing_range.high,
+            equilibrium=(dealing_range.equilibrium),
+            close=close,
+            range_position=None,
+            long_gate=False,
+            short_gate=False,
+            sweep_long_gate=False,
+            sweep_short_gate=False,
+        )
+
+    raw_position = (close - dealing_range.low) / dealing_range.height
+
+    range_position = min(
+        Decimal("1"),
+        max(
+            Decimal("0"),
+            raw_position,
+        ),
+    ).quantize(Decimal("0.0001"))
+
+    equilibrium = dealing_range.equilibrium
+
+    if close > equilibrium + epsilon:
+        state = PdState.PREMIUM
+    elif close < equilibrium - epsilon:
+        state = PdState.DISCOUNT
+    else:
+        state = PdState.AT_EQ
+
+    return PdContext(
+        range_id=dealing_range.range_id,
+        state=state,
+        range_low=dealing_range.low,
+        range_high=dealing_range.high,
+        equilibrium=equilibrium,
+        close=close,
+        range_position=range_position,
+        long_gate=(range_position <= _HALF),
+        short_gate=(range_position >= _HALF),
+        sweep_long_gate=(range_position <= _EXTREME_THIRD),
+        sweep_short_gate=(range_position >= _UPPER_EXTREME_THIRD),
+    )
+
+
+def bracketed_dealing_range(
+    *,
+    range_id: str,
+    external_low: Decimal,
+    external_high: Decimal,
+    low_anchor_index: int,
+    high_anchor_index: int,
+    close: Decimal,
+) -> DealingRange | None:
+    """Build range only when current close is bracketed by both anchors."""
+
+    if external_high <= external_low:
+        return None
+
+    if not (external_low <= close <= external_high):
+        return None
+
+    return DealingRange(
+        range_id=range_id,
+        low=external_low,
+        high=external_high,
+        low_anchor_index=(low_anchor_index),
+        high_anchor_index=(high_anchor_index),
+    )

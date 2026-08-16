@@ -1,0 +1,198 @@
+"""Shared ICT zone state machines (SLS §5.1-§5.9)."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from scanner.domain.ict.model import (
+    FvgState,
+    IfvgState,
+    ZoneState,
+)
+
+_ZONE_TERMINAL = {
+    ZoneState.INVALIDATED,
+    ZoneState.EXPIRED,
+}
+
+_FVG_TERMINAL = {
+    FvgState.FILLED,
+    FvgState.INVERTED,
+    FvgState.EXPIRED,
+}
+
+_IFVG_TERMINAL = {
+    IfvgState.DEAD,
+    IfvgState.EXPIRED,
+}
+
+
+@dataclass(slots=True)
+class ZoneStateMachine:
+    state: ZoneState = ZoneState.FRESH
+
+    def tested(self) -> ZoneState:
+        return self._transition(ZoneState.TESTED)
+
+    def mitigated(self) -> ZoneState:
+        return self._transition(ZoneState.MITIGATED)
+
+    def invalidated(self) -> ZoneState:
+        return self._transition(ZoneState.INVALIDATED)
+
+    def expired(self) -> ZoneState:
+        return self._transition(ZoneState.EXPIRED)
+
+    def _transition(
+        self,
+        target: ZoneState,
+    ) -> ZoneState:
+        if self.state in _ZONE_TERMINAL:
+            raise ValueError(
+                f"terminal zone cannot transition {self.state.value} -> {target.value}"
+            )
+
+        allowed = {
+            ZoneState.FRESH: {
+                ZoneState.TESTED,
+                ZoneState.MITIGATED,
+                ZoneState.INVALIDATED,
+                ZoneState.EXPIRED,
+            },
+            ZoneState.TESTED: {
+                ZoneState.MITIGATED,
+                ZoneState.INVALIDATED,
+                ZoneState.EXPIRED,
+            },
+            ZoneState.MITIGATED: {
+                ZoneState.INVALIDATED,
+                ZoneState.EXPIRED,
+            },
+        }
+
+        if target not in allowed.get(
+            self.state,
+            set(),
+        ):
+            raise ValueError(f"illegal zone transition {self.state.value} -> {target.value}")
+
+        self.state = target
+        return self.state
+
+
+@dataclass(slots=True)
+class FvgStateMachine:
+    state: FvgState = FvgState.OPEN
+
+    def touched(self) -> FvgState:
+        return self._transition(FvgState.TOUCHED)
+
+    def ce_filled(self) -> FvgState:
+        return self._transition(FvgState.CE_FILLED)
+
+    def filled(self) -> FvgState:
+        return self._transition(FvgState.FILLED)
+
+    def inverted(self) -> FvgState:
+        return self._transition(FvgState.INVERTED)
+
+    def expired(self) -> FvgState:
+        return self._transition(FvgState.EXPIRED)
+
+    def _transition(
+        self,
+        target: FvgState,
+    ) -> FvgState:
+        if self.state in _FVG_TERMINAL:
+            raise ValueError(f"terminal FVG cannot transition {self.state.value} -> {target.value}")
+
+        allowed = {
+            FvgState.OPEN: {
+                FvgState.TOUCHED,
+                FvgState.CE_FILLED,
+                FvgState.FILLED,
+                FvgState.INVERTED,
+                FvgState.EXPIRED,
+            },
+            FvgState.TOUCHED: {
+                FvgState.CE_FILLED,
+                FvgState.FILLED,
+                FvgState.INVERTED,
+                FvgState.EXPIRED,
+            },
+            FvgState.CE_FILLED: {
+                FvgState.FILLED,
+                FvgState.INVERTED,
+                FvgState.EXPIRED,
+            },
+        }
+
+        if target not in allowed.get(
+            self.state,
+            set(),
+        ):
+            raise ValueError(f"illegal FVG transition {self.state.value} -> {target.value}")
+
+        self.state = target
+        return self.state
+
+
+@dataclass(slots=True)
+class IfvgStateMachine:
+    state: IfvgState = IfvgState.UNPROVEN
+
+    def proven(self) -> IfvgState:
+        return self._transition(IfvgState.FRESH)
+
+    def tested(self) -> IfvgState:
+        return self._transition(IfvgState.TESTED)
+
+    def mitigated(self) -> IfvgState:
+        return self._transition(IfvgState.MITIGATED)
+
+    def dead(self) -> IfvgState:
+        return self._transition(IfvgState.DEAD)
+
+    def expired(self) -> IfvgState:
+        return self._transition(IfvgState.EXPIRED)
+
+    def _transition(
+        self,
+        target: IfvgState,
+    ) -> IfvgState:
+        if self.state in _IFVG_TERMINAL:
+            raise ValueError(
+                f"terminal IFVG cannot transition {self.state.value} -> {target.value}"
+            )
+
+        allowed = {
+            IfvgState.UNPROVEN: {
+                IfvgState.FRESH,
+                IfvgState.DEAD,
+                IfvgState.EXPIRED,
+            },
+            IfvgState.FRESH: {
+                IfvgState.TESTED,
+                IfvgState.MITIGATED,
+                IfvgState.DEAD,
+                IfvgState.EXPIRED,
+            },
+            IfvgState.TESTED: {
+                IfvgState.MITIGATED,
+                IfvgState.DEAD,
+                IfvgState.EXPIRED,
+            },
+            IfvgState.MITIGATED: {
+                IfvgState.DEAD,
+                IfvgState.EXPIRED,
+            },
+        }
+
+        if target not in allowed.get(
+            self.state,
+            set(),
+        ):
+            raise ValueError(f"illegal IFVG transition {self.state.value} -> {target.value}")
+
+        self.state = target
+        return self.state

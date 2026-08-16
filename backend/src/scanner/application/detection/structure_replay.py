@@ -16,13 +16,19 @@ from scanner.application.ports.detection import (
     EngineEventRecord,
     EngineEventRepository,
 )
+from scanner.domain.common import Candle
 from scanner.domain.structure import (
+    BreakDirection,
     ClassifiedSwing,
     StructureLabel,
+    SwingKind,
     SwingPoint,
+    SwingStrength,
     classify_swings,
+    detect_bos,
     detect_external_swings,
     detect_internal_swings,
+    swing_window,
 )
 from scanner.shared import Timeframe
 
@@ -139,6 +145,14 @@ class StructureReplayService:
             ):
                 inserted += 1
 
+        bos_inserted = await self._replay_bos(
+            symbol=symbol,
+            timeframe=timeframe,
+            candles=candles,
+            external_swings=external_swings,
+        )
+        inserted += bos_inserted
+
         trend_state = _infer_external_trend(external_classified)
 
         last_open_time = candles[-1].open_time
@@ -163,6 +177,139 @@ class StructureReplayService:
             events_inserted=inserted,
             trend_state=trend_state,
             last_processed_open_time=last_open_time,
+        )
+
+    async def _replay_bos(
+        self,
+        *,
+        symbol: str,
+        timeframe: Timeframe,
+        candles: list[Candle],
+        external_swings: tuple[SwingPoint, ...],
+    ) -> int:
+        """Replay BOS chronologically using trend known at each candle."""
+
+        inserted = 0
+        consumed: set[tuple[int, SwingKind]] = set()
+        confirmation_window = swing_window(SwingStrength.EXTERNAL)
+
+        for candle_index, candle in enumerate(candles):
+            confirmed_swings = tuple(
+                swing
+                for swing in external_swings
+                if swing.index + confirmation_window <= candle_index
+            )
+
+            if not confirmed_swings:
+                continue
+
+            classified = classify_swings(confirmed_swings)
+            trend_state = _infer_external_trend(classified)
+
+            if trend_state in {
+                "BULLISH",
+                "BULLISH_CAUTION",
+            }:
+                direction = BreakDirection.UP
+                required_kind = SwingKind.HIGH
+
+            elif trend_state in {
+                "BEARISH",
+                "BEARISH_CAUTION",
+            }:
+                direction = BreakDirection.DOWN
+                required_kind = SwingKind.LOW
+
+            else:
+                continue
+
+            candidates = [
+                swing
+                for swing in confirmed_swings
+                if swing.kind is required_kind and (swing.index, swing.kind) not in consumed
+            ]
+
+            if not candidates:
+                continue
+
+            swing = max(
+                candidates,
+                key=lambda item: item.index,
+            )
+
+            bos = detect_bos(
+                candle,
+                swing,
+                direction=direction,
+            )
+
+            if bos is None:
+                continue
+
+            consumed.add(
+                (
+                    swing.index,
+                    swing.kind,
+                )
+            )
+
+            if await self._persist_bos(
+                symbol=symbol,
+                timeframe=timeframe,
+                candle=candle,
+                candle_index=candle_index,
+                swing=swing,
+                direction=direction,
+            ):
+                inserted += 1
+
+        return inserted
+
+    async def _persist_bos(
+        self,
+        *,
+        symbol: str,
+        timeframe: Timeframe,
+        candle: Candle,
+        candle_index: int,
+        swing: SwingPoint,
+        direction: BreakDirection,
+    ) -> bool:
+        event_type = f"BOS_{direction.value}"
+
+        payload = json.dumps(
+            {
+                "direction": direction.value,
+                "swing_index": swing.index,
+                "swing_price": str(swing.price),
+                "swing_kind": swing.kind.value,
+                "swing_strength": swing.strength.value,
+                "break_index": candle_index,
+                "break_price": str(swing.price),
+                "candle_close": str(candle.close),
+                "consumed_by": event_type,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+        return await self._events.append(
+            EngineEventRecord(
+                event_key=build_event_key(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    event_type=event_type,
+                    event_at=candle.open_time,
+                    algo_version=self._algo_version,
+                ),
+                symbol=symbol,
+                timeframe=timeframe,
+                event_type=event_type,
+                event_at=candle.open_time,
+                algo_version=self._algo_version,
+                payload=payload,
+                created_at=self._clock.now(),
+            )
         )
 
     async def _persist_swing(

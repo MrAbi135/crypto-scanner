@@ -20,6 +20,11 @@ from scanner.domain.common import (
     Candle,
     CandleSource,
 )
+from scanner.domain.structure import (
+    SwingKind,
+    SwingPoint,
+    SwingStrength,
+)
 from scanner.shared import Timeframe
 
 
@@ -404,3 +409,68 @@ async def test_invalid_range_is_rejected() -> None:
             point,
             point,
         )
+
+
+@pytest.mark.asyncio
+async def test_bos_replay_waits_for_confirmed_external_swings() -> None:
+    candles: list[Candle] = []
+
+    for index in range(40):
+        close = Decimal("105")
+
+        if index == 36:
+            close = Decimal("125")
+
+        candles.append(
+            Candle(
+                symbol="BTCUSDT",
+                timeframe=Timeframe.H1,
+                open_time=datetime(2026, 8, 1, tzinfo=UTC) + timedelta(hours=index),
+                open=close,
+                high=close + Decimal("2"),
+                low=close - Decimal("2"),
+                close=close,
+                volume=Decimal("100"),
+                quote_volume=Decimal("10000"),
+                taker_buy_volume=Decimal("50"),
+                trade_count=10,
+                source=CandleSource.BACKFILL,
+            )
+        )
+
+    external_swings = (
+        SwingPoint(5, candles[5].open_time, Decimal("100"), SwingKind.HIGH, SwingStrength.EXTERNAL),
+        SwingPoint(10, candles[10].open_time, Decimal("80"), SwingKind.LOW, SwingStrength.EXTERNAL),
+        SwingPoint(
+            15, candles[15].open_time, Decimal("110"), SwingKind.HIGH, SwingStrength.EXTERNAL
+        ),
+        SwingPoint(20, candles[20].open_time, Decimal("90"), SwingKind.LOW, SwingStrength.EXTERNAL),
+        SwingPoint(
+            25, candles[25].open_time, Decimal("120"), SwingKind.HIGH, SwingStrength.EXTERNAL
+        ),
+        SwingPoint(
+            30, candles[30].open_time, Decimal("100"), SwingKind.LOW, SwingStrength.EXTERNAL
+        ),
+    )
+
+    events = FakeEventRepository()
+
+    service = StructureReplayService(
+        FakeCandleRepository(candles),
+        events,
+        EngineStateManager(FakeStateStore()),
+        FakeClock(),
+    )
+
+    inserted = await service._replay_bos(
+        symbol="BTCUSDT",
+        timeframe=Timeframe.H1,
+        candles=candles,
+        external_swings=external_swings,
+    )
+
+    bos_events = [event for event in events.events.values() if event.event_type == "BOS_UP"]
+
+    assert inserted == 1
+    assert len(bos_events) == 1
+    assert bos_events[0].event_at == candles[36].open_time

@@ -19,6 +19,18 @@ from datetime import UTC, datetime
 import httpx
 import redis.asyncio as aioredis
 
+from scanner.application.detection.ict_interaction_replay import (
+    IctZoneInteractionReplayService,
+)
+from scanner.application.detection.ict_ob_replay import (
+    IctOrderBlockReplayService,
+)
+from scanner.application.detection.ict_ote_replay import (
+    IctOteReplayService,
+)
+from scanner.application.detection.ict_replay import (
+    IctReplayService,
+)
 from scanner.application.detection.liquidity_replay import (
     LiquidityReplayService,
 )
@@ -27,6 +39,9 @@ from scanner.application.detection.state import (
 )
 from scanner.application.detection.structure_replay import (
     StructureReplayService,
+)
+from scanner.application.detection.structure_shift_replay import (
+    StructureShiftReplayService,
 )
 from scanner.application.marketdata import (
     BackfillService,
@@ -48,6 +63,17 @@ from scanner.infrastructure.persistence.database import (
 from scanner.infrastructure.persistence.detection_repositories import (
     PgEngineEventRepository,
 )
+from scanner.infrastructure.persistence.ict_evidence_repository import (
+    PgIctEvidenceRepository,
+)
+from scanner.infrastructure.persistence.ict_zone_interaction_repository import (
+    PgIctZoneInteractionContextRepository,
+    PgIctZoneInteractionRepository,
+)
+from scanner.infrastructure.persistence.ict_zone_repositories import (
+    PgIctZoneRepository,
+    PgIctZoneTransitionRepository,
+)
 from scanner.infrastructure.persistence.liquidity_detection_repositories import (
     PgLiquidityPoolRepository,
     PgLiquidityTransitionRepository,
@@ -59,6 +85,9 @@ from scanner.infrastructure.persistence.repositories import (
 )
 from scanner.infrastructure.redis.engine_state import (
     RedisEngineStateStore,
+)
+from scanner.infrastructure.redis.ict_zone_state import (
+    RedisIctZoneStateStore,
 )
 from scanner.infrastructure.redis.liquidity_state import (
     RedisLiquidityStateStore,
@@ -85,7 +114,7 @@ async def _run_sync(
             provider = BinanceRestAdapter(
                 client,
                 RateBudget(settings.binance_weight_capacity),
-                base_url=(settings.binance_base_url),
+                base_url=settings.binance_base_url,
             )
 
             report = await SymbolSyncService(
@@ -122,7 +151,7 @@ async def _run_backfill(
             provider = BinanceRestAdapter(
                 client,
                 RateBudget(settings.binance_weight_capacity),
-                base_url=(settings.binance_base_url),
+                base_url=settings.binance_base_url,
             )
 
             service = BackfillService(
@@ -248,25 +277,111 @@ async def _run_engine(
             args.timeframe,
             args.start,
             args.end,
-            rebuild_state=(rebuild_state),
+            rebuild_state=rebuild_state,
         )
 
         pool_repo = PgLiquidityPoolRepository(sessions)
 
-        transition_repo = PgLiquidityTransitionRepository(sessions)
+        liquidity_transition_repo = PgLiquidityTransitionRepository(sessions)
 
         liquidity_state_store = RedisLiquidityStateStore(redis_client)
 
         liquidity_service = LiquidityReplayService(
             candle_repo,
             pool_repo,
-            transition_repo,
+            liquidity_transition_repo,
             event_repo,
             liquidity_state_store,
             clock,
         )
 
         liquidity_report = await liquidity_service.run(
+            args.symbol,
+            args.timeframe,
+            args.start,
+            args.end,
+        )
+
+        structure_shift_evidence_repo = PgIctEvidenceRepository(sessions)
+
+        structure_shift_service = StructureShiftReplayService(
+            candle_repo,
+            event_repo,
+            structure_shift_evidence_repo,
+            clock,
+        )
+
+        structure_shift_report = await structure_shift_service.run(
+            args.symbol,
+            args.timeframe,
+            args.start,
+            args.end,
+        )
+
+        ict_zone_repo = PgIctZoneRepository(sessions)
+
+        ict_transition_repo = PgIctZoneTransitionRepository(sessions)
+
+        ict_state_store = RedisIctZoneStateStore(redis_client)
+
+        ict_service = IctReplayService(
+            candle_repo,
+            ict_zone_repo,
+            ict_transition_repo,
+            ict_state_store,
+            clock,
+        )
+
+        ict_report = await ict_service.run(
+            args.symbol,
+            args.timeframe,
+            args.start,
+            args.end,
+        )
+
+        ict_ote_service = IctOteReplayService(
+            candle_repo,
+            ict_zone_repo,
+            ict_transition_repo,
+            clock,
+        )
+
+        ict_ote_report = await ict_ote_service.run(
+            args.symbol,
+            args.timeframe,
+            args.start,
+            args.end,
+        )
+
+        ict_evidence_repo = PgIctEvidenceRepository(sessions)
+
+        ict_ob_service = IctOrderBlockReplayService(
+            candle_repo,
+            ict_zone_repo,
+            ict_transition_repo,
+            ict_state_store,
+            ict_evidence_repo,
+            clock,
+        )
+
+        ict_ob_report = await ict_ob_service.run(
+            args.symbol,
+            args.timeframe,
+            args.start,
+            args.end,
+        )
+
+        interaction_context_repo = PgIctZoneInteractionContextRepository(sessions)
+
+        interaction_repo = PgIctZoneInteractionRepository(sessions)
+
+        ict_interaction_service = IctZoneInteractionReplayService(
+            candle_repo,
+            interaction_context_repo,
+            interaction_repo,
+        )
+
+        ict_interaction_report = await ict_interaction_service.run(
             args.symbol,
             args.timeframe,
             args.start,
@@ -290,7 +405,7 @@ async def _run_engine(
             f"events_inserted="
             f"{structure_report.events_inserted} "
             f"trend="
-            f"{structure_report.trend_state}"
+            f"{structure_shift_report.trend_state}"
         )
 
         print(
@@ -309,6 +424,88 @@ async def _run_engine(
             f"{liquidity_report.broken_pools} "
             f"expired="
             f"{liquidity_report.expired_pools}"
+        )
+
+        print(
+            "  structure_shift: "
+            f"choch_created="
+            f"{structure_shift_report.choch_created} "
+            f"mss_created="
+            f"{structure_shift_report.mss_created} "
+            f"failed_candidates="
+            f"{structure_shift_report.failed_candidates} "
+            f"events_inserted="
+            f"{structure_shift_report.events_inserted} "
+            f"trend="
+            f"{structure_shift_report.trend_state}"
+        )
+
+        print(
+            "  ict: "
+            f"displacements="
+            f"{ict_report.displacements} "
+            f"fvgs="
+            f"{ict_report.fvgs_detected} "
+            f"ifvgs="
+            f"{ict_report.ifvgs_created} "
+            f"bprs="
+            f"{ict_report.bprs_created} "
+            f"upserted="
+            f"{ict_report.zones_upserted} "
+            f"transitions="
+            f"{ict_report.transitions} "
+            f"live_zones="
+            f"{ict_report.live_zones}"
+        )
+
+        print(
+            "  ict_ote: "
+            f"dealing_ranges="
+            f"{ict_ote_report.dealing_ranges} "
+            f"impulse_legs="
+            f"{ict_ote_report.impulse_legs} "
+            f"otes_detected="
+            f"{ict_ote_report.otes_detected} "
+            f"upserted="
+            f"{ict_ote_report.zones_upserted} "
+            f"transitions="
+            f"{ict_ote_report.transitions} "
+            f"live_otes="
+            f"{ict_ote_report.live_otes}"
+        )
+
+        print(
+            "  ict_ob: "
+            f"displacements="
+            f"{ict_ob_report.displacements} "
+            f"detected="
+            f"{ict_ob_report.order_blocks_detected} "
+            f"upserted="
+            f"{ict_ob_report.order_blocks_upserted} "
+            f"breakers_created="
+            f"{ict_ob_report.breakers_created} "
+            f"mitigations_created="
+            f"{ict_ob_report.mitigations_created} "
+            f"transitions="
+            f"{ict_ob_report.transitions} "
+            f"live_obs="
+            f"{ict_ob_report.live_order_blocks} "
+            f"live_breakers="
+            f"{ict_ob_report.live_breakers} "
+            f"live_mitigations="
+            f"{ict_ob_report.live_mitigations}"
+        )
+
+        print(
+            "  ict_interactions: "
+            f"zones={ict_interaction_report.zones_evaluated} "
+            f"touches={ict_interaction_report.touches} "
+            f"rejections={ict_interaction_report.rejections} "
+            f"mitigations={ict_interaction_report.mitigations} "
+            f"respects={ict_interaction_report.respects} "
+            f"violations={ict_interaction_report.violations} "
+            f"confirmations={ict_interaction_report.confirmations} "
+            f"inserted={ict_interaction_report.interactions_inserted}"
         )
 
         if structure_report.last_processed_open_time is not None:
