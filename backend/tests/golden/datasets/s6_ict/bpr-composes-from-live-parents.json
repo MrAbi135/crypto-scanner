@@ -1,0 +1,82 @@
+{
+  "dataset_id": "s6-bpr-composes-from-live-parents",
+  "engine": "ict",
+  "sls_sections": ["5.4", "5.6"],
+  "description": "A bullish and a bearish FVG overlap by exactly half the smaller band, and both parents are genuinely still live, so a Balanced Price Range composes over the intersection.",
+  "labelling_rationale": "SLS §5.6 composes a BPR when a bullish and a bearish FVG intersect by at least 50 percent of the smaller band, both are within P.ict.bpr_pair_age = 30 candles, and both parents are still OPEN or TOUCHED; the BPR band is the intersection and its polarity is that of the LATER parent. The bullish parent registers at candle 2 as [H[0], L[2]] = [100, 106], a gap of 6 against an ATR of exactly 6 from true ranges 2, 11 and 5, clearing the 1.5 floor. The bearish parent registers at candle 5 as [H[5], L[3]] = [105, 107], a gap of 2 against an ATR of exactly 5 from true ranges 2, 11, 5, 4, 6 and 2 summing to 30 over six candles, clearing the 1.25 floor. Their intersection is [105, 106], a width of 1; the smaller band is the bearish one at height 2, so the ratio is exactly 0.5 and the at-least-50-percent test passes on its boundary. The later parent is the bearish one, so the BPR is BEARISH over [105, 106] at candle 5. The parent-liveness condition is the delicate part and is why this geometry was chosen. A bearish FVG's band sits entirely ABOVE the candle that creates it, so that candle usually drops into any overlapping bullish zone and pushes it past CE. Here candle 5 spans only 104 to 105, staying above the bullish zone's CE of 103, so the bullish parent reaches no further than TOUCHED — which §5.6 still accepts. Its lifecycle is: candle 3 never enters the band, since its low of 107 is above the band top of 106; candle 4 dips to 105, inside the band but above CE, giving OPEN to TOUCHED; candle 5 touches again without reaching CE and TOUCHED is not re-emitted. The bearish parent has no candle after it and stays OPEN. All three zones are non-terminal, so all three are live.",
+  "labelled_by": "Claude Opus 5 (spec-derived; pending developer verification per Constitution §5)",
+  "labelled_at": "2026-08-16",
+  "algo_version": "s6-v1",
+  "symbol": "GOLDENBPR",
+  "timeframe": "H1",
+  "candles": [
+    { "open_time": "2026-01-05T00:00:00+00:00", "open": "99", "high": "100", "low": "98", "close": "99" },
+    { "open_time": "2026-01-05T01:00:00+00:00", "open": "99", "high": "110", "low": "99", "close": "109" },
+    { "open_time": "2026-01-05T02:00:00+00:00", "open": "109", "high": "111", "low": "106", "close": "110" },
+    { "open_time": "2026-01-05T03:00:00+00:00", "open": "110", "high": "111", "low": "107", "close": "111" },
+    { "open_time": "2026-01-05T04:00:00+00:00", "open": "110", "high": "110", "low": "105", "close": "106" },
+    { "open_time": "2026-01-05T05:00:00+00:00", "open": "105", "high": "105", "low": "104", "close": "104" }
+  ],
+  "expected": {
+    "report": {
+      "candles": 6,
+      "displacements": 0,
+      "fvgs_detected": 2,
+      "ifvgs_created": 0,
+      "bprs_created": 1,
+      "live_zones": 3
+    },
+    "zones": [
+      {
+        "zone": "zone:FVG:BULLISH:2",
+        "zone_type": "FVG",
+        "polarity": "BULLISH",
+        "state": "TOUCHED",
+        "grade": "FVG",
+        "band_low": "100",
+        "band_high": "106",
+        "created_index": 2,
+        "created_at": "2026-01-05T03:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": null
+      },
+      {
+        "zone": "zone:BPR:BEARISH:5",
+        "zone_type": "BPR",
+        "polarity": "BEARISH",
+        "state": "FRESH",
+        "grade": "BPR",
+        "band_low": "105",
+        "band_high": "106",
+        "created_index": 5,
+        "created_at": "2026-01-05T06:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": "zone:FVG:BULLISH:2"
+      },
+      {
+        "zone": "zone:FVG:BEARISH:5",
+        "zone_type": "FVG",
+        "polarity": "BEARISH",
+        "state": "OPEN",
+        "grade": "FVG",
+        "band_low": "105",
+        "band_high": "107",
+        "created_index": 5,
+        "created_at": "2026-01-05T06:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": null
+      }
+    ],
+    "transitions": [
+      {
+        "zone": "zone:FVG:BULLISH:2",
+        "zone_type": "FVG",
+        "from_state": "OPEN",
+        "to_state": "TOUCHED",
+        "reason": "zone_touch",
+        "candle_index": 4,
+        "transitioned_at": "2026-01-05T05:00:00+00:00"
+      }
+    ]
+  }
+}
