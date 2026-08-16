@@ -91,9 +91,19 @@ Two properties make this sound, and `test_filler.py` asserts both:
   no swing under §3.1 and opens no gap under §5.4 — the same rule
   `s4-flat-window-emits-nothing` pins. 300 filler candles add history without
   adding one fact.
-- **Filler does not change the verdict.** The same scenario run with and without
-  declared history produces identical detections, differing only by the index
-  offset.
+- **Filler is additive, never destructive.** Every detection the bare scenario
+  produced still appears once history is declared, unchanged apart from its
+  index offset.
+
+**Filler is not verdict-neutral, and that is the point.** Declared history
+genuinely *enables* detections a short series cannot reach: an external swing
+needs `k_ext = 5` candles on its left, so a scenario candle near the start of a
+bare series is unjudgeable and becomes judgeable once history exists. Migrating
+`s4-classification-hh-hl-uptrend` to declared history surfaced exactly this — an
+external swing low that the 15-candle version had no way to confirm. The short
+version was under-reporting; the padded one shows what the engine would really
+see. Expect migration to *add* expected output, and read every addition rather
+than assuming it is noise.
 
 **Indices stay absolute.** With 293 filler candles the third scenario candle is
 index 295, and the label says 295. Translating indices to be scenario-relative

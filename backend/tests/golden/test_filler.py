@@ -137,29 +137,40 @@ def test_negative_filler_is_rejected(tmp_path: Path) -> None:
         load_dataset(write_dataset(tmp_path, filler={**FILLER, "count": -1}))
 
 
-async def test_declared_history_does_not_change_the_scenario_verdict(
-    tmp_path: Path,
-) -> None:
-    """The property the whole mechanism rests on.
+async def test_declared_history_only_ever_adds_detections(tmp_path: Path) -> None:
+    """Filler is additive, not neutral — and the difference matters.
 
-    Detections must be identical with and without the declared history, apart
-    from the index offset the filler introduces. If quiet history could alter
-    a verdict, every dataset built on it would be measuring the filler rather
-    than the doctrine.
+    An earlier version of this test asserted that declared history cannot
+    change the verdict at all. That is **false**, and it passed only because
+    this fixture's scenario happens to confirm no external swing either way.
+
+    Real history genuinely enables detections that a short series cannot
+    reach: an external swing needs `k_ext = 5` candles on its left, so a
+    scenario candle near the start of a bare series is unjudgeable and
+    becomes judgeable once history exists. That is the engine seeing what it
+    would really see, and it is the whole reason for declaring history.
+
+    What must hold is the weaker, true property: every detection the bare run
+    produced still appears in the padded run, unchanged apart from its index
+    offset. Filler may **add**; it may never remove or alter.
     """
 
     bare = await run_dataset(load_dataset(write_dataset(tmp_path / "a", **{})))
     padded = await run_dataset(load_dataset(write_dataset(tmp_path / "b", filler=FILLER)))
 
-    assert bare["report"]["internal_swings"] == padded["report"]["internal_swings"]
-    assert bare["report"]["external_swings"] == padded["report"]["external_swings"]
-    assert bare["report"]["trend_state"] == padded["report"]["trend_state"]
-    assert len(bare["events"]) == len(padded["events"])
+    def fingerprint(event: dict[str, Any], offset: int) -> tuple[Any, ...]:
+        return (
+            event["event_type"],
+            event["payload"]["index"] - offset,
+            event["payload"]["price"],
+        )
 
-    for bare_event, padded_event in zip(bare["events"], padded["events"], strict=True):
-        assert bare_event["event_type"] == padded_event["event_type"]
-        assert padded_event["payload"]["index"] == bare_event["payload"]["index"] + 20
-        assert padded_event["payload"]["price"] == bare_event["payload"]["price"]
+    bare_events = {fingerprint(event, 0) for event in bare["events"]}
+    padded_events = {fingerprint(event, 20) for event in padded["events"]}
+
+    assert bare_events <= padded_events, "declared history removed or altered a detection"
+    assert padded["report"]["internal_swings"] >= bare["report"]["internal_swings"]
+    assert padded["report"]["external_swings"] >= bare["report"]["external_swings"]
 
 
 async def test_declared_history_emits_no_detection_of_its_own(tmp_path: Path) -> None:

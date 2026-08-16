@@ -9,6 +9,7 @@
   "algo_version": "s4-v2",
   "symbol": "GOLDENFLAT",
   "timeframe": "M5",
+  "filler": { "count": 293, "open": "9.5", "high": "10", "low": "9", "close": "9.5" },
   "candles": [
     { "open_time": "2026-01-05T00:00:00+00:00", "open": "9.5", "high": "10", "low": "9", "close": "9.5" },
     { "open_time": "2026-01-05T00:05:00+00:00", "open": "9.5", "high": "10", "low": "9", "close": "9.5" },
@@ -20,7 +21,7 @@
   ],
   "expected": {
     "report": {
-      "candles": 7,
+      "candles": 300,
       "internal_swings": 0,
       "external_swings": 0,
       "classified_events": 0,
