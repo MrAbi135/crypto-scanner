@@ -95,13 +95,26 @@ draft a dataset; the developer owns the label.
 
 ## Coverage status
 
-| Engine | Datasets | State |
-|---|---|---|
-| structure (S4) | 3 | seed cases: clean swing, equal-extreme tie, flat-window absence |
-| liquidity (S5) | 0 | runner not yet wired |
-| ict zones (S6) | 0 | runner not yet wired |
+| Engine | Datasets | Roadmap DoD | State |
+|---|---|---|---|
+| structure (S4) | 3 | ≥ 60 | clean swing, equal-extreme tie, flat-window absence |
+| liquidity (S5) | 3 | ≥ 50 | single-candle sweep, close-through break, two-candle sweep |
+| ict zones (S6) | 0 | ≥ 80 | runner not yet wired |
 
-The Roadmap's S4/S5/S6 DoD asks for ≥60 / ≥50 / ≥80 cases. This is the
-beginning of that debt being paid, not the end of it. `run_dataset` raises on
-an unsupported `engine` value rather than skipping, so a dataset for an
-unwired engine fails loudly instead of passing vacuously.
+This is the beginning of that debt being paid, not the end of it.
+`run_dataset` raises on an unsupported `engine` value rather than skipping, so
+a dataset for an unwired engine fails loudly instead of passing vacuously.
+
+### Opaque identifiers
+
+`pool_id`, `transition_id` and `event_key` are sha256 digests — deterministic,
+but not something a human labelling a case could write. Rather than drop the
+cross-references that make evidence readable, the liquidity runner **aliases**
+pool ids to their natural key (`pool:BSL:4` = side plus creation index) and
+applies the substitution recursively through every payload. `transition_id`
+is dropped outright, being derived from fields already compared.
+
+One thing the liquidity canonical form deliberately omits: the pool-creation
+`evidence` blob, which restates the strength component breakdown. Its total is
+compared, its components are unit-tested, and reproducing a nested JSON blob by
+hand would make datasets unwritable — which costs more coverage than it buys.

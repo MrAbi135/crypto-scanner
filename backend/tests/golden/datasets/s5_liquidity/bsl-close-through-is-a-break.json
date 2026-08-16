@@ -1,0 +1,79 @@
+{
+  "dataset_id": "s5-bsl-close-through-is-a-break",
+  "engine": "liquidity",
+  "sls_sections": ["4.2", "4.6"],
+  "description": "The same penetration as the sweep case, but the candle closes ABOVE the level. Acceptance is a break, not a sweep. This is the doctrine's hardest disambiguation.",
+  "labelling_rationale": "This series is byte-identical to s5-bsl-sweep-single-candle except for one number: the close of candle 6 is 108 instead of 104. SLS §4.6 step 2 is explicit that the close decides — 'If instead Cl[i] > Pl + e, the event is routed to BOS evaluation (§3.5): close-through = absorption/break, not sweep.' The wick is identical in both datasets, which is the entire point: a sweep and a break can look the same intrabar and are separated only by where the candle settles. With ATR = 3 and e = 0.15 (§0.4), the close of 108 exceeds 106 + 0.15, so the single-candle sweep test fails at its rejection-close condition and the pool transitions ACTIVE -> BROKEN with reason close_through, per the §4.2 state machine where BROKEN means the level was absorbed rather than swept. True ranges are unchanged at 2, 2, 4, 3, 2, 2, 6 because candle 6's high, low and the prior close are all unchanged, so ATR is still exactly 3 and e is still exactly 0.15, which the recorded evidence carries. Pool creation is identical to the sweep case: a BSL pool of 106 at index 4 with strength 19.00, and an SSL pool of 101 at index 6 with strength 18.75 whose lifecycle scan would start past the end of the series and so stays ACTIVE.",
+  "labelled_by": "Claude Opus 5 (spec-derived; pending developer verification per Constitution §5)",
+  "labelled_at": "2026-08-16",
+  "algo_version": "s5-v1",
+  "symbol": "GOLDENBREAK",
+  "timeframe": "H1",
+  "candles": [
+    { "open_time": "2026-01-05T00:00:00+00:00", "open": "101", "high": "102", "low": "100", "close": "101" },
+    { "open_time": "2026-01-05T01:00:00+00:00", "open": "101", "high": "103", "low": "101", "close": "102" },
+    { "open_time": "2026-01-05T02:00:00+00:00", "open": "104", "high": "106", "low": "104", "close": "105" },
+    { "open_time": "2026-01-05T03:00:00+00:00", "open": "104", "high": "104", "low": "102", "close": "103" },
+    { "open_time": "2026-01-05T04:00:00+00:00", "open": "103", "high": "103", "low": "101", "close": "102" },
+    { "open_time": "2026-01-05T05:00:00+00:00", "open": "103", "high": "104", "low": "102", "close": "104" },
+    { "open_time": "2026-01-05T06:00:00+00:00", "open": "104", "high": "109", "low": "103", "close": "108" }
+  ],
+  "expected": {
+    "report": {
+      "candles": 7,
+      "internal_pools": 2,
+      "external_pools": 0,
+      "pools_upserted": 2,
+      "active_pools": 1,
+      "sweeps": 0,
+      "broken_pools": 1,
+      "expired_pools": 0
+    },
+    "pools": [
+      {
+        "pool": "pool:BSL:4",
+        "side": "BSL",
+        "liquidity_class": "INTERNAL",
+        "source": "SWING",
+        "state": "BROKEN",
+        "price": "106",
+        "band_low": "106",
+        "band_high": "106",
+        "strength": "19.00",
+        "member_count": 1,
+        "created_index": 4,
+        "created_at": "2026-01-05T05:00:00+00:00"
+      },
+      {
+        "pool": "pool:SSL:6",
+        "side": "SSL",
+        "liquidity_class": "INTERNAL",
+        "source": "SWING",
+        "state": "ACTIVE",
+        "price": "101",
+        "band_low": "101",
+        "band_high": "101",
+        "strength": "18.75",
+        "member_count": 1,
+        "created_index": 6,
+        "created_at": "2026-01-05T07:00:00+00:00"
+      }
+    ],
+    "transitions": [
+      {
+        "pool": "pool:BSL:4",
+        "from_state": "ACTIVE",
+        "to_state": "BROKEN",
+        "reason": "close_through",
+        "candle_index": 6,
+        "transitioned_at": "2026-01-05T07:00:00+00:00",
+        "evidence": {
+          "close": "108",
+          "level": "106",
+          "epsilon": "0.15"
+        }
+      }
+    ],
+    "events": []
+  }
+}

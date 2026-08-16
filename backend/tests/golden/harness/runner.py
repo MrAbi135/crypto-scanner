@@ -12,6 +12,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from scanner.application.detection.liquidity_replay import LiquidityReplayService
 from scanner.application.detection.state import EngineStateManager
 from scanner.application.detection.structure_replay import StructureReplayService
 from tests.golden.harness.canonical import output_hash
@@ -21,6 +22,9 @@ from tests.golden.harness.memory import (
     InMemoryCandleRepository,
     InMemoryEngineEventRepository,
     InMemoryEngineStateStore,
+    InMemoryLiquidityPoolRepository,
+    InMemoryLiquidityStateStore,
+    InMemoryLiquidityTransitionRepository,
 )
 
 # Any instant works; it must merely be constant. See canonical.py on why
@@ -43,9 +47,12 @@ async def run_dataset(dataset: GoldenDataset) -> dict[str, Any]:
     if dataset.engine == "structure":
         return await _run_structure(dataset)
 
+    if dataset.engine == "liquidity":
+        return await _run_liquidity(dataset)
+
     raise ValueError(
         f"{dataset.dataset_id}: unsupported engine {dataset.engine!r}. "
-        "Liquidity and ICT engines are wired in a later sprint increment."
+        "The ICT zone engine is wired in a later sprint increment."
     )
 
 
@@ -90,6 +97,117 @@ async def _run_structure(dataset: GoldenDataset) -> dict[str, Any]:
             key=lambda item: (item["event_at"], item["event_type"]),
         ),
     }
+
+
+async def _run_liquidity(dataset: GoldenDataset) -> dict[str, Any]:
+    pools = InMemoryLiquidityPoolRepository()
+    transitions = InMemoryLiquidityTransitionRepository()
+    events = InMemoryEngineEventRepository()
+
+    service = LiquidityReplayService(
+        InMemoryCandleRepository(dataset.candles),
+        pools,
+        transitions,
+        events,
+        InMemoryLiquidityStateStore(),
+        FixedClock(HARNESS_CLOCK),
+        algo_version=dataset.algo_version,
+    )
+
+    report = await service.run(
+        dataset.symbol,
+        dataset.timeframe,
+        dataset.start,
+        dataset.end,
+    )
+
+    _assert_unique_event_keys(events)
+
+    # pool_id and transition_id are sha256 digests: deterministic, but not
+    # something a human labelling a dataset could write. Aliasing pool ids to
+    # their natural key keeps the cross-references in evidence payloads
+    # meaningful while leaving the file hand-writable. transition_id is
+    # dropped outright — it is derived from fields already compared.
+    aliases = {
+        pool.pool_id: f"pool:{pool.side}:{pool.created_index}" for pool in pools.pools.values()
+    }
+
+    return _apply_aliases(
+        {
+            "report": {
+                "candles": report.candles,
+                "internal_pools": report.internal_pools,
+                "external_pools": report.external_pools,
+                "pools_upserted": report.pools_upserted,
+                "active_pools": report.active_pools,
+                "sweeps": report.sweeps,
+                "broken_pools": report.broken_pools,
+                "expired_pools": report.expired_pools,
+            },
+            "pools": sorted(
+                (
+                    {
+                        "pool": pool.pool_id,
+                        "side": pool.side,
+                        "liquidity_class": pool.liquidity_class,
+                        "source": pool.source,
+                        "state": pool.state,
+                        "price": pool.price,
+                        "band_low": pool.band_low,
+                        "band_high": pool.band_high,
+                        "strength": pool.strength,
+                        "member_count": pool.member_count,
+                        "created_index": pool.created_index,
+                        "created_at": pool.created_at,
+                    }
+                    for pool in pools.pools.values()
+                ),
+                key=lambda item: (item["created_index"], item["side"]),
+            ),
+            "transitions": sorted(
+                (
+                    {
+                        "pool": transition.pool_id,
+                        "from_state": transition.from_state,
+                        "to_state": transition.to_state,
+                        "reason": transition.reason,
+                        "candle_index": transition.candle_index,
+                        "transitioned_at": transition.transitioned_at,
+                        "evidence": _parse_payload(transition.evidence),
+                    }
+                    for transition in transitions.transitions
+                ),
+                key=lambda item: (item["candle_index"], item["to_state"]),
+            ),
+            "events": sorted(
+                (
+                    {
+                        "event_type": event.event_type,
+                        "event_at": event.event_at,
+                        "payload": _parse_payload(event.payload),
+                    }
+                    for event in events.events
+                ),
+                key=lambda item: (item["event_at"], item["event_type"]),
+            ),
+        },
+        aliases,
+    )
+
+
+def _apply_aliases(value: Any, aliases: dict[str, str]) -> Any:
+    """Recursively replace opaque digests with their readable aliases."""
+
+    if isinstance(value, str):
+        return aliases.get(value, value)
+
+    if isinstance(value, dict):
+        return {key: _apply_aliases(item, aliases) for key, item in value.items()}
+
+    if isinstance(value, list):
+        return [_apply_aliases(item, aliases) for item in value]
+
+    return value
 
 
 async def run_dataset_hash(dataset: GoldenDataset) -> str:
