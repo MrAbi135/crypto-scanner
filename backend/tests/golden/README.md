@@ -66,6 +66,45 @@ strings. Volume fields default sensibly so a labeller only writes OHLC.
 }
 ```
 
+### Declared history (`filler`)
+
+SLS §1.9 requires **≥ 300 closed candles** before structure, liquidity or ICT
+detection may run at all, and names ATR baselines as one of the reasons. A
+golden case that runs on eight candles is therefore exercising the engine in a
+regime doctrine says cannot occur.
+
+Writing 300 candles of OHLC by hand is not realistic, so history is **declared**
+rather than enumerated:
+
+```json
+"filler": { "count": 293, "open": "100", "high": "103", "low": "100", "close": "100" },
+"candles": [ ...the seven hand-written scenario candles... ]
+```
+
+The loader prepends `count` identical candles immediately before the first
+scenario candle, at the timeframe's cadence, and the contiguity check runs over
+the whole series.
+
+Two properties make this sound, and `test_filler.py` asserts both:
+
+- **Filler emits nothing.** Identical candles form a flat window, which confirms
+  no swing under §3.1 and opens no gap under §5.4 — the same rule
+  `s4-flat-window-emits-nothing` pins. 300 filler candles add history without
+  adding one fact.
+- **Filler does not change the verdict.** The same scenario run with and without
+  declared history produces identical detections, differing only by the index
+  offset.
+
+**Indices stay absolute.** With 293 filler candles the third scenario candle is
+index 295, and the label says 295. Translating indices to be scenario-relative
+would put a layer between the engine's answer and the expectation, which is
+precisely where an off-by-one hides.
+
+**Choosing the filler's height.** Filler contributes true range, so it moves
+ATR. Set the filler's high−low to the scenario's *mean* true range and the
+blended ATR lands exactly on the value the scenario was designed around — which
+is what keeps thresholds hand-checkable.
+
 ### The rule that matters most
 
 **Derive the expectation from the SLS. Never paste the detector's output.**
