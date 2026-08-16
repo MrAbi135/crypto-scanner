@@ -60,6 +60,20 @@ class GoldenDataset:
     candles: tuple[Candle, ...]
     expected: dict[str, Any]
     path: Path
+    filler_count: int = 0
+
+    @property
+    def scenario_start_index(self) -> int:
+        """Absolute index of the first hand-written candle.
+
+        Equal to ``filler_count``. Expected output uses absolute indices, so a
+        swing at the third scenario candle of a 300-filler dataset is index
+        302. Kept absolute deliberately: translating indices to be
+        scenario-relative would put a layer between the engine's answer and
+        the label, which is exactly where an off-by-one hides.
+        """
+
+        return self.filler_count
 
     @property
     def start(self) -> datetime:
@@ -91,13 +105,21 @@ def load_dataset(path: Path) -> GoldenDataset:
     symbol = raw["symbol"]
     timeframe = Timeframe(raw["timeframe"])
 
-    candles = tuple(
+    scenario = tuple(
         _build_candle(entry, symbol=symbol, timeframe=timeframe, path=path)
         for entry in raw["candles"]
     )
 
-    if not candles:
+    if not scenario:
         raise ValueError(f"{path.name}: a dataset needs at least one candle")
+
+    filler = _build_filler(
+        raw.get("filler"),
+        first_scenario_candle=scenario[0],
+        path=path,
+    )
+
+    candles = filler + scenario
 
     _assert_contiguous(candles, path=path)
 
@@ -115,6 +137,7 @@ def load_dataset(path: Path) -> GoldenDataset:
         candles=candles,
         expected=raw["expected"],
         path=path,
+        filler_count=len(filler),
     )
 
 
@@ -160,6 +183,60 @@ def _build_candle(
         )
     except KeyError as exc:  # pragma: no cover - defensive
         raise ValueError(f"{path.name}: candle entry missing field {exc}") from exc
+
+
+def _build_filler(
+    spec: dict[str, Any] | None,
+    *,
+    first_scenario_candle: Candle,
+    path: Path,
+) -> tuple[Candle, ...]:
+    """Prepend N identical quiet candles ahead of the hand-written scenario.
+
+    SLS §1.9 requires ≥ 300 closed candles before structure, liquidity or ICT
+    detection may run at all, and names ATR baselines as one reason. A golden
+    case that runs on eight candles is therefore exercising the engine in a
+    regime doctrine says cannot occur. Writing 300 candles of OHLC by hand is
+    not realistic, so the history is declared instead of enumerated.
+
+    Filler is deliberately *identical* candles: a flat window confirms no
+    swing under §3.1 and opens no gap under §5.4, so the history satisfies the
+    warm-up count without contributing a single detection of its own. What it
+    does contribute is true range — pick the filler's height to equal the
+    scenario's mean true range and the blended ATR stays exactly on the value
+    the scenario was designed around.
+    """
+
+    if spec is None:
+        return ()
+
+    count = int(spec["count"])
+
+    if count < 0:
+        raise ValueError(f"{path.name}: filler count must be non-negative")
+
+    if count == 0:
+        return ()
+
+    step = first_scenario_candle.timeframe.duration
+    start = first_scenario_candle.open_time - (step * count)
+
+    template = {
+        "open": spec["open"],
+        "high": spec["high"],
+        "low": spec["low"],
+        "close": spec["close"],
+    }
+
+    return tuple(
+        _build_candle(
+            {**template, "open_time": (start + step * offset).isoformat()},
+            symbol=first_scenario_candle.symbol,
+            timeframe=first_scenario_candle.timeframe,
+            path=path,
+        )
+        for offset in range(count)
+    )
 
 
 def _assert_contiguous(candles: Sequence[Candle], *, path: Path) -> None:
