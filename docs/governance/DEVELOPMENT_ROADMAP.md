@@ -3,8 +3,8 @@
 ## Institutional AI Crypto Scanner — Build Plan to Production
 
 **Document Status:** Official Development Roadmap — the executable build sequence for the frozen governance stack
-**Authority:** Subordinate to all eight governance documents (Constitution, SLS, TDR, PRD, TAD, DDD, API Specification, UI/UX Blueprint — all v1.0.0, frozen); authoritative over build order, sprint scope, and release gating
-**Version:** 1.0.0 | **Ratified:** 2026-07-12
+**Authority:** Subordinate to all eight governance documents (Constitution, SLS, TDR, PRD, TAD, DDD, API Specification, UI/UX Blueprint — frozen; each document's current version is stated in its own header); authoritative over build order, sprint scope, and release gating
+**Version:** 1.0.1 | **Ratified:** 2026-07-12 · **Last amended:** 2026-08-17 (consequential edit under SLS v1.0.1; see that document's Amendment History)
 **Team model:** One developer + AI assistance (Claude / ChatGPT), full-time equivalent
 **Amendment Rule:** Scope moves between sprints via roadmap revision; governance documents are never modified by scheduling pressure (Constitution §8)
 
