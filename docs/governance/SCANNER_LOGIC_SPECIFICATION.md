@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.0
-**Ratified:** 2026-07-12
+**Version:** 1.0.1
+**Ratified:** 2026-07-12 · **Last amended:** 2026-08-17 (see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -451,7 +451,7 @@ Definition: the *current* unconsumed pool map — all `ACTIVE` pools, both sides
 **Detection Logic (per closed candle, per adjacent pool).** For a BSL pool at price `Pl` (band-aware for clusters):
 1. **Penetration:** `H[i] > Pl + ε` — the wick trades through the pool;
 2. **Rejection close:** `Cl[i] < Pl` — the candle closes back below the level. If instead `Cl[i] > Pl + ε`, the event is routed to BOS evaluation (§3.5): close-through = absorption/break, not sweep;
-3. **Sweep confirmation window:** if `Cl[i] < Pl` ⇒ sweep confirms **immediately at that close** (single-candle sweep). If the penetration candle closes marginally above (`Pl < Cl[i] ≤ Pl + ε`), a **two-candle sweep** confirms if `Cl[i−1] < Pl` on the very next close; otherwise the pool is `BROKEN`.
+3. **Sweep confirmation window:** if `Cl[i] < Pl` ⇒ sweep confirms **immediately at that close** (single-candle sweep). If the penetration candle closes marginally above (`Pl < Cl[i] ≤ Pl + ε`), a **two-candle sweep** confirms if `Cl[i+1] < Pl` on the very next close; otherwise the pool is `BROKEN`.
 4. Classification: `sweep_depth = (H[i] − Pl) / ATR` (recorded); `sweep_class = external | internal` (per §4.4); `displaced_after` = displacement in the reversal direction within `P.liquidity.sweep_disp_window = 3` closed candles (recorded; feeds Stop Hunt §4.7 and MSS §3.6).
    Mirror all rules for SSL pools.
 
@@ -558,7 +558,7 @@ Zones and context: where institutional orders were placed, where inefficiency re
 
 **Purpose.** An FVG closed-through flips role: failed inefficiency becomes the opposing side's shelf — bullish FVG inverted becomes resistance, and vice versa.
 
-**Detection Logic.** On FVG → `INVERTED` transition, register IFVG with same band, flipped polarity, state `FRESH`. **Activation validation:** IFVG becomes scoreable only after its first successful retest — price returns to the band and a candle closes rejecting it (close on the far side of the band in the flip direction, rejection wick ≥ `0.3 × ATR` into the band). Until then it is `UNPROVEN` (recorded, not scored).
+**Detection Logic.** On FVG → `INVERTED` transition, register IFVG with same band, flipped polarity, state `UNPROVEN`. **Activation validation:** IFVG becomes scoreable only after its first successful retest — price returns to the band and a candle closes rejecting it (close on the far side of the band in the flip direction, rejection wick ≥ `0.3 × ATR` into the band); that retest transitions it `UNPROVEN → FRESH`. Until then it is `UNPROVEN` (recorded, not scored).
 
 **Invalidation.** Close back through the IFVG against flip polarity ⇒ `DEAD` (terminal — a twice-failed zone carries no doctrine meaning). Age: inherits remaining FVG age budget.
 
@@ -1047,6 +1047,56 @@ Every parameter change increments `param_set_version` and requires golden-datase
 
 ---
 
+## Amendment History
+
+Amendments follow Constitution §42.7: explicit proposal, impact review against
+dependent sections, version increment, recorded rationale. Each row below links
+the golden dataset that surfaced the defect, so the reasoning is reproducible
+from the test suite rather than from memory.
+
+### v1.0.1 — 2026-08-17
+
+Two editorial corrections. **Neither changes detection behaviour**: in both
+cases the implementation already followed the corrected reading, and the
+document was the party at fault. Recorded as a patch increment for that reason,
+and no `algo_version` or `param_set_version` bump is required.
+
+This is worth stating plainly, because §0's standing rule is the opposite — *"if
+the code and this document disagree, the code is wrong."* That rule assumes the
+document says what it means. These two passages did not, and this amendment is
+the mechanism for that case.
+
+| # | Section | Was | Now | Why |
+|---|---|---|---|---|
+| 1 | §4.6 step 3 | two-candle sweep confirms if `Cl[i−1] < Pl` | `Cl[i+1] < Pl` | `i−1` is the candle *before* the penetration candle, while the same sentence says *"on the very next close"*. The index contradicted its own prose. Surfaced by golden dataset `s5-bsl-two-candle-sweep`. |
+| 2 | §5.5 Detection Logic | register IFVG in state `FRESH` | register in state `UNPROVEN`, and name the `UNPROVEN → FRESH` retest transition explicitly | The paragraph contradicted itself: it registered the zone as `FRESH` and then said it stays `UNPROVEN` until its first successful retest. Both could not be true. Surfaced by golden dataset `s6-ifvg-born-unproven-from-inverted-fvg`. |
+
+**Impact review.** Both changes are confined to their own subsections.
+
+- §4.6's sweep confirmation feeds §4.7 (stop hunts) and §3.6 (MSS sweep
+  lookback). Neither depends on *which* index confirms, only that a sweep
+  confirmed and when — so no dependent text changes.
+- §5.5's initial state feeds §8 scoring via the "recorded, not scored"
+  distinction. That distinction is unchanged; the correction removes the
+  contradiction about which label carries it. §5.6 (BPR) references FVG parent
+  states, not IFVG states, and is untouched.
+- No parameter in Appendix A changes. No golden dataset needs relabelling —
+  both datasets already encode the corrected reading and pass.
+
+**Consequential edit outside this document.** `DEVELOPMENT_ROADMAP.md` §Authority
+asserted that the governance stack was *"all v1.0.0"*, which this amendment
+makes false. Rather than restate a version number that must be re-edited on
+every future amendment, the phrase now points at each document's own header,
+and the Roadmap is incremented to v1.0.1 for the edit. Its scope, sprint
+contents and gates are untouched.
+
+Deliberately **not** addressed here: the same line's "eight governance
+documents" wording, which the Sprint S0.1 guide reads as nine (it counts the
+Roadmap itself). That is a pre-existing contradiction with its own merits and
+belongs in its own amendment, not folded into an unrelated one.
+
+---
+
 *This document is the complete detection doctrine of the Institutional AI Crypto Scanner. An engineering team implementing it makes zero trading-logic decisions: where a question is not answered here, the answer is an amendment to this document — never a guess in code.*
 
-**— End of Scanner Logic Specification v1.0.0 —**
+**— End of Scanner Logic Specification v1.0.1 —**
