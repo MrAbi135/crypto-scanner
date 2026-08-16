@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -15,7 +16,7 @@ from scanner.application.ports.ict_zones import (
     IctZoneTransitionRecord,
     IctZoneTransitionRepository,
 )
-from scanner.domain.common import Candle
+from scanner.domain.common import Candle, wilder_atr
 from scanner.domain.ict.model import ZoneBand, ZonePolarity, ZoneState
 from scanner.domain.ict.ote import (
     ImpulseDirection,
@@ -37,7 +38,7 @@ from scanner.domain.structure import (
 )
 from scanner.shared import Timeframe
 
-ICT_OTE_ALGO_VERSION = "s6-ote-v1"
+ICT_OTE_ALGO_VERSION = "s6-ote-v2"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")
@@ -603,38 +604,15 @@ def _transition_id(
 
 
 def _atr_at(
-    candles: list[Candle],
+    candles: Sequence[Candle],
     index: int,
 ) -> Decimal:
-    if index <= 0:
-        return _ZERO
+    """Wilder ATR (SLS §2), with the seeding window reported as zero.
 
-    start = max(
-        1,
-        index - _ATR_PERIOD + 1,
-    )
+    The domain function returns None while ATR is still seeding. Every call
+    site in this module already guards with ``if atr <= 0``, so zero routes to
+    the same skip; this shim avoids threading Optional through them all.
+    §1.9's warm-up gate keeps production out of the seeding region.
+    """
 
-    true_ranges: list[Decimal] = []
-
-    for current_index in range(
-        start,
-        index + 1,
-    ):
-        candle = candles[current_index]
-        previous_close = candles[current_index - 1].close
-
-        true_range = max(
-            candle.high - candle.low,
-            abs(candle.high - previous_close),
-            abs(candle.low - previous_close),
-        )
-
-        true_ranges.append(true_range)
-
-    if not true_ranges:
-        return _ZERO
-
-    return sum(
-        true_ranges,
-        _ZERO,
-    ) / Decimal(len(true_ranges))
+    return wilder_atr(candles, index) or Decimal("0")
