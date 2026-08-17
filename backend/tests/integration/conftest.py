@@ -37,3 +37,35 @@ async def engine(pg_dsn):
     engine = build_engine(pg_dsn, pool_size=2)
     yield engine
     await engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def redis_url():
+    """One Redis for the suite, on the same reasoning as the database.
+
+    Imported from `testcontainers.community` rather than the deprecated
+    `testcontainers.redis` the Postgres fixture above still uses -- new code
+    should not adopt a path that already emits a DeprecationWarning.
+    """
+    from testcontainers.community.redis import RedisContainer
+
+    with RedisContainer("redis:7-alpine") as container:
+        host = container.get_container_host_ip()
+        port = container.get_exposed_port(container.port)
+
+        yield f"redis://{host}:{port}/0"
+
+
+@pytest.fixture()
+async def redis_client(redis_url):
+    import redis.asyncio as aioredis
+
+    client = aioredis.from_url(redis_url, decode_responses=True)
+
+    # The container is shared, so a test that assumes an empty stream has to
+    # make it empty. Cheaper and more honest than per-test containers.
+    await client.flushall()
+
+    yield client
+
+    await client.aclose()
