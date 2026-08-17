@@ -32,6 +32,38 @@ scripts/bootstrap.sh          # checks tools, installs deps (uv sync / pnpm inst
 4. Installs pre-commit hooks (`pre-commit install` + commit-msg).
 5. Copies `ops/env/.env.example` → `ops/env/dev.env` if absent (fill in real local values).
 
+## Look at the chart (Sprint S13a)
+
+```bash
+scripts/chart.sh              # starts db + redis + api, then the chart on :5173
+```
+
+Then open **http://localhost:5173**.
+
+The script checks that the context actually has candles before starting, because
+a chart with no data and a chart of a quiet market look identical. If it is
+empty it says so and prints the two commands that fill it. Override the context
+it checks with `SYMBOL=ETHUSDT TIMEFRAME=M15 scripts/chart.sh`.
+
+The dev frontend runs on the host by design — `ops/docker/frontend.Dockerfile`
+is a staging/production artifact only (S0.2 §6.1) — so the chart is the one
+thing not inside compose.
+
+### Running CLI commands against the dev stack
+
+```bash
+scripts/cli.sh warmth                                    # which contexts can detect?
+scripts/cli.sh sync-symbols                              # mirror the venue registry
+scripts/cli.sh backfill --symbol BTCUSDT --timeframe H1 --start 2026-06-01
+scripts/cli.sh engine run --symbol BTCUSDT --timeframe H1 \
+  --start 2026-06-01 --end 2026-08-17
+```
+
+`cli.sh` loads `ops/env/dev.env`, rewrites the compose hostnames (`db`, `redis`)
+to `localhost`, and runs inside the backend venv. All three are required and
+none is obvious: without the rewrite every host-run command dies on
+`getaddrinfo`, since those hostnames only resolve inside the compose network.
+
 ## Verify a clean setup (G0 evidence)
 ```bash
 scripts/verify-clone.sh       # tools present, lockfiles install frozen, hooks run — all green
