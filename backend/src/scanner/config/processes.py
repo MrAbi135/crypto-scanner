@@ -35,6 +35,31 @@ class IngestSettings(BaseProcessSettings):
         le=300,
     )
 
+    # Sprint S3b — the ingested context set, externalised.
+    #
+    # These lived as module-level tuples in `runtime/ingest.py` until S3b, which
+    # is a Constitution §8.8 violation ("behavior may never depend on
+    # hardcoded environment-specific values") -- staging and production could
+    # not scan different universes without a code change.
+    #
+    # Comma-separated rather than JSON so an operator can write
+    # SCANNER_INGEST_SYMBOLS=BTCUSDT,ETHUSDT without quoting a list.
+    ingest_symbols: str = "BTCUSDT,ETHUSDT"
+
+    # The ladder, bottom-up. HTF zone confirmation reads the timeframe below it
+    # (SLS §5.9 via `_lower_timeframe`), so subscribing to H1 without M15 yields
+    # zero confirmations, silently and forever. Whatever is listed here, list
+    # its lower neighbour too.
+    ingest_timeframes: str = "M5,M15,H1,H4"
+
+    # Enough history for the SLS §1.9 detection gate (300) with headroom, so a
+    # fresh deployment warms itself instead of waiting days for live closes.
+    warmup_backfill_candles: int = Field(
+        default=600,
+        gt=300,
+        le=5000,
+    )
+
 
 class EngineSettings(BaseProcessSettings):
     health_port: int = Field(default=8002, gt=0, le=65535)

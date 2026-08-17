@@ -13,8 +13,14 @@ import structlog
 from starlette.applications import Starlette
 
 from scanner.application.marketdata import BackfillService
+from scanner.application.marketdata.contexts import (
+    parse_symbols,
+    parse_timeframes,
+    stream_names,
+)
 from scanner.application.marketdata.live_ingest import LiveIngestService
 from scanner.application.marketdata.outbox_relay import OutboxRelayService
+from scanner.application.marketdata.warmup_backfill import WarmupBackfillService
 from scanner.config import get_settings
 from scanner.config.processes import IngestSettings
 from scanner.domain.common import Candle
@@ -36,19 +42,8 @@ from scanner.infrastructure.persistence.repositories import (
 from scanner.infrastructure.redis.event_stream import RedisEventStreamPublisher
 from scanner.runtime.wiring.bootstrap import bootstrap
 from scanner.runtime.wiring.health import build_health_app, run_asgi
-from scanner.shared import Timeframe
 
 log = structlog.get_logger(__name__)
-
-_STREAMS = (
-    "BTCUSDT@kline_5m",
-    "ETHUSDT@kline_5m",
-)
-
-_FEEDS = (
-    ("BTCUSDT", Timeframe.M5),
-    ("ETHUSDT", Timeframe.M5),
-)
 
 
 # Fast enough that a close reaches the engine within a second or two, slow
@@ -87,10 +82,11 @@ async def _run_relay(relay: OutboxRelayService) -> None:
 async def _run_websocket(
     settings: IngestSettings,
     live_ingest: LiveIngestService,
+    streams: tuple[str, ...],
 ) -> None:
     url = build_combined_stream_url(
         settings.binance_ws_url,
-        _STREAMS,
+        streams,
     )
 
     async def handle_candle(
@@ -163,11 +159,27 @@ def main() -> None:
                 clock,
             )
 
+            symbols = parse_symbols(settings.ingest_symbols)
+            timeframes = parse_timeframes(settings.ingest_timeframes)
+
+            streams = stream_names(symbols, timeframes)
+            feeds = tuple((symbol, tf) for symbol in symbols for tf in timeframes)
+
+            # Before the socket opens. A context that reaches the gate only
+            # after days of live closes is a context the engine spends those
+            # days silently declining.
+            await WarmupBackfillService(
+                candle_repo,
+                backfill,
+                clock,
+                target_candles=settings.warmup_backfill_candles,
+            ).warm_all(symbols, timeframes)
+
             async def readiness_probe() -> tuple[bool, dict[str, str]]:
                 details: dict[str, str] = {}
                 all_ready = True
 
-                for symbol, timeframe in _FEEDS:
+                for symbol, timeframe in feeds:
                     key = f"feed:{symbol}:{timeframe.value}"
 
                     if not live_ingest.has_observation(
@@ -208,6 +220,7 @@ def main() -> None:
                 _run_websocket(
                     settings,
                     live_ingest,
+                    streams,
                 )
             )
             app.state.websocket_task = task
