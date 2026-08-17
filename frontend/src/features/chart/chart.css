@@ -115,3 +115,9 @@
 .candle__wick {
   stroke-width: 1;
 }
+
+.chart__clipped {
+  margin: 0 0 0.5rem;
+  color: var(--sem-caution);
+  font-size: 0.85rem;
+}

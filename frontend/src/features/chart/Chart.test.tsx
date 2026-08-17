@@ -127,8 +127,11 @@ describe('Chart', () => {
   it('describes its contents for a screen reader', () => {
     render(<Chart candles={[candle(0)]} zones={[zone('z1')]} pools={[pool('p1')]} />)
 
+    // "1 of 1 in view" rather than "1 zones": when objects are clipped for
+    // being outside the price range, a screen-reader user has to hear that
+    // too, or the chart quietly under-reports what the engine found.
     expect(screen.getByRole('img').getAttribute('aria-label')).toBe(
-      'Price chart with 1 candles, 1 zones and 1 liquidity pools',
+      'Price chart with 1 candles, 1 of 1 zones in view and 1 liquidity pools',
     )
   })
 })
@@ -167,5 +170,32 @@ describe('zone placement', () => {
 
     expect(Number(band.getAttribute('x'))).toBeLessThan(50)
     expect(Number(band.getAttribute('width'))).toBeGreaterThan(1000)
+  })
+})
+
+describe('clipping', () => {
+  it('says how many zones sit outside the visible price range', () => {
+    // Silently dropping them would under-report what the engine found, which
+    // is the one thing this screen must never do.
+    render(
+      <Chart
+        candles={[candle(0)]}
+        zones={[
+          zone('near', { band_low: '95', band_high: '100' }),
+          zone('far', { band_low: '10', band_high: '12' }),
+        ]}
+        pools={[]}
+      />,
+    )
+
+    expect(screen.getByTestId('chart-clipped').textContent).toContain('1 of 2 zones')
+    expect(screen.queryByTestId('zone-far')).toBeNull()
+    expect(screen.getByTestId('zone-near')).toBeDefined()
+  })
+
+  it('stays quiet when everything is in view', () => {
+    render(<Chart candles={[candle(0)]} zones={[zone('z1')]} pools={[]} />)
+
+    expect(screen.queryByTestId('chart-clipped')).toBeNull()
   })
 })

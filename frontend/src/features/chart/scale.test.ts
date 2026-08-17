@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Candle, Zone } from '@entities/market/types'
-import { bodyRect, isUp, priceScale, timeScale, type Viewport } from './scale'
+import { bodyRect, isUp, priceScale, timeScale, visibleZones, type Viewport } from './scale'
 
 const VIEWPORT: Viewport = { width: 1000, height: 500, padding: 20 }
 
@@ -58,17 +58,33 @@ describe('priceScale', () => {
     expect(scale.y('90')).toBeLessThanOrEqual(VIEWPORT.height)
   })
 
-  it('includes zones in the extent so an overlay cannot fall off the chart', () => {
-    // A zone drawn outside the visible range simply vanishes, and a missing
-    // overlay reads as "the engine found nothing" -- a different claim
-    // entirely, and the one thing this screen must never say by accident.
-    const far = zone('50', '55')
-    const scale = priceScale([candle()], VIEWPORT, [far])
+  it('is set by price alone, so a distant zone cannot squash the candles', () => {
+    // An earlier version widened the extent to fit every zone. A pool far from
+    // price then stretched the axis until 300 candles collapsed into a strip a
+    // few pixels tall -- the price action, which is the point, became
+    // unreadable. Distant objects are clipped and counted instead.
+    const scale = priceScale([candle()], VIEWPORT)
 
-    const y = scale.y('52')
+    expect(scale.contains('52')).toBe(false)
+    expect(scale.contains('100')).toBe(true)
+  })
 
-    expect(y).toBeGreaterThanOrEqual(0)
-    expect(y).toBeLessThanOrEqual(VIEWPORT.height)
+  it('reports what it clipped rather than dropping it silently', () => {
+    const scale = priceScale([candle()], VIEWPORT)
+
+    const { shown, clipped } = visibleZones([zone('95', '100'), zone('50', '55')], scale)
+
+    expect(shown).toHaveLength(1)
+    expect(clipped).toBe(1)
+  })
+
+  it('keeps a zone that straddles the whole visible range', () => {
+    // Band wider than the window on both sides: neither edge is inside, but the
+    // zone covers every candle, so dropping it would hide the most relevant
+    // object on the chart.
+    const scale = priceScale([candle()], VIEWPORT)
+
+    expect(visibleZones([zone('10', '500')], scale).shown).toHaveLength(1)
   })
 
   it('survives a flat series without collapsing every candle onto one line', () => {
