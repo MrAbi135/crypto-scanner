@@ -24,6 +24,7 @@ from scanner.application.marketdata import (
     SymbolSyncService,
     verify_continuity,
 )
+from scanner.application.marketdata.warmth import ENGINE_TIMEFRAMES, assess_all
 from scanner.config import (
     get_settings,
     load_ingest_settings,
@@ -184,6 +185,64 @@ async def _run_verify(
 
         return 0 if report.ok else 2
 
+    finally:
+        await engine.dispose()
+
+
+async def _run_warmth(
+    args: argparse.Namespace,
+) -> int:
+    """Answer "which contexts can produce detections", in one screen.
+
+    Defaults to the whole active registry because the failure this exists to
+    catch -- everything cold, silently -- is invisible when you inspect the one
+    symbol you already suspected.
+    """
+    settings = load_ingest_settings()
+    engine = build_engine(settings.db_dsn)
+
+    try:
+        sessions = build_session_factory(engine)
+        clock = SystemClock()
+
+        candles = PgCandleRepository(sessions, clock)
+
+        symbols: tuple[str, ...]
+
+        if args.symbol:
+            symbols = (args.symbol,)
+        else:
+            registry = await PgSymbolRepository(sessions).list_active()
+            symbols = tuple(symbol.exchange_symbol for symbol in registry)
+
+        if not symbols:
+            # Not an empty result -- an unrun prerequisite. The registry being
+            # empty is exactly the state S3b exists to end, and reporting it as
+            # "0 contexts, all fine" is how it stayed unnoticed this long.
+            print("warmth: the symbol registry is empty -- run `sync-symbols` first")
+
+            return 1
+
+        timeframes = (args.timeframe,) if args.timeframe else ENGINE_TIMEFRAMES
+
+        contexts = tuple((symbol, tf) for symbol in symbols for tf in timeframes)
+
+        reports = await assess_all(candles, contexts, now=clock.now())
+
+        warm = 0
+
+        for report in reports:
+            if report.detection_warm:
+                warm += 1
+
+            print(
+                f"  {report.symbol:<12} {report.timeframe.value:<4} "
+                f"candles={report.closed_candles:<6} {report.describe()}"
+            )
+
+        print(f"warmth: {warm}/{len(reports)} contexts can produce detections")
+
+        return 0 if warm else 1
     finally:
         await engine.dispose()
 
@@ -382,6 +441,7 @@ _HANDLERS: dict[
     "sync-symbols": _run_sync,
     "backfill": _run_backfill,
     "verify-continuity": _run_verify,
+    "warmth": _run_warmth,
 }
 
 

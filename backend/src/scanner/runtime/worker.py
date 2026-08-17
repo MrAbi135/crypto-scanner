@@ -20,6 +20,9 @@ from scanner.application.marketdata.liquidity_collector import (
 from scanner.application.marketdata.liquidity_history import (
     LiquiditySnapshotBuilder,
 )
+from scanner.application.marketdata.symbol_sync import (
+    SymbolSyncService,
+)
 from scanner.application.marketdata.universe_manager import (
     UniverseManager,
 )
@@ -61,12 +64,43 @@ async def _seconds_until_next_utc_midnight() -> float:
     )
 
 
+async def _sync_symbols(sync: SymbolSyncService) -> None:
+    """Mirror the venue registry. Never fatal.
+
+    Binance being unreachable must not take the worker down -- the registry we
+    already hold is still usable, and the next attempt is a day away at worst.
+    """
+    try:
+        report = await sync.sync()
+
+        log.info(
+            "symbol_registry_synced",
+            seen=report.seen,
+            eligible=report.eligible,
+            upserted=report.upserted,
+        )
+    except Exception:
+        log.exception("symbol_registry_sync_failed")
+
+
 async def _run_daily_universe_loop(
     job: DailyUniverseJob,
     symbols: PgSymbolRepository,
+    sync: SymbolSyncService,
 ) -> None:
+    # Once at boot, before the first sleep. `market.symbols` had zero rows for
+    # the entire life of the project because `sync-symbols` existed only as a
+    # CLI command nobody had cause to type, and every loop below iterates
+    # `list_active()` -- so an empty registry made the whole worker a no-op
+    # that looked perfectly healthy.
+    await _sync_symbols(sync)
+
     while True:
         await asyncio.sleep(await _seconds_until_next_utc_midnight())
+
+        # Before evaluation, not after: a symbol listed today should be
+        # evaluated today rather than a day late.
+        await _sync_symbols(sync)
 
         active_symbols = await symbols.list_active()
 
@@ -139,6 +173,12 @@ def main() -> None:
 
             snapshot_builder = LiquiditySnapshotBuilder(liquidity_history_repo)
 
+            symbol_sync = SymbolSyncService(
+                rest_adapter,
+                symbol_repo,
+                clock,
+            )
+
             universe_manager = UniverseManager(symbol_repo)
 
             job = DailyUniverseJob(
@@ -151,6 +191,7 @@ def main() -> None:
                 _run_daily_universe_loop(
                     job,
                     symbol_repo,
+                    symbol_sync,
                 )
             )
 

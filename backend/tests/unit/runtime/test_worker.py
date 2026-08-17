@@ -60,6 +60,7 @@ async def test_daily_loop_waits_until_midnight_before_loading_symbols() -> None:
         await worker._run_daily_universe_loop(
             job,
             symbols,
+            AsyncMock(),
         )
 
     sleep_mock.assert_awaited_once_with(123.0)
@@ -107,9 +108,48 @@ async def test_daily_loop_runs_job_for_each_active_symbol() -> None:
         await worker._run_daily_universe_loop(
             job,
             symbols,
+            AsyncMock(),
         )
 
     assert job.run_symbol.await_count == 2
 
     job.run_symbol.assert_any_await("BTCUSDT")
     job.run_symbol.assert_any_await("ETHUSDT")
+
+
+@pytest.mark.asyncio
+async def test_the_registry_is_synced_at_boot_before_the_first_sleep() -> None:
+    """`market.symbols` held zero rows for the project's whole life.
+
+    `sync-symbols` existed only as a CLI command nobody had cause to type, and
+    every loop here iterates `list_active()` -- so an empty registry made the
+    worker a no-op that looked perfectly healthy. Ordering matters: syncing
+    after the sleep would leave the first day unusable.
+    """
+    sync = AsyncMock()
+    symbols = AsyncMock()
+    symbols.list_active = AsyncMock(side_effect=asyncio.CancelledError)
+
+    with (
+        patch.object(
+            worker,
+            "_seconds_until_next_utc_midnight",
+            AsyncMock(return_value=1.0),
+        ),
+        patch.object(worker.asyncio, "sleep", AsyncMock()) as sleep_mock,
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await worker._run_daily_universe_loop(AsyncMock(), symbols, sync)
+
+    # Twice: once at boot, once after the first sleep, before evaluation.
+    assert sync.sync.await_count == 2
+    sleep_mock.assert_awaited_once_with(1.0)
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_venue_does_not_take_the_worker_down() -> None:
+    """The registry we already hold stays usable; the next attempt is a day away."""
+    sync = AsyncMock()
+    sync.sync = AsyncMock(side_effect=ConnectionError("binance unreachable"))
+
+    await worker._sync_symbols(sync)
