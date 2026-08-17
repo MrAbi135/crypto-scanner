@@ -23,13 +23,22 @@ from typing import Any
 
 from scanner.shared.decimal_math import to_canonical_str
 
+# Param sets are an S8 deliverable (SLS §8, the weighted factor stack). No
+# scoring reads a versioned parameter yet, so there is no version to report.
+#
+# Reported as this sentinel rather than "1.0.0" or "default", either of which
+# would read as a real version and quietly become a false provenance claim on
+# every doctrine response. It is greppable, and it disappears the moment S8
+# gives it something true to say.
+NO_PARAM_SET = "none:pre-s8"
+
 
 @dataclass(frozen=True, slots=True)
 class Versions:
     """`meta.versions` -- required on doctrine-derived responses (SLS §15.2)."""
 
     algo_version: str
-    param_set_version: str
+    param_set_version: str = NO_PARAM_SET
 
     def as_dict(self) -> dict[str, str]:
         return {
