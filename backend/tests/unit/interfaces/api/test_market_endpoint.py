@@ -19,6 +19,22 @@ class FakeClock:
         return NOW
 
 
+class EmptyRepo:
+    """Stands in for the doctrine repositories this module does not exercise."""
+
+    async def list_structure(self, *args):
+        return ()
+
+    async def list_liquidity(self, *args):
+        return ()
+
+    async def list_live(self, *args):
+        return ()
+
+    async def list_active(self, *args):
+        return ()
+
+
 class FakeCandleRepository:
     def __init__(self, series=()) -> None:
         self.series = list(series)
@@ -34,6 +50,9 @@ def build(series=()):
 
     app = build_read_api(
         candles=repo,
+        evidence=EmptyRepo(),
+        zones=EmptyRepo(),
+        pools=EmptyRepo(),
         clock=FakeClock(),
         allow_unauthenticated=True,
     )
@@ -61,6 +80,9 @@ def test_the_api_refuses_to_build_without_an_explicit_private_declaration() -> N
     with pytest.raises(RuntimeError, match="no authentication"):
         build_read_api(
             candles=FakeCandleRepository(),
+            evidence=EmptyRepo(),
+            zones=EmptyRepo(),
+            pools=EmptyRepo(),
             clock=FakeClock(),
             allow_unauthenticated=False,
         )

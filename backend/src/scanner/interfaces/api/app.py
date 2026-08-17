@@ -26,17 +26,29 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from scanner.application.ports import CandleRepository, Clock
+from scanner.application.ports.ict_evidence import IctEvidenceRepository
+from scanner.application.ports.ict_zones import IctZoneRepository
+from scanner.application.ports.liquidity_detection import LiquidityPoolRepository
+from scanner.interfaces.api.coins import router as coins_router
 from scanner.interfaces.api.errors import install_error_handlers
 from scanner.interfaces.api.market import router as market_router
 
 # Kept in the code so a reader can see the subset at a glance, and so the
 # contract test can assert that nothing was quietly added.
-IMPLEMENTED_ROWS: tuple[str, ...] = ("GET /api/v1/market/candles",)
+IMPLEMENTED_ROWS: tuple[str, ...] = (
+    "GET /api/v1/market/candles",
+    "GET /api/v1/coins/{symbol_id}/structure",
+    "GET /api/v1/coins/{symbol_id}/zones",
+    "GET /api/v1/coins/{symbol_id}/liquidity",
+)
 
 
 def build_read_api(
     *,
     candles: CandleRepository,
+    evidence: IctEvidenceRepository,
+    zones: IctZoneRepository,
+    pools: LiquidityPoolRepository,
     clock: Clock,
     allow_unauthenticated: bool,
 ) -> FastAPI:
@@ -56,10 +68,14 @@ def build_read_api(
     )
 
     app.state.candles = candles
+    app.state.evidence = evidence
+    app.state.zones = zones
+    app.state.pools = pools
     app.state.clock = clock
 
     install_error_handlers(app)
 
     app.include_router(market_router)
+    app.include_router(coins_router)
 
     return app

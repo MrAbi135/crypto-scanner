@@ -21,6 +21,15 @@ from scanner.infrastructure.persistence.database import (
     build_engine,
     build_session_factory,
 )
+from scanner.infrastructure.persistence.ict_evidence_repository import (
+    PgIctEvidenceRepository,
+)
+from scanner.infrastructure.persistence.ict_zone_repositories import (
+    PgIctZoneRepository,
+)
+from scanner.infrastructure.persistence.liquidity_detection_repositories import (
+    PgLiquidityPoolRepository,
+)
 from scanner.infrastructure.persistence.repositories import PgCandleRepository
 from scanner.interfaces.api.app import build_read_api
 from scanner.runtime.wiring.bootstrap import bootstrap
@@ -58,6 +67,9 @@ def build_api_app(settings: ApiSettings) -> FastAPI:
 
     read_api = build_read_api(
         candles=PgCandleRepository(sessions, clock),
+        evidence=PgIctEvidenceRepository(sessions),
+        zones=PgIctZoneRepository(sessions),
+        pools=PgLiquidityPoolRepository(sessions),
         clock=clock,
         allow_unauthenticated=True,
     )
