@@ -19,6 +19,7 @@ export interface PriceScale {
   readonly max: number
   /** Price -> y pixel. Inverted: SVG y grows downward, price grows upward. */
   readonly y: (price: string | number) => number
+  readonly contains: (price: string | number) => boolean
 }
 
 export interface TimeScale {
@@ -27,27 +28,27 @@ export interface TimeScale {
   readonly bandWidth: number
 }
 
-/** The visible price range, padded so extremes are not flush to the frame. */
-export function priceScale(
-  candles: readonly Candle[],
-  viewport: Viewport,
-  extra: readonly Zone[] = [],
-): PriceScale {
+/** The visible price range, set by price alone.
+ *
+ * Zones deliberately do NOT widen it. An earlier version included them, on the
+ * reasoning that a zone outside the range would silently vanish. That was the
+ * wrong trade: a pool six thousand dollars away stretched the axis until three
+ * hundred candles collapsed into a strip a few pixels tall, and the price
+ * action — the thing the chart exists to show — became unreadable.
+ *
+ * Objects outside the range are clipped instead, and `clipped` reports how
+ * many. Stating the number is what keeps this honest: nothing disappears
+ * without the chart saying so.
+ */
+export function priceScale(candles: readonly Candle[], viewport: Viewport): PriceScale {
   const values: number[] = []
 
   for (const candle of candles) {
     values.push(Number(candle.high), Number(candle.low))
   }
 
-  // Zones are included in the extent because a zone drawn outside the visible
-  // range would silently vanish -- and an overlay that disappears reads as
-  // "the engine found nothing", which is a different and much worse claim.
-  for (const zone of extra) {
-    values.push(Number(zone.band_low), Number(zone.band_high))
-  }
-
   if (values.length === 0) {
-    return { min: 0, max: 1, y: () => viewport.height / 2 }
+    return { min: 0, max: 1, y: () => viewport.height / 2, contains: () => false }
   }
 
   const rawMin = Math.min(...values)
@@ -71,7 +72,27 @@ export function priceScale(
 
       return viewport.padding + (1 - ratio) * usable
     },
+    contains: (price) => {
+      const value = typeof price === 'string' ? Number(price) : price
+
+      return value >= min && value <= max
+    },
   }
+}
+
+/** Objects with any part inside the visible band, and how many were dropped. */
+export function visibleZones(
+  zones: readonly Zone[],
+  price: PriceScale,
+): { shown: readonly Zone[]; clipped: number } {
+  const shown = zones.filter(
+    (zone) =>
+      price.contains(zone.band_low) ||
+      price.contains(zone.band_high) ||
+      (Number(zone.band_low) < price.min && Number(zone.band_high) > price.max),
+  )
+
+  return { shown, clipped: zones.length - shown.length }
 }
 
 /** The x of the first candle at or after `iso`, or the left edge if earlier.
@@ -91,8 +112,7 @@ export function xForTime(
 
   const index = candles.findIndex((candle) => Date.parse(candle.open_time) >= at)
 
-  // Created before this window opened: the zone is still live, so it starts at
-  // the left edge rather than being dropped.
+  // Created after this window ends: pin to the right edge rather than drop it.
   if (index === -1) return viewport.width - viewport.padding
 
   return index === 0 ? viewport.padding : time.x(index)
