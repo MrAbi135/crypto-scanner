@@ -44,7 +44,12 @@ def test_missing_command_exits() -> None:
 
 
 def test_all_commands_have_handlers() -> None:
-    assert set(cli._HANDLERS) == {"sync-symbols", "backfill", "verify-continuity"}
+    assert set(cli._HANDLERS) == {
+        "sync-symbols",
+        "backfill",
+        "verify-continuity",
+        "warmth",
+    }
 
 
 async def test_dispatch_routes_to_handler(monkeypatch: pytest.MonkeyPatch) -> None:

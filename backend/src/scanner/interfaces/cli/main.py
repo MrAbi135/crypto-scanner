@@ -121,6 +121,24 @@ def build_parser() -> argparse.ArgumentParser:
         type=parse_date,
     )
 
+    warmth = sub.add_parser(
+        "warmth",
+        help="Report which contexts can produce detections (SLS 1.9)",
+    )
+
+    warmth.add_argument(
+        "--symbol",
+        default=None,
+        help="default: every active symbol in the registry",
+    )
+
+    warmth.add_argument(
+        "--timeframe",
+        default=None,
+        type=Timeframe.parse,
+        help="default: every timeframe the engine consumes",
+    )
+
     engine = sub.add_parser(
         "engine",
         help="Detection engine operations",
