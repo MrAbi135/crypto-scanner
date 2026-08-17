@@ -48,6 +48,7 @@ class FakeCandleRepository:
     def __init__(self, tail: datetime | None = None) -> None:
         self.tail = tail
         self.inserted: list[Candle] = []
+        self.announced: list[Candle] = []
 
     async def latest_open_time(
         self,
@@ -56,8 +57,16 @@ class FakeCandleRepository:
     ) -> datetime | None:
         return self.tail
 
-    async def bulk_insert(self, candles: list[Candle]) -> int:
+    async def bulk_insert(
+        self,
+        candles: list[Candle],
+        *,
+        emit_outbox: bool = False,
+    ) -> int:
         self.inserted.extend(candles)
+
+        if emit_outbox:
+            self.announced.extend(candles)
 
         if candles:
             self.tail = candles[-1].open_time
@@ -315,3 +324,43 @@ async def test_stale_event_marks_series_stale() -> None:
         )
         is False
     )
+
+
+@pytest.mark.asyncio
+async def test_a_verified_close_is_announced_to_the_outbox() -> None:
+    """Live ingest must ask for the T39 event; backfill must not.
+
+    The flag is the only thing separating "a candle arrived from the exchange
+    just now" from "a candle was reconstructed from history", and the engine
+    reacts to the first. Asserted at this level because the integration suite
+    proves the outbox writes correctly, not that this caller requests it.
+    """
+    now = datetime(2026, 8, 9, 0, 5, tzinfo=UTC)
+    service, repo, _ = build_service(now=now)
+
+    candle = make_candle(
+        open_time=datetime(2026, 8, 9, 0, 0, tzinfo=UTC),
+    )
+
+    assert await service.ingest(candle, now - timedelta(seconds=1)) == 1
+    assert repo.announced == [candle]
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_candle_is_never_announced() -> None:
+    """A close the engine must not react to is a close it must not hear about.
+
+    A stale duplicate frame returns before the insert, so nothing is announced.
+    If ingest announced first and validated second, the engine would run a
+    detection pass for a bar it had already processed.
+    """
+    tail = datetime(2026, 8, 9, 0, 0, tzinfo=UTC)
+    now = datetime(2026, 8, 9, 0, 5, tzinfo=UTC)
+
+    service, repo, _ = build_service(now=now, tail=tail)
+
+    duplicate = make_candle(open_time=tail)
+
+    assert await service.ingest(duplicate, now - timedelta(seconds=1)) == 0
+    assert repo.announced == []
+    assert repo.inserted == []
