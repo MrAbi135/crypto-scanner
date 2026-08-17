@@ -6,7 +6,7 @@
 **Authority:** Subordinate to all eight governance documents (Constitution, SLS, TDR, PRD, TAD, DDD, API Specification, UI/UX Blueprint — frozen; each document's current version is stated in its own header); authoritative over build order, sprint scope, and release gating
 **Version:** 1.0.1 | **Ratified:** 2026-07-12 · **Last amended:** 2026-08-17 (consequential edit under SLS v1.0.1; see that document's Amendment History)
 **Team model:** One developer + AI assistance (Claude / ChatGPT), full-time equivalent
-**Amendment Rule:** Scope moves between sprints via roadmap revision; governance documents are never modified by scheduling pressure (Constitution §8)
+**Amendment Rule:** Scope moves between sprints via roadmap revision; governance documents are never modified by scheduling pressure (Constitution §43.5, §46.1)
 
 > Planning doctrine for a solo+AI team: AI multiplies *throughput*, not *judgment* — sprints are sized for one person's review bandwidth, because every AI-produced line must be understood, tested, and owned by the developer (Constitution §5: production-only code, no unreviewed generation). Every sprint ends in a state that runs, is tested, and could be walked away from safely.
 
@@ -436,7 +436,7 @@ Testing philosophy for solo+AI: AI writes test *scaffolding* freely, but every g
 | **G5** | S19 | J3 E2E ≤ 3 s alert p95; AI validator adversarial suite green; zero unvalidated AI text structurally possible |
 | **G6** | S21–22 | Readiness report: all drills timed within targets, load with headroom, runbooks tested, 72 h production soak |
 
-Gate discipline: a failed gate consumes the next sprint's start until passed — gates gate, they don't advise (Constitution §8.6).
+Gate discipline: a failed gate consumes the next sprint's start until passed — gates gate, they don't advise (Constitution §43.5).
 
 ## 10. Deployment Milestones
 

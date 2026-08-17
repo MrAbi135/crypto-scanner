@@ -26,6 +26,7 @@ from scanner.domain.structure import (
     SwingStrength,
 )
 from scanner.shared import Timeframe
+from scanner.shared.errors import DomainInvariantError
 
 
 class FakeClock:
@@ -375,3 +376,67 @@ async def test_empty_shift_history_is_safe() -> None:
     assert report.mss_created == 0
     assert report.events_inserted == 0
     assert report.trend_state == "RANGING"
+
+
+@pytest.mark.asyncio
+async def test_unparseable_liquidity_evidence_raises_rather_than_downgrading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A corrupt evidence blob must be loud, not quietly answer "no sweep".
+
+    This is the same fixture as ``test_external_sweep_choch_confirms_mss`` --
+    which proves the series does confirm an MSS when the evidence parses -- with
+    the blob replaced by garbage. Before the fix the JSONDecodeError was
+    swallowed with ``continue``, so the sweep check simply returned False and
+    the run downgraded MSS_DOWN to a bare CHOCH_DOWN. Nothing failed; the
+    doctrine answer was just wrong, permanently and without a trace.
+
+    Asserting on the raise (rather than on the downgraded output) is deliberate:
+    it is the swallow that Constitution §8.5 prohibits, not the downgrade.
+    """
+    series = candles()
+
+    monkeypatch.setattr(
+        shift_module,
+        "detect_external_swings",
+        lambda _: external_swings(series),
+    )
+
+    monkeypatch.setattr(
+        shift_module,
+        "detect_internal_swings",
+        lambda _: (),
+    )
+
+    evidence = FakeEvidenceRepository(
+        (
+            LiquidityEvidenceRecord(
+                pool_id="external-bsl",
+                from_state="ACTIVE",
+                to_state="SWEPT",
+                reason="liquidity_sweep",
+                transitioned_at=series[18].close_time,
+                candle_index=18,
+                evidence="{not json at all",
+            ),
+        )
+    )
+
+    service = StructureShiftReplayService(
+        FakeCandleRepository(series),
+        FakeEventRepository(),
+        evidence,
+        FakeClock(),
+    )
+
+    with pytest.raises(DomainInvariantError) as caught:
+        await service.run(
+            "BTCUSDT",
+            Timeframe.H1,
+            series[0].open_time,
+            series[-1].close_time,
+        )
+
+    # The pool must be named, or the operator cannot find the bad row.
+    assert caught.value.details["pool_id"] == "external-bsl"
+    assert caught.value.details["candle_index"] == 18

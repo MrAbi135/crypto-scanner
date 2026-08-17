@@ -40,6 +40,7 @@ from scanner.domain.structure import (
     swing_window,
 )
 from scanner.shared import Timeframe
+from scanner.shared.errors import DomainInvariantError
 
 STRUCTURE_SHIFT_ALGO_VERSION = "s6-structure-shift-v2"
 
@@ -543,10 +544,21 @@ def _has_external_sweep(
         if not (lower_bound <= record.candle_index <= choch_index):
             continue
 
+        # This blob is written by our own liquidity service, so a parse failure
+        # is not a routine condition -- it is corruption, writer drift, or a
+        # schema change nobody migrated. Swallowing it would silently answer
+        # "no external sweep", which downgrades an MSS to a CHoCH and leaves no
+        # trace of why. Constitution §8.5: silent failure is a violation.
         try:
             evidence = json.loads(record.evidence)
-        except json.JSONDecodeError:
-            continue
+        except json.JSONDecodeError as exc:
+            raise DomainInvariantError(
+                "liquidity evidence is not valid JSON",
+                details={
+                    "pool_id": record.pool_id,
+                    "candle_index": record.candle_index,
+                },
+            ) from exc
 
         if evidence.get("liquidity_class") != "EXTERNAL":
             continue
