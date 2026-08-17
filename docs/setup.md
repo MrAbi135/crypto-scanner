@@ -35,7 +35,8 @@ scripts/bootstrap.sh          # checks tools, installs deps (uv sync / pnpm inst
 ## Look at the chart (Sprint S13a)
 
 ```bash
-scripts/chart.sh              # starts db + redis + api, then the chart on :5173
+scripts/chart.sh              # bash / Git Bash / CI
+scripts/chart.ps1             # PowerShell
 ```
 
 Then open **http://localhost:5173**.
