@@ -121,6 +121,13 @@ async def get_zones_endpoint(
             "band_high": zone.band_high,
             "refined_low": zone.refined_low,
             "refined_high": zone.refined_high,
+            # created_at, not just the index. `created_index` is an offset
+            # into whatever window the engine replayed -- 22..1846 for a
+            # 1848-candle run -- and means nothing to a client holding a
+            # different window. A chart positioning a zone by it would place
+            # the object at a point in time it has no relation to. Time is the
+            # only coordinate both sides share.
+            "created_at": zone.created_at,
             "created_index": zone.created_index,
             "confirmed_index": zone.confirmed_index,
             "parent_zone_id": zone.parent_zone_id,

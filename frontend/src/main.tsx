@@ -3,6 +3,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from '@app/App'
 import { env } from '@shared/config/env'
+import '@shared/design-system/tokens/tokens.css'
 
 // DSN-gated: absent in dev = fully disabled (S0.3 §8.1). Errors only, no replay.
 if (env.sentryDsn) {

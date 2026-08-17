@@ -1,0 +1,52 @@
+/* Design tokens — UI/UX Blueprint §16. Values are copied from the Blueprint,
+   not chosen here: §41.8 makes a one-off style a defect, and the palette is
+   pre-verified for WCAG AA against these surfaces.
+
+   Dark-first. Light mode is a future token remap, not a v1 deliverable
+   (Constitution §22.2), so there is no light block to keep in sync yet. */
+
+:root {
+  /* §16.1 Neutral foundation — "cold graphite" */
+  --bg-base: #0b0e14;
+  --bg-surface: #11151e;
+  --bg-raised: #171c28;
+  --bg-inset: #070a10;
+  --line-subtle: #1f2635;
+  --line-strong: #2e3850;
+  --text-primary: #e8ecf4;
+  --text-secondary: #9aa5bc;
+  --text-muted: #5c6785;
+
+  /* §16.2 Semantic palette — colour is meaning, never decoration (§2.3).
+     Every value below is reserved for the meaning named in the Blueprint. */
+  --sem-long: #2ed3a0;
+  --sem-short: #f0517b;
+  --sem-caution: #f5b84a;
+  --sem-info: #5b9dff;
+}
+
+/* Page ground. Without this the SPA renders on the browser's default white
+   with a serif stack, and every token above is applied on top of a surface the
+   palette was never contrast-checked against. */
+body {
+  margin: 0;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
+
+h1 {
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-secondary);
+  margin: 0;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid var(--line-subtle);
+}

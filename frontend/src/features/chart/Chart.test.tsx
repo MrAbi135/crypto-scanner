@@ -29,6 +29,7 @@ function zone(id: string, overrides: Partial<Zone> = {}): Zone {
     band_high: '100',
     refined_low: null,
     refined_high: null,
+    created_at: '2026-08-17T00:00:00+00:00',
     created_index: 0,
     confirmed_index: 1,
     parent_zone_id: null,
@@ -129,5 +130,42 @@ describe('Chart', () => {
     expect(screen.getByRole('img').getAttribute('aria-label')).toBe(
       'Price chart with 1 candles, 1 zones and 1 liquidity pools',
     )
+  })
+})
+
+describe('zone placement', () => {
+  it('starts a zone where it was created, not at the left edge', () => {
+    // Drawing a zone full-width claims it existed before the engine found it.
+    // For a reader verifying a label against the SLS that is a false
+    // statement, and the kind that looks like a rendering choice.
+    render(
+      <Chart
+        candles={[candle(0), candle(1), candle(2), candle(3)]}
+        zones={[zone('z1', { created_at: '2026-08-17T02:00:00+00:00' })]}
+        pools={[]}
+      />,
+    )
+
+    const band = screen.getByTestId('zone-z1')
+
+    // Created at the third candle, so its left edge is well past the frame's.
+    expect(Number(band.getAttribute('x'))).toBeGreaterThan(300)
+  })
+
+  it('runs a zone created before the window from the left edge', () => {
+    // Still live, so it must appear -- dropping it would read as "the engine
+    // found nothing", the one claim the chart must never make by accident.
+    render(
+      <Chart
+        candles={[candle(1), candle(2)]}
+        zones={[zone('z1', { created_at: '2020-01-01T00:00:00+00:00' })]}
+        pools={[]}
+      />,
+    )
+
+    const band = screen.getByTestId('zone-z1')
+
+    expect(Number(band.getAttribute('x'))).toBeLessThan(50)
+    expect(Number(band.getAttribute('width'))).toBeGreaterThan(1000)
   })
 })
