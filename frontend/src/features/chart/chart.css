@@ -1,0 +1,117 @@
+/* Chart styling (Sprint S13a). Tokens only — no literal colours below.
+
+   This file exists because its absence was a real defect: an unstyled SVG
+   <rect> fills solid black by default, so 39 full-width zone bands painted the
+   entire chart out. The DOM was correct the whole time, which is exactly why
+   inspecting the DOM did not catch it. */
+
+.screen {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  padding: 1rem;
+}
+
+.screen__controls {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  color: var(--text-secondary);
+}
+
+.screen__controls label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.screen__controls input,
+.screen__controls select {
+  background: var(--bg-inset);
+  color: var(--text-primary);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  padding: 0.3rem 0.5rem;
+  font: inherit;
+}
+
+.screen__provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin-top: 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--bg-inset);
+  border: 1px solid var(--line-subtle);
+  border-radius: 4px;
+}
+
+/* Zones are context and sit behind price, so they are washes rather than
+   fills. 12% keeps a band readable where several overlap without any one of
+   them hiding a candle — the thing the reader is actually here to judge. */
+.zone {
+  fill-opacity: 0.12;
+  stroke-width: 1;
+  stroke-opacity: 0.45;
+}
+
+.zone--bullish {
+  fill: var(--sem-long);
+  stroke: var(--sem-long);
+}
+
+.zone--bearish {
+  fill: var(--sem-short);
+  stroke: var(--sem-short);
+}
+
+/* A stale zone must not read as a live one (Constitution §45.3 in visual form).
+   Dashed outline plus a lighter wash: the difference survives greyscale and
+   colour-blindness, because colour is never the sole carrier (Blueprint §158). */
+.zone--stale {
+  fill-opacity: 0.05;
+  stroke-dasharray: 6 4;
+}
+
+.pool {
+  stroke-width: 1;
+  stroke-opacity: 0.7;
+  stroke-dasharray: 4 4;
+}
+
+/* Buy-side liquidity rests above price, sell-side below. The colours follow the
+   direction a sweep of that pool implies, not the pool's own position. */
+.pool--bsl {
+  stroke: var(--sem-long);
+}
+
+.pool--ssl {
+  stroke: var(--sem-short);
+}
+
+.candle--up rect {
+  fill: var(--sem-long);
+}
+
+.candle--up .candle__wick {
+  stroke: var(--sem-long);
+}
+
+.candle--down rect {
+  fill: var(--sem-short);
+}
+
+.candle--down .candle__wick {
+  stroke: var(--sem-short);
+}
+
+.candle__wick {
+  stroke-width: 1;
+}

@@ -35,6 +35,7 @@ export interface Zone {
   readonly band_high: string
   readonly refined_low: string | null
   readonly refined_high: string | null
+  readonly created_at: string
   readonly created_index: number
   readonly confirmed_index: number
   readonly parent_zone_id: string | null

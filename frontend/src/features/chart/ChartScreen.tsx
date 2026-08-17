@@ -11,6 +11,8 @@ import type { Meta, Candle, Pool, Zone } from '@entities/market/types'
 import { ApiRequestError, fetchCandles, fetchLiquidity, fetchZones } from '@services/api/client'
 import { Chart } from '@features/chart/Chart'
 
+import './chart.css'
+
 const TIMEFRAMES = ['M5', 'M15', 'H1', 'H4'] as const
 
 interface Loaded {

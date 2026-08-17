@@ -74,6 +74,30 @@ export function priceScale(
   }
 }
 
+/** The x of the first candle at or after `iso`, or the left edge if earlier.
+ *
+ * Zones are positioned by time, not by `created_index`: that index is an offset
+ * into whatever window the engine replayed, and the chart holds a different
+ * one. Placing a zone at index 1846 of a 297-candle chart would put the object
+ * somewhere it has no relation to -- worse than not placing it at all.
+ */
+export function xForTime(
+  candles: readonly Candle[],
+  iso: string,
+  viewport: Viewport,
+  time: TimeScale,
+): number {
+  const at = Date.parse(iso)
+
+  const index = candles.findIndex((candle) => Date.parse(candle.open_time) >= at)
+
+  // Created before this window opened: the zone is still live, so it starts at
+  // the left edge rather than being dropped.
+  if (index === -1) return viewport.width - viewport.padding
+
+  return index === 0 ? viewport.padding : time.x(index)
+}
+
 export function timeScale(count: number, viewport: Viewport): TimeScale {
   const usable = viewport.width - viewport.padding * 2
   const band = count > 0 ? usable / count : usable

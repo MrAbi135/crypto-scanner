@@ -3,7 +3,14 @@
 // would put the part that must be trustworthy behind an abstraction.
 
 import type { Candle, Pool, Zone } from '@entities/market/types'
-import { bodyRect, isUp, priceScale, timeScale, type Viewport } from '@features/chart/scale'
+import {
+  bodyRect,
+  isUp,
+  priceScale,
+  timeScale,
+  xForTime,
+  type Viewport,
+} from '@features/chart/scale'
 
 const VIEWPORT: Viewport = { width: 1200, height: 600, padding: 24 }
 
@@ -42,15 +49,20 @@ export function Chart({ candles, zones, pools }: ChartProps) {
           const top = price.y(zone.band_high)
           const bottom = price.y(zone.band_low)
 
+          // A zone runs from when it was created to now. Drawing it full-width
+          // would claim it existed before the engine found it -- a false
+          // statement to anyone reading the chart to verify a label.
+          const left = xForTime(candles, zone.created_at, VIEWPORT, time)
+
           return (
             <rect
               key={zone.zone_id}
               data-testid={`zone-${zone.zone_id}`}
               data-zone-type={zone.zone_type}
               data-state={zone.state}
-              x={VIEWPORT.padding}
+              x={left}
               y={top}
-              width={VIEWPORT.width - VIEWPORT.padding * 2}
+              width={Math.max(1, VIEWPORT.width - VIEWPORT.padding - left)}
               height={Math.max(1, bottom - top)}
               className={`zone zone--${zone.polarity.toLowerCase()}${
                 zone.stale_context ? ' zone--stale' : ''
