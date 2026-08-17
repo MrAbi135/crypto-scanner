@@ -117,7 +117,12 @@ class LiveIngestService:
             tracker.mark_degraded()
             return 0
 
-        inserted = await self._candles.bulk_insert([candle])
+        # The one place a close is announced. Backfill inserts through the same
+        # repository without this flag -- see CandleRepository.bulk_insert.
+        inserted = await self._candles.bulk_insert(
+            [candle],
+            emit_outbox=True,
+        )
 
         if inserted > 0:
             tracker.record_verified_candle()

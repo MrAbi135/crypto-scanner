@@ -73,8 +73,15 @@ class CandleRepository(Protocol):
     async def bulk_insert(
         self,
         candles: Sequence[Candle],
+        *,
+        emit_outbox: bool = False,
     ) -> int:
-        """Insert immutable candles idempotently."""
+        """Insert immutable candles idempotently.
+
+        `emit_outbox` writes a `market.candle.closed` event to T39 in the same
+        transaction, for exactly the candles the insert accepted. Off by
+        default: backfill must not announce historical closes as live ones.
+        """
         ...
 
     async def latest_open_time(

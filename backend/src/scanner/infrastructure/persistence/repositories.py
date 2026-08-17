@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import bindparam, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -21,6 +22,10 @@ from scanner.application.ports import (
 )
 from scanner.application.ports.liquidity_history import (
     LiquidityHistoryRecord,
+)
+from scanner.application.ports.outbox import (
+    CANDLE_AGGREGATE,
+    CANDLE_CLOSED_EVENT,
 )
 from scanner.domain.common import (
     Candle,
@@ -35,7 +40,9 @@ from scanner.infrastructure.persistence.models import (
     LiquidityHistoryRow,
     SymbolRow,
 )
-from scanner.shared import Timeframe
+from scanner.shared import EventEnvelope, Timeframe
+from scanner.shared.ids import monotonic_factory
+from scanner.shared.types import Ulid
 
 _CANDLE_COLUMNS = (
     "symbol",
@@ -191,10 +198,36 @@ class PgCandleRepository:
         self._sessions = sessions
         self._clock = clock
 
+        # Outbox ids order the relay's queue, so they must be strictly
+        # increasing. A plain new_ulid() randomises its tail, and every candle
+        # in one batch shares a created_at -- which left the order of a
+        # multi-candle insert undefined. Caught by an integration test that
+        # read back 02:00 as the first of three closes.
+        self._event_id = monotonic_factory()
+
+    def _next_event_id(self, now: datetime) -> Ulid:
+        return self._event_id(int(now.timestamp() * 1000))
+
     async def bulk_insert(
         self,
         candles: Sequence[Candle],
+        *,
+        emit_outbox: bool = False,
     ) -> int:
+        """Insert immutable candles idempotently.
+
+        With ``emit_outbox``, one ``market.candle.closed`` event is written to
+        T39 **in this same transaction**, for exactly the candles the insert
+        actually accepted -- never for rows ``ON CONFLICT DO NOTHING`` dropped.
+        A duplicate frame from the exchange must not re-announce a close the
+        engine has already seen.
+
+        It defaults off because backfill is the other caller. Replaying three
+        hundred historical candles through the live detection path would be
+        three hundred detection passes to reach a state the replay services
+        compute in one, and the events would arrive labelled as closes that
+        just happened.
+        """
         if not candles:
             return 0
 
@@ -243,25 +276,98 @@ class PgCandleRepository:
                 columns=list(_CANDLE_COLUMNS),
             )
 
-            inserted = await driver.fetchval(
+            # RETURNING the keys rather than a bare 1: the outbox needs to know
+            # which candles were accepted, and counting them is the same query.
+            accepted = await driver.fetch(
                 """
-                WITH moved AS (
-                    INSERT INTO market.candles
-                    SELECT * FROM _candles_stage
-                    ON CONFLICT (
-                        symbol,
-                        timeframe,
-                        open_time
-                    ) DO NOTHING
-                    RETURNING 1
-                )
-                SELECT count(*) FROM moved
+                INSERT INTO market.candles
+                SELECT * FROM _candles_stage
+                ON CONFLICT (
+                    symbol,
+                    timeframe,
+                    open_time
+                ) DO NOTHING
+                RETURNING symbol, timeframe, open_time
                 """
             )
 
+            if emit_outbox and accepted:
+                await self._append_candle_events(
+                    driver,
+                    accepted,
+                    candles,
+                    now,
+                )
+
             await session.commit()
 
-            return int(inserted or 0)
+            return len(accepted)
+
+    async def _append_candle_events(
+        self,
+        driver: Any,
+        accepted: Sequence[Any],
+        candles: Sequence[Candle],
+        now: datetime,
+    ) -> None:
+        """Write one T39 row per accepted candle, inside the caller's transaction."""
+
+        by_key = {
+            (
+                candle.symbol,
+                candle.timeframe.value,
+                candle.open_time,
+            ): candle
+            for candle in candles
+        }
+
+        rows = []
+
+        for record in accepted:
+            key = (
+                record["symbol"],
+                record["timeframe"],
+                record["open_time"],
+            )
+
+            candle = by_key[key]
+
+            envelope = EventEnvelope(
+                event_type=CANDLE_CLOSED_EVENT,
+                event_id=self._next_event_id(now),
+                occurred_at=candle.close_time,
+                payload={
+                    "symbol": candle.symbol,
+                    "timeframe": candle.timeframe.value,
+                    "open_time": candle.open_time,
+                },
+            )
+
+            rows.append(
+                (
+                    envelope.event_id,
+                    CANDLE_AGGREGATE,
+                    f"{candle.symbol}:{candle.timeframe.value}:{candle.open_time.isoformat()}",
+                    CANDLE_CLOSED_EVENT,
+                    envelope.to_json(),
+                    now,
+                )
+            )
+
+        await driver.executemany(
+            """
+            INSERT INTO ops.outbox_events (
+                id,
+                aggregate_type,
+                aggregate_id,
+                event_type,
+                payload,
+                created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            rows,
+        )
 
     async def latest_open_time(
         self,
