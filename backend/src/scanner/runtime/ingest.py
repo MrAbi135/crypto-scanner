@@ -8,11 +8,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 import httpx
+import redis.asyncio as aioredis
 import structlog
 from starlette.applications import Starlette
 
 from scanner.application.marketdata import BackfillService
 from scanner.application.marketdata.live_ingest import LiveIngestService
+from scanner.application.marketdata.outbox_relay import OutboxRelayService
 from scanner.config import get_settings
 from scanner.config.processes import IngestSettings
 from scanner.domain.common import Candle
@@ -26,10 +28,12 @@ from scanner.infrastructure.persistence.database import (
     build_engine,
     build_session_factory,
 )
+from scanner.infrastructure.persistence.outbox_repository import PgOutboxRepository
 from scanner.infrastructure.persistence.repositories import (
     PgCandleRepository,
     PgIncidentRepository,
 )
+from scanner.infrastructure.redis.event_stream import RedisEventStreamPublisher
 from scanner.runtime.wiring.bootstrap import bootstrap
 from scanner.runtime.wiring.health import build_health_app, run_asgi
 from scanner.shared import Timeframe
@@ -45,6 +49,39 @@ _FEEDS = (
     ("BTCUSDT", Timeframe.M5),
     ("ETHUSDT", Timeframe.M5),
 )
+
+
+# Fast enough that a close reaches the engine within a second or two, slow
+# enough that an idle market is not a tight poll. The sweep is a single indexed
+# query returning nothing when there is nothing to do.
+_RELAY_INTERVAL_SECONDS = 1.0
+
+
+async def _run_relay(relay: OutboxRelayService) -> None:
+    """Drain the outbox onto the stream, forever.
+
+    Lives in ingest rather than engine because ingest is what writes the outbox
+    rows, and because exactly one relay may run -- see `PgOutboxRepository`.
+    Tying it to the single ingest process makes that structural instead of
+    something an operator has to remember.
+    """
+    while True:
+        try:
+            report = await relay.sweep()
+
+            if report.claimed:
+                log.info(
+                    "outbox_relayed",
+                    claimed=report.claimed,
+                    published=report.published,
+                    marked=report.marked,
+                )
+        except Exception:
+            # Never fatal. Redis being down must not stop candles being
+            # persisted; the events stay queued and the next sweep retries.
+            log.exception("outbox_relay_sweep_failed")
+
+        await asyncio.sleep(_RELAY_INTERVAL_SECONDS)
 
 
 async def _run_websocket(
@@ -159,6 +196,14 @@ def main() -> None:
             app.state.readiness_probe = readiness_probe
             app.state.live_ingest = live_ingest
 
+            redis_client = aioredis.from_url(settings.redis_url)
+
+            relay = OutboxRelayService(
+                PgOutboxRepository(sessions),
+                RedisEventStreamPublisher(redis_client),
+                clock,
+            )
+
             task = asyncio.create_task(
                 _run_websocket(
                     settings,
@@ -167,14 +212,20 @@ def main() -> None:
             )
             app.state.websocket_task = task
 
+            relay_task = asyncio.create_task(_run_relay(relay))
+            app.state.relay_task = relay_task
+
             try:
                 yield
             finally:
                 task.cancel()
+                relay_task.cancel()
                 await asyncio.gather(
                     task,
+                    relay_task,
                     return_exceptions=True,
                 )
+                await redis_client.aclose()
                 await engine.dispose()
 
     app = build_health_app(settings)
