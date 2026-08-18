@@ -8,6 +8,8 @@ object, so there is exactly one definition of what "run detection" means.
 module dependency graph from Roadmap §6:
 
     structure ─→ liquidity ─→ structure_shift ─→ ict ─→ ote / ob ─→ interaction
+                                                                        ↓
+                                                                  participation
 
 `structure_shift` (CHoCH/MSS, SLS §3.6) reads liquidity sweep evidence to decide
 whether a break is an MSS, so it cannot precede liquidity. The ICT engines read
@@ -15,6 +17,11 @@ structure and liquidity facts through `IctEvidenceRepository` for their
 qualification flags, so they come last. Running these out of order does not
 crash -- each service simply finds less evidence than exists and quietly grades
 its output lower.
+
+Participation (§6, §7) sits at the end but is not part of that chain: volume and
+momentum read candles alone and depend on nothing above them. It runs last
+because §8's confluence engine consumes every engine's output, and the ordering
+that matters there is "after everything", not "after any particular one".
 """
 
 from __future__ import annotations
@@ -30,6 +37,7 @@ from scanner.application.detection.ict_ob_replay import IctOrderBlockReplayServi
 from scanner.application.detection.ict_ote_replay import IctOteReplayService
 from scanner.application.detection.ict_replay import IctReplayService
 from scanner.application.detection.liquidity_replay import LiquidityReplayService
+from scanner.application.detection.participation_replay import ParticipationReplayService
 from scanner.application.detection.structure_replay import StructureReplayService
 from scanner.application.detection.structure_shift_replay import (
     StructureShiftReplayService,
@@ -46,6 +54,7 @@ class DetectionPipelineReport:
     ict_ote: Any
     ict_ob: Any
     ict_interaction: Any
+    participation: Any
 
 
 class DetectionPipeline:
@@ -60,6 +69,7 @@ class DetectionPipeline:
         ict_ote: IctOteReplayService,
         ict_ob: IctOrderBlockReplayService,
         ict_interaction: IctZoneInteractionReplayService,
+        participation: ParticipationReplayService,
     ) -> None:
         self._structure = structure
         self._liquidity = liquidity
@@ -68,6 +78,7 @@ class DetectionPipeline:
         self._ict_ote = ict_ote
         self._ict_ob = ict_ob
         self._ict_interaction = ict_interaction
+        self._participation = participation
 
     async def run(
         self,
@@ -98,6 +109,8 @@ class DetectionPipeline:
 
         ict_interaction = await self._ict_interaction.run(symbol, timeframe, start, end)
 
+        participation = await self._participation.run(symbol, timeframe, start, end)
+
         return DetectionPipelineReport(
             structure=structure,
             liquidity=liquidity,
@@ -106,4 +119,5 @@ class DetectionPipeline:
             ict_ote=ict_ote,
             ict_ob=ict_ob,
             ict_interaction=ict_interaction,
+            participation=participation,
         )

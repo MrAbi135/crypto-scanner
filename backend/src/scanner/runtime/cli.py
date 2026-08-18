@@ -282,6 +282,7 @@ async def _run_engine(
         ict_ote_report = report.ict_ote
         ict_ob_report = report.ict_ob
         ict_interaction_report = report.ict_interaction
+        participation_report = report.participation
 
         operation = "engine rebuild-state" if rebuild_state else "engine run"
 
@@ -401,6 +402,21 @@ async def _run_engine(
             f"violations={ict_interaction_report.violations} "
             f"confirmations={ict_interaction_report.confirmations} "
             f"inserted={ict_interaction_report.interactions_inserted}"
+        )
+
+        # Printed because its absence is what hid whether the service ran at
+        # all: the pipeline called it, the CLI said nothing, and the only way
+        # to find out was to query the database.
+        print(
+            "  participation: "
+            f"spikes={participation_report.volume_spikes} "
+            f"vol_expansion={participation_report.expansions} "
+            f"vol_contraction={participation_report.contractions} "
+            f"range_expansion={participation_report.range_expansions} "
+            f"compression={participation_report.compressions} "
+            f"accelerating={participation_report.accelerations} "
+            f"exhaustion={participation_report.exhaustion_watches} "
+            f"inserted={participation_report.events_inserted}"
         )
 
         if structure_report.last_processed_open_time is not None:
