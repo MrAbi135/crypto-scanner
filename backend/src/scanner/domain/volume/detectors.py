@@ -14,7 +14,7 @@ from decimal import Decimal
 
 from scanner.domain.common import Candle
 from scanner.domain.common.atr import wilder_atr
-from scanner.domain.volume.rvol import RvolClass, classify, relative_volume
+from scanner.domain.common.rvol import RvolClass, classify, relative_volume
 
 # P.volume.spike_floor -- an absolute quote-volume floor so a micro-cap's $8k
 # "spike" cannot score merely by being 5x its own tiny baseline (§6.2).
@@ -126,7 +126,7 @@ def detect_expansion(
     if any(value is None for value in rvols):
         return False
 
-    mean_rvol = sum(value for value in rvols if value is not None) / 3
+    mean_rvol = sum((value for value in rvols if value is not None), Decimal(0)) / 3
 
     if mean_rvol < EXPANSION_MEAN_RVOL:
         return False
@@ -161,7 +161,9 @@ def detect_contraction(
     if any(value is None for value in rvols):
         return False
 
-    mean_rvol = sum(value for value in rvols if value is not None) / CONTRACTION_WINDOW
+    mean_rvol = (
+        sum((value for value in rvols if value is not None), Decimal(0)) / CONTRACTION_WINDOW
+    )
 
     if mean_rvol > CONTRACTION_MEAN_RVOL:
         return False
@@ -171,6 +173,8 @@ def detect_contraction(
     if atr is None or atr <= 0:
         return False
 
-    mean_range = sum(candles[i].high - candles[i].low for i in window) / CONTRACTION_WINDOW
+    mean_range = (
+        sum((candles[i].high - candles[i].low for i in window), Decimal(0)) / CONTRACTION_WINDOW
+    )
 
     return mean_range <= CONTRACTION_MEAN_RANGE_ATR * atr
