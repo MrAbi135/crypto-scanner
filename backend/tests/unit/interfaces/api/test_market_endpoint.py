@@ -44,6 +44,9 @@ class FakeCandleRepository:
         self.calls.append((symbol, timeframe, start, end))
         return self.series
 
+    async def latest_open_time(self, symbol, timeframe):
+        return self.series[-1].open_time if self.series else None
+
 
 def build(series=()):
     repo = FakeCandleRepository(series)
@@ -134,7 +137,55 @@ def test_the_symbol_is_normalised_before_the_query() -> None:
     assert timeframe is Timeframe.H1
 
 
-def test_the_window_is_limit_candles_back_from_now() -> None:
+def test_a_historical_context_anchors_to_its_own_newest_candle() -> None:
+    """The defect that hid twelve golden datasets.
+
+    Anchoring to `clock.now()` looks correct for a live symbol, because its
+    newest candle is roughly now. For anything historical the window lands in
+    empty space and the chart says "no candles for this context yet" -- a
+    plausible sentence about data that is sitting in the table.
+    """
+    january = datetime(2026, 1, 5, tzinfo=UTC)
+
+    old = [
+        make_candle(
+            symbol="GOLDENFVG",
+            timeframe=Timeframe.H1,
+            open_time=january + Timeframe.H1.duration * i,
+        )
+        for i in range(6)
+    ]
+
+    client, repo, _ = build(old)
+
+    body = client.get(
+        "/api/v1/market/candles",
+        params={"symbol_id": "GOLDENFVG", "timeframe": "H1", "limit": 100},
+    ).json()
+
+    _, _, start, end = repo.calls[0]
+
+    # One step past the newest stored candle, so that candle is inside the
+    # half-open window rather than on its excluded edge.
+    assert end == old[-1].open_time + Timeframe.H1.duration
+    assert start == end - Timeframe.H1.duration * 100
+    assert len(body["data"]) == 6
+
+
+def test_an_unknown_context_still_falls_back_to_the_clock() -> None:
+    client, repo, _ = build()
+
+    client.get(
+        "/api/v1/market/candles",
+        params={"symbol_id": "NOSUCH", "timeframe": "H1"},
+    )
+
+    _, _, _, end = repo.calls[0]
+
+    assert end == NOW
+
+
+def test_the_window_is_limit_candles_back_from_the_anchor() -> None:
     client, repo, _ = build()
 
     client.get(

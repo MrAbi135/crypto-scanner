@@ -21,6 +21,7 @@ from scanner.application.ports import CandleRepository, Clock
 from scanner.interfaces.api.deps import get_candles, get_clock
 from scanner.interfaces.api.envelope import Freshness, success
 from scanner.interfaces.api.errors import bad_request
+from scanner.interfaces.api.window import window_end
 from scanner.shared import Timeframe
 
 router = APIRouter(prefix="/api/v1/market", tags=["market"])
@@ -50,10 +51,12 @@ async def get_candles_endpoint(
     """
     parsed = _timeframe(request, timeframe)
 
-    end = to or clock.now()
+    symbol = symbol_id.upper()
+
+    end = to or await window_end(candles, symbol, parsed, clock)
     start = end - parsed.duration * limit
 
-    series = await candles.fetch_series(symbol_id.upper(), parsed, start, end)
+    series = await candles.fetch_series(symbol, parsed, start, end)
 
     rows = [
         {

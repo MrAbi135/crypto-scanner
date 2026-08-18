@@ -60,16 +60,22 @@ class FakePools:
 
 
 class NoCandles:
+    def __init__(self, latest: datetime | None = None) -> None:
+        self.latest = latest
+
     async def fetch_series(self, *args):
         return []
 
+    async def latest_open_time(self, *args):
+        return self.latest
 
-def build(*, structure=(), liquidity=(), zones=(), pools=()):
+
+def build(*, structure=(), liquidity=(), zones=(), pools=(), latest=None):
     evidence = FakeEvidence(structure, liquidity)
     zone_repo = FakeZones(zones)
 
     app = build_read_api(
-        candles=NoCandles(),
+        candles=NoCandles(latest),
         evidence=evidence,
         zones=zone_repo,
         pools=FakePools(pools),
@@ -204,7 +210,8 @@ def test_structure_returns_recorded_events_with_decoded_evidence() -> None:
     assert body["data"][0]["evidence"] == {"swing_index": 12, "level": "62000"}
 
 
-def test_the_structure_window_is_window_candles_back() -> None:
+def test_the_structure_window_is_window_candles_back_from_the_anchor() -> None:
+    """With no stored candles the anchor falls back to the clock."""
     client, evidence, _ = build()
 
     client.get(
@@ -214,7 +221,8 @@ def test_the_structure_window_is_window_candles_back() -> None:
 
     start, end = evidence.windows[0]
 
-    assert end == NOW
+    # One step past the anchor so an event on the final bar is inside.
+    assert end == NOW + Timeframe.H4.duration
     assert start == NOW - Timeframe.H4.duration * 100
 
 
@@ -302,3 +310,27 @@ def test_an_unknown_timeframe_is_refused_on_every_row(path: str) -> None:
 
     assert response.status_code == 400
     assert response.json()["error"]["details"][0]["field"] == "timeframe"
+
+
+def test_the_window_reaches_past_the_final_candles_close() -> None:
+    """An event on the last bar must not fall one instant outside the window.
+
+    A candle is keyed by open_time, so `lastOpen + duration` includes it. A
+    transition is stamped at the *close* of the candle that caused it, which is
+    exactly `lastOpen + duration` -- and the repository filters
+    `transitioned_at < end`. The two bounds agree everywhere except the final
+    bar, where the most recent event is the one most likely being looked for.
+
+    Found on the GOLDENSWEEP dataset: last candle open 06:00, sweep stamped
+    07:00, window ending 07:00, and zero sweeps returned for a dataset whose
+    entire purpose is that sweep.
+    """
+    last_open = datetime(2026, 1, 5, 6, tzinfo=UTC)
+
+    client, evidence, _ = build(latest=last_open)
+
+    client.get("/api/v1/coins/GOLDENSWEEP/structure", params={"timeframe": "H1"})
+
+    _, end = evidence.windows[0]
+
+    assert end > last_open + Timeframe.H1.duration
