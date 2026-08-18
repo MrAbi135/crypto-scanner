@@ -1,4 +1,10 @@
-"""Relative volume (SLS §2.11) — the baseline the whole volume engine sits on.
+"""Relative volume (SLS §2.11) — a shared derived measure, like ATR.
+
+Lives in `common` because §6 (volume) and §7.1 (momentum participation) both
+read it, and those two are siblings under the engine-acyclicity contract: they
+may not import each other. It first shipped inside `domain/volume`, placed by
+which engine happened to need it first rather than by what it is. §2.11 puts it
+in Data Integrity & Derived Measures alongside ATR, which was already here.
 
 Two baselines, not one, and the split is deliberate:
 

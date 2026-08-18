@@ -19,6 +19,16 @@ Building those now would add detectors nothing can call, which is the mistake
 recorded in docs/evidence/S5/CHECKLIST.md. They wait for the ingest work.
 """
 
+from scanner.domain.common.rvol import (
+    BASELINE_CANDLES,
+    BASELINE_DAYS,
+    RvolClass,
+    baseline_sample,
+    classify,
+    median,
+    relative_volume,
+    uses_seasonal_baseline,
+)
 from scanner.domain.volume.detectors import (
     CONTRACTION_WINDOW,
     CONVICTION_DELTA,
@@ -28,16 +38,6 @@ from scanner.domain.volume.detectors import (
     detect_contraction,
     detect_expansion,
     detect_volume_spike,
-)
-from scanner.domain.volume.rvol import (
-    BASELINE_CANDLES,
-    BASELINE_DAYS,
-    RvolClass,
-    baseline_sample,
-    classify,
-    median,
-    relative_volume,
-    uses_seasonal_baseline,
 )
 
 __all__ = [
