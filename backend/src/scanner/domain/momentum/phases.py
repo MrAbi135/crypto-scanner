@@ -12,7 +12,7 @@ from decimal import Decimal
 
 from scanner.domain.common import Candle
 from scanner.domain.common.atr import wilder_atr
-from scanner.domain.momentum.score import momentum_score
+from scanner.domain.momentum.score import MomentumDirection, momentum_score
 
 # §7.2
 ACCEL_LOOKBACK = 3
@@ -63,13 +63,33 @@ def momentum_phase(
         decelerating=decelerating,
         # Fading energy while price still grinds out marginal extremes is the
         # tired-trend signature §7.2 wants flagged -- prime context for a sweep.
-        exhaustion_watch=decelerating and _marginal_progress(candles, index),
+        exhaustion_watch=decelerating and _marginal_new_extreme(candles, index, now.direction),
     )
 
 
-def _marginal_progress(candles: Sequence[Candle], index: int) -> bool:
-    """Less than 0.5 x ATR of progress per candle over the differential window."""
+def _marginal_new_extreme(
+    candles: Sequence[Candle],
+    index: int,
+    direction: MomentumDirection,
+) -> bool:
+    """§7.2: "price makes marginal new extremes (< 0.5 x ATR progress per candle)".
+
+    Two tests, and the first is the one that carries the meaning. Exhaustion is
+    a trend that is *still pushing* and getting almost nowhere -- which is why
+    §7.2 calls it prime Sweep-Reversal context: there is a trend there to sweep.
+
+    Measuring only the size of the move tags every quiet candle in a range.
+    Sideways drift is not a tired trend, it is the absence of one, and on real
+    BTCUSDT H1 that read fired on 26% of candles -- a warning that common is not
+    a warning, and §8.5 spends it as a -8 penalty.
+
+    Extremes, not closes: the subject of the sentence is the extreme.
+    """
     if index < ACCEL_LOOKBACK:
+        return False
+
+    # §7.1 forces NEUTRAL where no direction dominates. Nothing is exhausted.
+    if direction is MomentumDirection.NEUTRAL:
         return False
 
     atr = wilder_atr(candles, index)
@@ -77,7 +97,18 @@ def _marginal_progress(candles: Sequence[Candle], index: int) -> bool:
     if atr is None or atr <= 0:
         return False
 
-    progress = abs(candles[index].close - candles[index - ACCEL_LOOKBACK].close)
+    prior = candles[index - ACCEL_LOOKBACK : index]
+
+    if direction is MomentumDirection.UP:
+        if candles[index].high <= max(c.high for c in prior):
+            return False
+
+        progress = candles[index].high - candles[index - ACCEL_LOOKBACK].high
+    else:
+        if candles[index].low >= min(c.low for c in prior):
+            return False
+
+        progress = candles[index - ACCEL_LOOKBACK].low - candles[index].low
 
     return progress < EXHAUSTION_PROGRESS_ATR * atr * ACCEL_LOOKBACK
 
