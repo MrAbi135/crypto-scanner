@@ -29,17 +29,40 @@ class FakeClock:
         return datetime(2026, 8, 18, tzinfo=UTC)
 
 
-class FakeCandleRepository:
-    def __init__(self, count: int) -> None:
-        self.series = [
+# §6.2's RVOL baseline is 20 candles and §7.1's momentum warm-up is 30, so a
+# context shorter than that is one G1 refuses rather than grades.
+CANDLES = 60
+
+
+def make_series(
+    count: int = CANDLES,
+    *,
+    trend: str = "up",
+    last_volume: str = "50",
+) -> list:
+    """A steadily trending context, with the newest candle's volume settable."""
+    out = []
+
+    for i in range(count):
+        step = i if trend == "up" else -i
+        base = Decimal(1000) + step
+
+        out.append(
             make_candle(
                 timeframe=TF,
                 open_time=BASE + TF.duration * i,
-                open_=Decimal(100),
-                close=Decimal(101),
+                open_=base,
+                close=base + (1 if trend == "up" else -1),
+                volume=Decimal(last_volume) if i == count - 1 else Decimal(50),
             )
-            for i in range(count)
-        ]
+        )
+
+    return out
+
+
+class FakeCandleRepository:
+    def __init__(self, series) -> None:
+        self.series = list(series)
 
     async def fetch_series(self, symbol, timeframe, start, end):
         return self.series
@@ -136,17 +159,18 @@ def zone(
     )
 
 
-# The window is 20 candles, so index 19 is "now". §4.6 gives a sweep 15 closed
-# candles of setup relevance, which puts a sweep confirmed at 4 exactly at the
-# edge of still counting.
-LAST_INDEX = 19
+LAST_INDEX = CANDLES - 1
+
+# §4.6 gives a sweep 15 closed candles of setup relevance, so a sweep confirmed
+# 5 candles back is comfortably live and one from the start of the window is not.
+RECENT_SWEEP = LAST_INDEX - 5
 
 
 def sweep(
     *,
     side: str = "SSL",
     liquidity_class: str = "EXTERNAL",
-    confirmed_index: int = 4,
+    confirmed_index: int = RECENT_SWEEP,
     expiry_index: int | None = None,
     reclaimed: bool = False,
 ) -> LiquidityEvidenceRecord:
@@ -176,12 +200,12 @@ def service(
     events: list[EngineEventRecord] | None = None,
     zones: list[IctZoneRecord] | None = None,
     liquidity: list[LiquidityEvidenceRecord] | None = None,
-    candles: int = 20,
+    candles: list | None = None,
 ):
     repo = FakeEventRepository(events)
 
     svc = ConfluenceReplayService(
-        FakeCandleRepository(candles),
+        FakeCandleRepository(make_series() if candles is None else candles),
         repo,
         FakeZoneRepository(zones or []),
         FakeEvidenceRepository(liquidity),
@@ -201,8 +225,6 @@ def bullish_setup() -> dict:
         "events": [
             event("BOS_UP", 3, direction="UP"),
             event("MSS_UP", 6, direction="UP"),
-            event("VOLUME_SPIKE", 7, rvol="3.2"),
-            event("MOMENTUM_ACCELERATING", 8, score="70", direction="UP"),
         ],
         "zones": [zone("z1")],
         "liquidity": [sweep()],
@@ -211,7 +233,7 @@ def bullish_setup() -> dict:
 
 @pytest.mark.asyncio
 async def test_an_empty_window_grades_nothing() -> None:
-    svc, repo = service(candles=0)
+    svc, repo = service(candles=[])
 
     report = await run(svc)
 
@@ -534,16 +556,20 @@ async def test_unread_target_pool_terms_do_not_pay_points() -> None:
 
 
 @pytest.mark.asyncio
-async def test_volume_reads_the_recorded_rvol_rather_than_a_constant() -> None:
+async def test_volume_reads_rvol_at_the_newest_candle() -> None:
+    """§6.2's RVOL is a per-candle measurement, so F4 reads it at the close.
+
+    Scanning the event log for the last VOLUME_SPIKE answers a different
+    question -- "did one ever happen in this window" -- and over a long replay
+    the answer is always yes.
+    """
     setup = bullish_setup()
 
-    spiking, _ = service(**setup)
-    quiet, _ = service(
-        **{**setup, "events": [e for e in setup["events"] if e.event_type != "VOLUME_SPIKE"]}
-    )
+    spiking, _ = service(**setup, candles=make_series(last_volume="250"))
+    quiet, _ = service(**setup)
 
-    a = next(c for c in (await run(spiking)).candidates if c.direction == "UP")
-    b = next(c for c in (await run(quiet)).candidates if c.direction == "UP")
+    a = next(c for c in (await run(spiking, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(quiet, "BULLISH")).candidates if c.direction == "UP")
 
     assert a.factors["F4"] > b.factors["F4"]
 
@@ -553,18 +579,29 @@ async def test_momentum_pointing_the_other_way_is_not_counted_as_support() -> No
     setup = bullish_setup()
 
     aligned, _ = service(**setup)
-    opposed, _ = service(
-        **{
-            **setup,
-            "events": [e for e in setup["events"] if e.event_type != "MOMENTUM_ACCELERATING"]
-            + [event("MOMENTUM_ACCELERATING", 8, score="70", direction="DOWN")],
-        }
-    )
+    opposed, _ = service(**setup, candles=make_series(trend="down"))
 
-    a = next(c for c in (await run(aligned)).candidates if c.direction == "UP")
-    b = next(c for c in (await run(opposed)).candidates if c.direction == "UP")
+    a = next(c for c in (await run(aligned, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(opposed, "BULLISH")).candidates if c.direction == "UP")
 
     assert a.factors["F5"] > b.factors["F5"]
+
+
+@pytest.mark.asyncio
+async def test_a_context_too_short_to_measure_is_refused_by_g1() -> None:
+    """§6.2 needs 20 candles of baseline and §7.1 thirty of warm-up.
+
+    A context that cannot produce either reading is not one §8 can grade, and
+    `data_ready` used to be a bare True.
+    """
+    svc, _ = service(**bullish_setup(), candles=make_series(15))
+
+    report = await run(svc, "BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    assert not up.gates_passed
+    assert "G1" in up.failed_gates
 
 
 @pytest.mark.asyncio

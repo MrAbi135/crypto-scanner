@@ -37,6 +37,8 @@ from scanner.application.ports.ict_evidence import (
     LiquidityEvidenceRecord,
 )
 from scanner.application.ports.ict_zones import IctZoneRecord, IctZoneRepository
+from scanner.domain.common import Candle
+from scanner.domain.common.rvol import relative_volume
 from scanner.domain.confluence import (
     Adjustment,
     ArchetypeEvidence,
@@ -57,16 +59,11 @@ from scanner.domain.confluence import (
     volume_factor,
     zone_factor,
 )
+from scanner.domain.momentum import momentum_phase, momentum_score
 from scanner.domain.structure import TrendState
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v1"
-
-# §6.2's NORMAL band is 0.8--1.5; its midpoint stands in where no RVOL fact was
-# recorded, because "no spike happened" is itself a reading, not missing data.
-NORMAL_RVOL = Decimal("1.15")
-
-_RVOL_BEARING = frozenset({"VOLUME_SPIKE", "VOLUME_EXPANSION", "VOLUME_CONTRACTION"})
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v2"
 
 # Inputs §8 asks for that no engine currently produces. Listed rather than
 # silently defaulted -- see the module docstring.
@@ -84,6 +81,17 @@ UNREACHABLE_INPUTS: tuple[str, ...] = (
     # price. Without one, no chain closes and no candidate can classify.
     "archetype_retest_chain",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _Reading:
+    """§6 and §7 at the context's newest candle."""
+
+    rvol: Decimal | None
+    score: Decimal
+    direction: str | None
+    accelerating: bool
+    exhausted: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +169,8 @@ class ConfluenceReplayService:
 
         event_types = {record.event_type for record in events}
 
+        reading = _read_participation(series)
+
         candidates: list[SetupCandidate] = []
         inserted = 0
 
@@ -174,8 +184,7 @@ class ConfluenceReplayService:
                 event_types=event_types,
                 liquidity=liquidity,
                 live_zones=live_zones,
-                rvol=_latest_rvol(events),
-                momentum=_latest_momentum(events),
+                reading=reading,
             )
 
             candidates.append(candidate)
@@ -201,8 +210,7 @@ class ConfluenceReplayService:
         event_types: set[str],
         liquidity: tuple[LiquidityEvidenceRecord, ...],
         live_zones: tuple[IctZoneRecord, ...],
-        rvol: Decimal,
-        momentum: tuple[Decimal, str | None],
+        reading: _Reading,
     ) -> SetupCandidate:
         polarity = "BULLISH" if direction == "UP" else "BEARISH"
 
@@ -246,7 +254,11 @@ class ConfluenceReplayService:
 
         gates = evaluate_gates(
             GateEvidence(
-                data_ready=True,
+                # §7.1 and §6.2 both need a warm-up window; a context too short
+                # to produce either reading is not one §8 can grade. Partial --
+                # G1 also wants feed freshness and tier permission -- but no
+                # longer a bare `True`.
+                data_ready=reading.rvol is not None,
                 structure_compatible=trend_following or reversal,
                 # §5.7 has no persisted output, so this passes rather than
                 # blocking every candidate on an unbuilt gate. Recorded in
@@ -306,13 +318,13 @@ class ConfluenceReplayService:
                 )
             ).score,
             Factor.ZONE: _zone_score(best_zone, len(matching_zones)),
-            Factor.VOLUME: volume_factor(rvol).score,
+            Factor.VOLUME: volume_factor(reading.rvol or Decimal(0)).score,
             Factor.MOMENTUM: momentum_factor(
                 MomentumEvidence(
-                    score=momentum[0],
-                    aligned=momentum[1] == direction,
-                    accelerating="MOMENTUM_ACCELERATING" in event_types,
-                    exhaustion_against="EXHAUSTION_WATCH" in event_types,
+                    score=reading.score,
+                    aligned=reading.direction == direction,
+                    accelerating=reading.accelerating,
+                    exhaustion_against=reading.exhausted,
                 )
             ).score,
             # The HTF's own state is a ladder read this service does not have
@@ -462,33 +474,37 @@ def _state_direction(trend_state: str) -> str | None:
     return None
 
 
-def _latest_rvol(events: tuple[EngineEventRecord, ...]) -> Decimal:
-    """The most recent recorded RVOL, or the §6.2 NORMAL midpoint."""
-    for record in reversed(events):
-        if record.event_type not in _RVOL_BEARING:
-            continue
+def _read_participation(series: list[Candle]) -> _Reading:
+    """§6 and §7 at the newest candle, recomputed rather than read back.
 
-        value = json.loads(record.payload).get("rvol")
+    Scanning the event log for the last VOLUME_SPIKE or MOMENTUM_ACCELERATING
+    answered a different question -- "did this ever happen in the window" -- and
+    over 1849 candles the answer is always yes. Correcting §7.2's exhaustion
+    rule cut the tag from 479 candles to 32 and moved confluence's confidence
+    not at all, because both counts are non-zero somewhere in two months.
 
-        if value is not None:
-            return Decimal(str(value))
+    Recomputing is safe *here* and not for trend state, and the difference is
+    the point. §7.1 calls the momentum score a "per-candle measurement (fact)"
+    and §6.2's RVOL likewise: both are pure functions of closed candles, so a
+    recomputation cannot disagree with the engine that owns them. Trend state is
+    a state machine with history, which is why it arrives as an argument.
 
-    return NORMAL_RVOL
+    The continuous series is also not in the event log by design -- §6 and §7
+    persist only the candles where the reading is a *fact*, since a class on
+    every bar is a series, not an event. So there is nothing to read back.
+    """
+    last = len(series) - 1
 
+    score = momentum_score(series, last)
+    phase = momentum_phase(series, last)
 
-def _latest_momentum(events: tuple[EngineEventRecord, ...]) -> tuple[Decimal, str | None]:
-    """The last recorded §7.1 score and the direction it pointed."""
-    for record in reversed(events):
-        if record.event_type != "MOMENTUM_ACCELERATING":
-            continue
-
-        payload = json.loads(record.payload)
-        score = payload.get("score")
-
-        if score is not None:
-            return Decimal(str(score)), payload.get("direction")
-
-    return Decimal(0), None
+    return _Reading(
+        rvol=relative_volume(series, last),
+        score=score.score if score else Decimal(0),
+        direction=score.direction.value if score else None,
+        accelerating=phase.accelerating if phase else False,
+        exhausted=phase.exhaustion_watch if phase else False,
+    )
 
 
 # §5 defines zone lifecycle twice: OB, breaker and OTE zones carry ZoneState
