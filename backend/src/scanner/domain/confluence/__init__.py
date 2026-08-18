@@ -8,8 +8,12 @@ Archetype classification (§8.6) evaluates supplied chain facts, the same shape
 as the gate battery: the application layer establishes them by reading across
 five sibling engines, and this layer decides what they add up to.
 
-**Not here.** Factor *scoring* (§8.3) reads those five engines directly, so it
-composes in the application layer. Cross-symbol ranking (§9.2) operates over
+Factor scoring (§8.3) provides the contribution framework for all six factors
+and implements the two the spec actually prices: F4 passes through §6.7's
+published score, F6 applies §8.3's four-value HTF table. **F1, F2, F3 and F5
+are deliberately absent** — §8.3 names what earns them points but never how
+many, and Appendix A has no factor table. Inventing one would make it doctrine
+by default. Cross-symbol ranking (§9.2) operates over
 published setups rather than a single candidate — only its archetype tie-break
 order lives here, next to the classification order it is often confused with.
 
@@ -39,6 +43,19 @@ from scanner.domain.confluence.confidence import (
     base_confidence,
     final_confidence,
 )
+from scanner.domain.confluence.factors import (
+    FACTOR_CEILING,
+    FACTOR_FLOOR,
+    HTF_ALIGNED,
+    HTF_CAUTION_TOWARD,
+    HTF_OPPOSED,
+    HTF_RANGING,
+    Contribution,
+    FactorScore,
+    from_contributions,
+    htf_alignment_factor,
+    volume_factor,
+)
 from scanner.domain.confluence.gates import (
     Gate,
     GateEvidence,
@@ -57,12 +74,18 @@ from scanner.domain.confluence.weights import (
 
 __all__ = [
     "CLASSIFICATION_ORDER",
+    "FACTOR_CEILING",
+    "FACTOR_FLOOR",
     "FACTOR_MAX",
     "FACTOR_MIN",
     "FLOORS",
     "GRADE_A_FLOOR",
     "GRADE_B_FLOOR",
     "GRADE_S_FLOOR",
+    "HTF_ALIGNED",
+    "HTF_CAUTION_TOWARD",
+    "HTF_OPPOSED",
+    "HTF_RANGING",
     "MAX_FVG_AGE_CANDLES",
     "MAX_PENALTY",
     "MAX_SYNERGY",
@@ -73,7 +96,9 @@ __all__ = [
     "Archetype",
     "ArchetypeEvidence",
     "Confidence",
+    "Contribution",
     "Factor",
+    "FactorScore",
     "Gate",
     "GateEvidence",
     "GateResult",
@@ -82,7 +107,10 @@ __all__ = [
     "classify_archetype",
     "evaluate_gates",
     "final_confidence",
+    "from_contributions",
     "grade",
+    "htf_alignment_factor",
     "meets_floor",
     "ranking_priority",
+    "volume_factor",
 ]

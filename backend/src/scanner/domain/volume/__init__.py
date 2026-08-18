@@ -39,6 +39,12 @@ from scanner.domain.volume.detectors import (
     detect_expansion,
     detect_volume_spike,
 )
+from scanner.domain.volume.factor import (
+    VolumeContribution,
+    VolumeFactor,
+    VolumeFactorEvidence,
+    volume_factor_score,
+)
 
 __all__ = [
     "BASELINE_CANDLES",
@@ -47,6 +53,9 @@ __all__ = [
     "CONVICTION_DELTA",
     "SPIKE_FLOOR_QUOTE",
     "RvolClass",
+    "VolumeContribution",
+    "VolumeFactor",
+    "VolumeFactorEvidence",
     "VolumeSpike",
     "baseline_sample",
     "classify",
@@ -57,4 +66,5 @@ __all__ = [
     "median",
     "relative_volume",
     "uses_seasonal_baseline",
+    "volume_factor_score",
 ]
