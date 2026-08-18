@@ -18,6 +18,9 @@ from scanner.application.detection.ict_ob_replay import IctOrderBlockReplayServi
 from scanner.application.detection.ict_ote_replay import IctOteReplayService
 from scanner.application.detection.ict_replay import IctReplayService
 from scanner.application.detection.liquidity_replay import LiquidityReplayService
+from scanner.application.detection.participation_replay import (
+    ParticipationReplayService,
+)
 from scanner.application.detection.pipeline import DetectionPipeline
 from scanner.application.detection.state import EngineStateManager
 from scanner.application.detection.structure_replay import StructureReplayService
@@ -108,5 +111,10 @@ def build_detection_pipeline(
             candles,
             PgIctZoneInteractionContextRepository(sessions),
             PgIctZoneInteractionRepository(sessions),
+        ),
+        participation=ParticipationReplayService(
+            candles,
+            events,
+            clock,
         ),
     )
