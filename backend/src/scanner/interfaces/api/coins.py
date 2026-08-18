@@ -23,11 +23,12 @@ from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSIO
 from scanner.application.detection.structure_shift_replay import (
     STRUCTURE_SHIFT_ALGO_VERSION,
 )
-from scanner.application.ports import Clock
+from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.ict_evidence import IctEvidenceRepository
 from scanner.application.ports.ict_zones import IctZoneRepository
 from scanner.application.ports.liquidity_detection import LiquidityPoolRepository
 from scanner.interfaces.api.deps import (
+    get_candles,
     get_clock,
     get_evidence,
     get_pools,
@@ -35,6 +36,7 @@ from scanner.interfaces.api.deps import (
 )
 from scanner.interfaces.api.envelope import Freshness, Versions, success
 from scanner.interfaces.api.errors import bad_request
+from scanner.interfaces.api.window import window_end
 from scanner.shared import Timeframe
 
 router = APIRouter(prefix="/api/v1/coins", tags=["coins"])
@@ -52,6 +54,7 @@ async def get_structure(
     symbol_id: SymbolId,
     timeframe: TimeframeParam,
     evidence: Annotated[IctEvidenceRepository, Depends(get_evidence)],
+    candles: Annotated[CandleRepository, Depends(get_candles)],
     clock: Annotated[Clock, Depends(get_clock)],
     window: Annotated[int, Query(ge=1, le=MAX_WINDOW)] = DEFAULT_WINDOW,
 ) -> dict[str, Any]:
@@ -64,9 +67,11 @@ async def get_structure(
     """
     parsed = _timeframe(request, timeframe)
 
-    start, end = _window(clock, parsed, window)
+    symbol = symbol_id.upper()
 
-    events = await evidence.list_structure(symbol_id.upper(), parsed, start, end)
+    start, end = await _window(candles, symbol, parsed, clock, window)
+
+    events = await evidence.list_structure(symbol, parsed, start, end)
 
     rows = [
         {
@@ -155,6 +160,7 @@ async def get_liquidity(
     timeframe: TimeframeParam,
     pools: Annotated[LiquidityPoolRepository, Depends(get_pools)],
     evidence: Annotated[IctEvidenceRepository, Depends(get_evidence)],
+    candles: Annotated[CandleRepository, Depends(get_candles)],
     clock: Annotated[Clock, Depends(get_clock)],
     window: Annotated[int, Query(ge=1, le=MAX_WINDOW)] = DEFAULT_WINDOW,
 ) -> dict[str, Any]:
@@ -168,7 +174,7 @@ async def get_liquidity(
 
     symbol = symbol_id.upper()
 
-    start, end = _window(clock, parsed, window)
+    start, end = await _window(candles, symbol, parsed, clock, window)
 
     active = await pools.list_active(symbol, parsed)
     transitions = await evidence.list_liquidity(symbol, parsed, start, end)
@@ -226,14 +232,32 @@ def _timeframe(request: Request, raw: str) -> Timeframe:
         ) from None
 
 
-def _window(
-    clock: Clock,
+async def _window(
+    candles: CandleRepository,
+    symbol: str,
     timeframe: Timeframe,
-    candles: int,
+    clock: Clock,
+    span: int,
 ) -> tuple[datetime, datetime]:
-    end = clock.now()
+    """Anchored to the context's newest candle -- see `window.py` for why.
 
-    return end - timeframe.duration * candles, end
+    One step wider than the candles window, and not by preference. A candle is
+    keyed by `open_time`, so `lastOpen + duration` includes it. A transition is
+    stamped at the *close* of the candle that caused it -- which is exactly
+    `lastOpen + duration` -- and the repository filters `transitioned_at < end`.
+    The two agree everywhere except on the final bar, where the most recent
+    event, the one the reader is most likely looking for, falls one instant
+    outside.
+
+    Found on GOLDENSWEEP: last candle open 06:00, sweep stamped 07:00, window
+    ending 07:00, zero sweeps returned for a dataset whose entire purpose is
+    that sweep.
+    """
+    last_close = await window_end(candles, symbol, timeframe, clock)
+
+    end = last_close + timeframe.duration
+
+    return last_close - timeframe.duration * span, end
 
 
 def _decode(raw: str) -> Any:
