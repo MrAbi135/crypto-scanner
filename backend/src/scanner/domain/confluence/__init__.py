@@ -10,10 +10,12 @@ five sibling engines, and this layer decides what they add up to.
 
 Factor scoring (§8.3) provides the contribution framework for all six factors
 and implements the two the spec actually prices: F4 passes through §6.7's
-published score, F6 applies §8.3's four-value HTF table. **F1, F2, F3 and F5
-are deliberately absent** — §8.3 names what earns them points but never how
-many, and Appendix A has no factor table. Inventing one would make it doctrine
-by default. Cross-symbol ranking (§9.2) operates over
+published score, F6 applies §8.3's four-value HTF table, and F1, F2, F3 and F5
+use the point tables added by **SLS v1.0.5 §8.3.1** — values the spec did not
+carry until that amendment, fitted to §8.7's own worked example rather than to
+preference.
+
+Cross-symbol ranking (§9.2) operates over
 published setups rather than a single candidate — only its archetype tie-break
 order lives here, next to the classification order it is often confused with.
 
@@ -42,6 +44,18 @@ from scanner.domain.confluence.confidence import (
     Confidence,
     base_confidence,
     final_confidence,
+)
+from scanner.domain.confluence.factor_points import (
+    ZONE_GRADE_POINTS,
+    ZONE_STATE_POINTS,
+    LiquidityEvidence,
+    MomentumEvidence,
+    StructureEvidence,
+    ZoneEvidence,
+    liquidity_factor,
+    momentum_factor,
+    structure_factor,
+    zone_factor,
 )
 from scanner.domain.confluence.factors import (
     FACTOR_CEILING,
@@ -92,6 +106,8 @@ __all__ = [
     "RANGE_MIN_ATR",
     "RANKING_PRIORITY",
     "WEIGHTS",
+    "ZONE_GRADE_POINTS",
+    "ZONE_STATE_POINTS",
     "Adjustment",
     "Archetype",
     "ArchetypeEvidence",
@@ -103,6 +119,10 @@ __all__ = [
     "GateEvidence",
     "GateResult",
     "Grade",
+    "LiquidityEvidence",
+    "MomentumEvidence",
+    "StructureEvidence",
+    "ZoneEvidence",
     "base_confidence",
     "classify_archetype",
     "evaluate_gates",
@@ -110,7 +130,11 @@ __all__ = [
     "from_contributions",
     "grade",
     "htf_alignment_factor",
+    "liquidity_factor",
     "meets_floor",
+    "momentum_factor",
     "ranking_priority",
+    "structure_factor",
     "volume_factor",
+    "zone_factor",
 ]
