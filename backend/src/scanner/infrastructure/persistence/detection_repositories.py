@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import (
@@ -15,6 +17,7 @@ from scanner.application.ports.detection import (
 from scanner.infrastructure.persistence.detection_models import (
     EngineEventRow,
 )
+from scanner.shared import Timeframe
 
 
 class PgEngineEventRepository:
@@ -66,3 +69,42 @@ class PgEngineEventRepository:
             )
 
             return result.scalar_one_or_none() is not None
+
+    async def list_events(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[EngineEventRecord, ...]:
+        async with self._sessions() as session:
+            result = await session.execute(
+                select(EngineEventRow)
+                .where(
+                    EngineEventRow.symbol == symbol,
+                    EngineEventRow.timeframe == timeframe.value,
+                    EngineEventRow.event_at >= start,
+                    EngineEventRow.event_at < end,
+                )
+                .order_by(
+                    EngineEventRow.event_at.asc(),
+                    EngineEventRow.event_type.asc(),
+                    EngineEventRow.event_key.asc(),
+                )
+            )
+
+            rows = result.scalars().all()
+
+            return tuple(
+                EngineEventRecord(
+                    event_key=row.event_key,
+                    symbol=row.symbol,
+                    timeframe=Timeframe(row.timeframe),
+                    event_type=row.event_type,
+                    event_at=row.event_at,
+                    algo_version=row.algo_version,
+                    payload=row.payload,
+                    created_at=row.created_at,
+                )
+                for row in rows
+            )

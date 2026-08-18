@@ -1,4 +1,4 @@
-"""The detection pipeline: all seven replay services, in doctrine order.
+"""The detection pipeline: all nine replay services, in doctrine order.
 
 Extracted from `cli.py`, where this sequence was inline in a 250-line function
 and therefore reachable only by typing a command. The engine now runs the same
@@ -18,10 +18,16 @@ qualification flags, so they come last. Running these out of order does not
 crash -- each service simply finds less evidence than exists and quietly grades
 its output lower.
 
-Participation (§6, §7) sits at the end but is not part of that chain: volume and
-momentum read candles alone and depend on nothing above them. It runs last
-because §8's confluence engine consumes every engine's output, and the ordering
-that matters there is "after everything", not "after any particular one".
+Participation (§6, §7) is not part of that chain: volume and momentum read
+candles alone and depend on nothing above them. It runs late because §8's
+confluence engine consumes every engine's output, and the ordering that matters
+there is "after everything", not "after any particular one".
+
+Confluence (§8) is genuinely last, and here the order *is* load-bearing rather
+than merely tidy. It reads what the eight services above it wrote in this same
+run -- structure events, sweeps, live zones, participation flags. Move it up and
+it does not fail; it grades a context on the evidence of the previous run, which
+looks exactly like a correct answer.
 """
 
 from __future__ import annotations
@@ -30,6 +36,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from scanner.application.detection.confluence_replay import ConfluenceReplayService
 from scanner.application.detection.ict_interaction_replay import (
     IctZoneInteractionReplayService,
 )
@@ -55,6 +62,7 @@ class DetectionPipelineReport:
     ict_ob: Any
     ict_interaction: Any
     participation: Any
+    confluence: Any
 
 
 class DetectionPipeline:
@@ -70,6 +78,7 @@ class DetectionPipeline:
         ict_ob: IctOrderBlockReplayService,
         ict_interaction: IctZoneInteractionReplayService,
         participation: ParticipationReplayService,
+        confluence: ConfluenceReplayService,
     ) -> None:
         self._structure = structure
         self._liquidity = liquidity
@@ -79,6 +88,7 @@ class DetectionPipeline:
         self._ict_ob = ict_ob
         self._ict_interaction = ict_interaction
         self._participation = participation
+        self._confluence = confluence
 
     async def run(
         self,
@@ -111,6 +121,17 @@ class DetectionPipeline:
 
         participation = await self._participation.run(symbol, timeframe, start, end)
 
+        # The trend comes from the engine that owns it. Confluence inferring
+        # it from the last BOS in the window is how §8.2 G2 came to grade a
+        # 58-confidence UP candidate on a context §3.7 had ruled BEARISH.
+        confluence = await self._confluence.run(
+            symbol,
+            timeframe,
+            start,
+            end,
+            trend_state=structure_shift.trend_state,
+        )
+
         return DetectionPipelineReport(
             structure=structure,
             liquidity=liquidity,
@@ -120,4 +141,5 @@ class DetectionPipeline:
             ict_ob=ict_ob,
             ict_interaction=ict_interaction,
             participation=participation,
+            confluence=confluence,
         )

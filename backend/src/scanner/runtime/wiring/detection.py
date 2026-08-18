@@ -1,6 +1,6 @@
 """Build the detection pipeline (Sprint S4b).
 
-One construction site for the seven services and their fourteen collaborators.
+One construction site for the nine services and their collaborators.
 The CLI and the engine process both call this, so `engine run` and the live loop
 cannot drift into detecting differently -- which is exactly what would have
 happened had the engine copied the sixty lines this replaces.
@@ -11,6 +11,7 @@ from __future__ import annotations
 import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from scanner.application.detection.confluence_replay import ConfluenceReplayService
 from scanner.application.detection.ict_interaction_replay import (
     IctZoneInteractionReplayService,
 )
@@ -115,6 +116,13 @@ def build_detection_pipeline(
         participation=ParticipationReplayService(
             candles,
             events,
+            clock,
+        ),
+        confluence=ConfluenceReplayService(
+            candles,
+            events,
+            zones,
+            evidence,
             clock,
         ),
     )

@@ -283,6 +283,7 @@ async def _run_engine(
         ict_ob_report = report.ict_ob
         ict_interaction_report = report.ict_interaction
         participation_report = report.participation
+        confluence_report = report.confluence
 
         operation = "engine rebuild-state" if rebuild_state else "engine run"
 
@@ -418,6 +419,27 @@ async def _run_engine(
             f"exhaustion={participation_report.exhaustion_watches} "
             f"inserted={participation_report.events_inserted}"
         )
+
+        for candidate in confluence_report.candidates:
+            if candidate.gates_passed:
+                print(
+                    f"  confluence {candidate.direction}: "
+                    f"confidence={candidate.confidence} "
+                    f"grade={candidate.grade} "
+                    f"archetype={candidate.archetype} "
+                    f"publishable={candidate.publishable}"
+                )
+            else:
+                # A blocked direction prints why. "No candidate" and "gate G4
+                # found no zone" are the same silence otherwise, and only one
+                # of them is a reason to go looking for a bug.
+                print(
+                    f"  confluence {candidate.direction}: "
+                    f"blocked_by={','.join(candidate.failed_gates)}"
+                )
+
+        if confluence_report.unreachable:
+            print(f"  confluence unreachable: {','.join(confluence_report.unreachable)}")
 
         if structure_report.last_processed_open_time is not None:
             print(f"  last_processed={structure_report.last_processed_open_time.isoformat()}")

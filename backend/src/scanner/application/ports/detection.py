@@ -32,6 +32,19 @@ class EngineEventRepository(Protocol):
         event_key: str,
     ) -> bool: ...
 
+    # Confluence (§8) needs every engine's output, not one engine's slice.
+    # `IctEvidenceRepository.list_structure` deliberately filters to SWING_* and
+    # STRUCTURE_*, which is right for the ICT engines that ask it for swing
+    # context and wrong for a reader that must also see BOS, CHOCH, MSS, sweeps
+    # and participation flags.
+    async def list_events(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[EngineEventRecord, ...]: ...
+
 
 class EngineStateStore(Protocol):
     async def load(
