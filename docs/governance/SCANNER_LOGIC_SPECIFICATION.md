@@ -4,7 +4,7 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.4
+**Version:** 1.0.5
 **Ratified:** 2026-07-12 · **Last amended:** 2026-08-17 (see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
@@ -746,6 +746,108 @@ Failing any gate ⇒ no setup exists; nothing is scored, nothing is logged as a 
 
 Every factor's score is a sum of enumerated evidence contributions with stored event ids — reproducible from the evidence alone.
 
+#### 8.3.1 Contribution Tables (added v1.0.5)
+
+The table above states what earns points. These state how many. Each factor is
+the sum of its components, clamped to [0,100]; every component stores the
+evidence id of the fact that awarded it. Values are `P.confluence.factor_points`
+and change only by amendment (Constitution §30.8).
+
+**F1 Structure** — the break is the claim; the trend is the context it is made in.
+
+| Component | Range | Award |
+|---|---|---|
+| Break quality | 0–45 | 15 for a confirmed break · **+18 displaced** · **+12 external** |
+| MSS present | 0–10 | 10 when the break is an MSS rather than a plain BOS |
+| Trend maturity | 0–30 | `min(pairs, 4) / 4 × 30` over consecutive unbroken HH/HL or LL/LH pairs (§7.4) |
+| Clean break record | 0–15 | 15 with no failed break against D in 20 candles · 7 with one · 0 with two or more |
+
+*Why these sizes.* Displacement outranks externality (18 vs 12) because §3.5's
+close-break law already requires a real break — displacement is the evidence
+that it was *intended*, while external/internal describes only which swing set
+it crossed. MSS is worth less than either (10) despite being the stronger event:
+§8.6 already routes MSS-dependent setups to A1, so paying it heavily here would
+charge the same fact twice.
+
+**F2 Liquidity** — sweep quality dominates because the sweep *is* the narrative.
+
+| Component | Range | Award |
+|---|---|---|
+| Sweep quality | 0–60 | 20 for a confirmed sweep · **+16 external** · **+12 depth** (`min(depth_atr, 1.0) × 12`) · **+6 unclaimed** · **+6 fresh** (inside the §4.6 expiry) |
+| Stop-hunt confirmed | 0–15 | 15 when §4.7's composite confirms |
+| Target-side pool strength | 0–25 | `pool_strength / 100 × 25` (§4.2) |
+
+*Why these sizes.* `reclaimed: true` costs the whole 6-point unclaimed award
+rather than a fraction, because §4.6 calls a reclaimed sweep "contrary
+evidence" — partial credit would let it still read as support. Stop-hunt sits
+at 15, below sweep quality, because §4.7 is a composite *built on* the sweep;
+weighting it higher would double-count the same penetration.
+
+**F3 Zone** — location quality, ordered exactly as §8.3 orders it.
+
+| Component | Range | Award |
+|---|---|---|
+| Zone grade | 0–50 | BRK_A 50 · OB_A 40 · OB_B 32 · FVG 25 · MIT 18 · IFVG 10 |
+| State freshness | 0–25 | FRESH 25 · TESTED 15 · CE_FILLED 6 · anything further 0 |
+| Stack depth | 0–15 | 2 overlapping zones 15 · 3 or more 15 (no further credit) |
+| Entry-grade Confirmation | 0–10 | 10 when §5.9 records a Confirmation |
+
+*Why these sizes.* The grade spread is wide (50 down to 10) because §8.3 gives
+the ordering explicitly and it is the single strongest statement in the factor.
+Stack depth stops paying after two zones: §8.5 already awards a zone-stack
+synergy bonus, and an unbounded stack term would reward piling weak zones on
+one another.
+
+**F5 Momentum** — the most transient factor, so alignment carries it and the
+rest are qualifiers.
+
+| Component | Range | Award |
+|---|---|---|
+| Aligned momentum | 0–55 | `momentum_score × 0.55` when direction matches D · **0 when opposed or NEUTRAL** |
+| Acceleration | 0–25 | accelerating 25 · neither 12 · decelerating 0 (§7.2) |
+| No exhaustion against D | 0–20 | 20 when `exhaustion_watch` is absent · 0 when present |
+
+*Why these sizes.* Opposed momentum scores zero on its largest component rather
+than scaling down, because §7.1 already forces NEUTRAL where there is no
+dominant direction — a momentum score pointing the other way is not weak
+support, it is absence of support. `exhaustion_watch` is worth a flat 20
+because §8.5 also penalises it: the two act on different stages, and §7.2 calls
+it "prime context for Sweep-Reversal" — a tired trend is exactly where a
+continuation setup should lose weight.
+
+**Anchor check.** Scored against §8.7's own illustration:
+
+| | Components | This table | §8.7 |
+|---|---|---|---|
+| F1 | displaced external BOS, no MSS, 3 pairs, clean: 45 + 0 + 22.5 + 15 | **82.5** | 85 |
+| F2 | external sweep at 0.8 ATR, unclaimed, fresh, no stop hunt, pool 76: 57.6 + 0 + 19 | **76.6** | 80 |
+| F3 | OB_A in an OTE stack, FRESH, with Confirmation: 40 + 25 + 15 + 10 | **90** | 90 |
+| F5 | momentum 60 aligned, steady, unexhausted: 33 + 12 + 20 | **65** | 65 |
+
+F3 and F5 reproduce the illustration exactly. F1 and F2 do not, and the two
+residuals differ in kind:
+
+* **F2 is 3.4 low, and closes.** §8.7 does not state its target-pool strength;
+  at 90 rather than the 76 assumed above, F2 scores 80.1. The assumption is
+  ordinary for the scenario, so the gap is an unstated input rather than a
+  disagreement.
+* **F1 is 2.5 low, and does not close.** §8.7 does not state its unbroken-pair
+  count either, but no count reaches 85: three pairs give 82.5 and four give
+  90. The illustration's figure sits between two adjacent states of this table
+  and is unreachable by any input.
+
+F1 is left as it stands. §8.7 is headed *Normative Illustration* — it fixes the
+combination arithmetic, which §8.4 already reproduces exactly, not the factor
+internals, which did not exist when it was written. Retuning the F1 components
+to land on one illustrative number would be fitting four values to a datum the
+section never claimed to derive, and would move the displaced-vs-external
+spread that §8.3 does assert.
+
+Recorded plainly because the first draft of this paragraph claimed F1 reached 85
+at four pairs. It does not; the arithmetic was not run before the claim was
+written. Both figures above are now asserted in
+`tests/unit/domain/confluence/test_factor_points.py`.
+
 ### 8.4 Stage 3 — Weighted Base Confidence
 
 `BaseConfidence = Σ (F_k × W_k)` with weights fixed by §9. Result ∈ [0,100].
@@ -1043,6 +1145,7 @@ Confidence is displayed with its factor breakdown — never as a bare number. Ta
 | Synergy cap / conflict cap | +15 / −20 | §8.5 |
 | Archetype floors A1–A5 | 75 / 72 / 70 / 70 / 74 | §8.6 |
 | P.rank.weights (F1..F6) | .20/.15/.20/.15/.15/.15 | §9.1 |
+| P.confluence.factor_points | see §8.3.1 tables | §8.3.1 |
 | P.alert.storm_count | 40 per 5 min | §10.2 |
 | P.alert.user_daily_cap | 25 | §10.3 |
 | P.lifecycle.ttl | M5:24 · M15:24 · H1:24 · H4:18 · D1:15 | §12.5 |
@@ -1053,6 +1156,47 @@ Every parameter change increments `param_set_version` and requires golden-datase
 ---
 
 ## Amendment History
+
+### v1.0.5 — 2026-08-18
+
+Gives F1, F2, F3 and F5 the point values they never had.
+
+**The gap.** §8.3 states what earns each factor points — displaced beats plain,
+external beats internal, BRK_A beats OB_A, FRESH beats TESTED — and never how
+many. Appendix A carried `P.rank.weights` and no factor table. §8.7's worked
+example supplies F1=85, F2=80, F3=90, F5=65 as *given inputs* rather than
+deriving them, so the canonical fixture could not be re-derived from anything.
+
+F4 and F6 were never affected: §8.3 defers F4 to §6.7's published score, which
+is fully specified, and gives F6 an exact four-value table.
+
+**Why it had to be closed.** §8.3 promises every factor is "reproducible from
+the evidence alone". Without point values that promise is unkeepable, and an
+implementation must invent numbers to proceed — at which point the invented
+numbers become the doctrine, unratified and undocumented. Surfaced while
+implementing §8.3 (PR #45), which shipped the contribution framework plus F4
+and F6 and deliberately left the other four unimplemented rather than guess.
+
+**How the values were chosen.** Fitted to §8.7's own illustration rather than to
+preference, then checked back against it. F3 and F5 reproduce the example
+exactly. F2 lands 3.4 low and closes once its unstated target-pool strength is
+supplied. F1 lands 2.5 low and does not close: no unbroken-pair count reaches
+85, since three give 82.5 and four give 90. Every ordering §8.3 asserts is preserved strictly, and each component
+range is justified in place — including three cases where a term is deliberately
+*small* because §8.5 or §8.6 already pays for the same fact, and paying twice
+would let one piece of evidence carry a setup.
+
+**Impact review.** §8.4's weighted sum is unchanged; only its inputs are now
+computable. §9.1 weights are untouched. No gate, archetype, floor or grade band
+moves. No golden dataset needs relabelling — none of the twelve exercises §8,
+which is itself worth noting: the first confluence dataset will be written
+against these tables.
+
+**Versioning.** This is new behaviour rather than a correction, so any engine
+publishing scores under it must stamp a new `algo_version` (Constitution §44.5)
+and `P.confluence.factor_points` enters the versioned parameter set. Signals
+scored before and after are not comparable, which is precisely why the values
+are settled once, here, rather than emerging from an implementation.
 
 Amendments follow Constitution §42.7: explicit proposal, impact review against
 dependent sections, version increment, recorded rationale. Each row below links
