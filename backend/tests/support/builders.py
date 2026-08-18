@@ -23,6 +23,8 @@ def make_candle(
     close: Decimal | None = None,
     volume: Decimal | None = None,
     taker_buy_volume: Decimal | None = None,
+    quote_volume: Decimal | None = None,
+    trade_count: int = 10,
 ) -> Candle:
     o = open_ if open_ is not None else dec("100")
     c = close if close is not None else dec("101")
@@ -38,9 +40,12 @@ def make_candle(
         low=lo,
         close=c,
         volume=v,
-        quote_volume=v * o,
+        # Defaults to volume x price, which is what a real candle reports.
+        # Overridable because §6.2's spike floor is an absolute quote figure,
+        # so a test needs to vary it independently of base volume.
+        quote_volume=quote_volume if quote_volume is not None else v * o,
         taker_buy_volume=taker_buy_volume if taker_buy_volume is not None else v / 2,
-        trade_count=10,
+        trade_count=trade_count,
         source=CandleSource.BACKFILL,
     )
 
