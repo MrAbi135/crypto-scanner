@@ -40,6 +40,12 @@ class FakeClock:
 # context shorter than that is one G1 refuses rather than grades.
 CANDLES = 60
 
+# `make_series` closes its last candle here, and §8.2 G4 measures every zone
+# against that price -- so a fixture zone has to sit on it, or the gate refuses
+# the candidate before anything else is exercised.
+LAST_CLOSE = Decimal(1000 + CANDLES - 1 + 1)
+DOWN_LAST_CLOSE = Decimal(1000 - (CANDLES - 1) - 1)
+
 
 def make_series(
     count: int = CANDLES,
@@ -140,6 +146,8 @@ def zone(
     grade: str = "OB_A",
     state: str = "FRESH",
     confirmed_index: int = 5,
+    band_low: Decimal | None = None,
+    band_high: Decimal | None = None,
 ) -> IctZoneRecord:
     return IctZoneRecord(
         zone_id=zone_id,
@@ -149,8 +157,8 @@ def zone(
         polarity=polarity,
         state=state,
         grade=grade,
-        band_low=Decimal(100),
-        band_high=Decimal(101),
+        band_low=LAST_CLOSE - 1 if band_low is None else band_low,
+        band_high=LAST_CLOSE + 1 if band_high is None else band_high,
         refined_low=None,
         refined_high=None,
         created_index=confirmed_index,
@@ -617,7 +625,16 @@ async def test_momentum_pointing_the_other_way_is_not_counted_as_support() -> No
     setup = bullish_setup()
 
     aligned, _ = service(**setup)
-    opposed, _ = service(**setup, candles=make_series(trend="down"))
+
+    # The down series closes elsewhere, so its zone has to move with it or G4
+    # refuses the candidate and there is no F5 to compare.
+    opposed, _ = service(
+        **{
+            **setup,
+            "zones": [zone("z1", band_low=DOWN_LAST_CLOSE - 1, band_high=DOWN_LAST_CLOSE + 1)],
+        },
+        candles=make_series(trend="down"),
+    )
 
     a = next(c for c in (await run(aligned, "BULLISH")).candidates if c.direction == "UP")
     b = next(c for c in (await run(opposed, "BULLISH")).candidates if c.direction == "UP")
@@ -766,3 +783,71 @@ async def test_a_read_ladder_leaves_the_report_clean() -> None:
 
     assert report.htf_state == "DOWN"
     assert HTF_STATE_UNREACHABLE not in report.unreachable
+
+
+@pytest.mark.asyncio
+async def test_a_zone_far_from_price_does_not_satisfy_g4() -> None:
+    """The bug this test exists for.
+
+    §8.2 G4 asks for a zone "whose band contains or is adjacent (<= 0.5 x ATR)
+    to current price". Only the polarity half was implemented, so any live zone
+    passed wherever price stood -- on real BTCUSDT H1, 9 BULLISH and 16 BEARISH
+    zones, and the gate could not fail. DOWN reached grade B there with its
+    nearest zone 302.7 away against a 60.97 tolerance.
+    """
+    setup = bullish_setup()
+    setup["zones"] = [zone("far", band_low=Decimal(100), band_high=Decimal(101))]
+
+    svc, _ = service(**setup)
+
+    report = await run(svc, "BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    assert not up.gates_passed
+    assert "G4" in up.failed_gates
+
+
+@pytest.mark.asyncio
+async def test_a_zone_containing_price_satisfies_g4() -> None:
+    svc, _ = service(**bullish_setup())
+
+    report = await run(svc, "BULLISH")
+
+    assert next(c for c in report.candidates if c.direction == "UP").gates_passed
+
+
+@pytest.mark.asyncio
+async def test_a_zone_just_below_price_is_adjacent_enough() -> None:
+    """The band need not contain price; §8.2 allows half an ATR of gap."""
+    setup = bullish_setup()
+    setup["zones"] = [zone("near", band_low=LAST_CLOSE - 3, band_high=LAST_CLOSE - Decimal("0.5"))]
+
+    svc, _ = service(**setup)
+
+    report = await run(svc, "BULLISH")
+
+    assert next(c for c in report.candidates if c.direction == "UP").gates_passed
+
+
+@pytest.mark.asyncio
+async def test_f3_scores_a_qualifying_zone_not_the_best_one_anywhere() -> None:
+    """Scoring a zone price is nowhere near is the same error one layer down.
+
+    A distant BRK_A outranks a nearby FVG on grade points alone, so without the
+    same filter F3 would report the quality of a zone the setup is not at.
+    """
+    setup = bullish_setup()
+    setup["zones"] = [
+        zone("distant_strong", grade="BRK_A", band_low=Decimal(100), band_high=Decimal(101)),
+        zone("near_weak", grade="IFVG"),
+    ]
+
+    svc, _ = service(**setup)
+
+    report = await run(svc, "BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    assert up.gates_passed
+    assert up.zone_id == "near_weak"
