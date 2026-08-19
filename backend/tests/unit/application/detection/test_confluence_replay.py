@@ -986,6 +986,28 @@ async def test_a_stale_fvg_is_past_its_age_limit() -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_unreachable_list_does_not_disown_a_chain_that_closed() -> None:
+    """A4 classifies, so the record must not still claim archetypes are out of
+    reach -- the entry names the three chains that genuinely are."""
+    setup = bullish_setup()
+    setup["zones"] = [zone("fvg", zone_type="FVG", grade="FVG", state="OPEN", confirmed_index=46)]
+
+    svc, _ = service(
+        **setup,
+        candles=series_with_displacement(),
+        htf_trend="BULLISH",
+    )
+
+    report = await run(svc, "BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    assert up.archetype == "A4"
+    assert "archetype_a1_a2_a5" in up.unreachable
+    assert not any(name == "archetype_retest_chain" for name in up.unreachable)
+
+
+@pytest.mark.asyncio
 async def test_classification_and_publication_are_separate_decisions() -> None:
     """§8.6: below-floor candidates "are recorded internally ... never published".
 

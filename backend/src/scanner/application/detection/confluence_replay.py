@@ -93,9 +93,12 @@ UNREACHABLE_INPUTS: tuple[str, ...] = (
     "target_pool_strength",
     "target_pool_unclaimed",
     "target_pool_fresh",
-    # §8.6 archetype chains all terminate in a retest tied to an entry
-    # price. Without one, no chain closes and no candidate can classify.
-    "archetype_retest_chain",
+    # Not "archetype chains" in general -- A3 and A4 close now that G4
+    # anchors the retest. These three are the ones still short a link:
+    # A1 needs §5.7's range-extreme PD, A2 needs a Respect from §5.9's
+    # interaction record (written, but with no read method), A5 needs the
+    # dealing range's width.
+    "archetype_a1_a2_a5",
 )
 
 # Not in the constant above, because unlike those it is only *sometimes*
