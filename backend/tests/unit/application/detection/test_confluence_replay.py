@@ -143,6 +143,7 @@ def zone(
     zone_id: str = "z1",
     *,
     polarity: str = "BULLISH",
+    zone_type: str = "OB",
     grade: str = "OB_A",
     state: str = "FRESH",
     confirmed_index: int = 5,
@@ -153,7 +154,7 @@ def zone(
         zone_id=zone_id,
         symbol="BTCUSDT",
         timeframe=TF,
-        zone_type="OB",
+        zone_type=zone_type,
         polarity=polarity,
         state=state,
         grade=grade,
@@ -851,3 +852,159 @@ async def test_f3_scores_a_qualifying_zone_not_the_best_one_anywhere() -> None:
 
     assert up.gates_passed
     assert up.zone_id == "near_weak"
+
+
+def series_with_displacement(*, at: int = 45, count: int = CANDLES) -> list:
+    """The same ramp, with one §5.10 displacement candle in it.
+
+    A smooth series contains no displacement at all, so an A4 chain built on it
+    would fail for the wrong reason and the test would prove nothing.
+    """
+    out = []
+
+    for i in range(count):
+        base = Decimal(1000) + i
+
+        if i == at:
+            out.append(
+                make_candle(
+                    timeframe=TF,
+                    open_time=BASE + TF.duration * i,
+                    open_=base,
+                    close=base + 20,
+                    high=base + 20,
+                    low=base - 1,
+                    volume=Decimal(50),
+                )
+            )
+        else:
+            out.append(
+                make_candle(
+                    timeframe=TF,
+                    open_time=BASE + TF.duration * i,
+                    open_=base,
+                    close=base + 1,
+                    volume=Decimal(50),
+                )
+            )
+
+    return out
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_displacement_fvg_at_price_classifies_as_a4() -> None:
+    """§8.6 A4: displacement FVG, first touch in trend direction, HTF aligned.
+
+    Until G4 established that price is *at* a zone, no §8.6 chain could close
+    and `classify_archetype` returned None on every candidate ever scored.
+    """
+    setup = bullish_setup()
+    setup["zones"] = [zone("fvg", zone_type="FVG", grade="FVG", state="OPEN", confirmed_index=46)]
+
+    svc, _ = service(
+        **setup,
+        candles=series_with_displacement(),
+        htf_trend="BULLISH",
+    )
+
+    report = await run(svc, "BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    assert up.gates_passed
+    assert up.archetype == "A4"
+
+
+@pytest.mark.asyncio
+async def test_an_fvg_with_no_displacement_behind_it_does_not_classify() -> None:
+    """§5.4 detects gaps without asking what made them.
+
+    "Displacement FVG" is a narrower claim than "FVG", and the zone record does
+    not carry it -- so it is recovered from §5.10, and an ordinary gap must not
+    pass as one.
+    """
+    setup = bullish_setup()
+    setup["zones"] = [zone("fvg", zone_type="FVG", grade="FVG", state="OPEN", confirmed_index=46)]
+
+    svc, _ = service(**setup, htf_trend="BULLISH")
+
+    report = await run(svc, "BULLISH")
+
+    assert next(c for c in report.candidates if c.direction == "UP").archetype is None
+
+
+@pytest.mark.asyncio
+async def test_an_already_touched_fvg_is_not_a_first_touch() -> None:
+    setup = bullish_setup()
+    setup["zones"] = [
+        zone("fvg", zone_type="FVG", grade="FVG", state="CE_FILLED", confirmed_index=46)
+    ]
+
+    svc, _ = service(
+        **setup,
+        candles=series_with_displacement(),
+        htf_trend="BULLISH",
+    )
+
+    report = await run(svc, "BULLISH")
+
+    assert next(c for c in report.candidates if c.direction == "UP").archetype is None
+
+
+@pytest.mark.asyncio
+async def test_a4_needs_the_htf_behind_it() -> None:
+    """§8.6 A4 requires HTF alignment; a counter-HTF continuation is not one."""
+    setup = bullish_setup()
+    setup["zones"] = [zone("fvg", zone_type="FVG", grade="FVG", state="OPEN", confirmed_index=46)]
+
+    svc, _ = service(
+        **setup,
+        candles=series_with_displacement(),
+        htf_trend="BEARISH",
+    )
+
+    report = await run(svc, "BULLISH")
+
+    assert next(c for c in report.candidates if c.direction == "UP").archetype is None
+
+
+@pytest.mark.asyncio
+async def test_a_stale_fvg_is_past_its_age_limit() -> None:
+    """§8.6 A4: "FVG age <= 30 candles"."""
+    setup = bullish_setup()
+    setup["zones"] = [zone("fvg", zone_type="FVG", grade="FVG", state="OPEN", confirmed_index=5)]
+
+    svc, _ = service(
+        **setup,
+        candles=series_with_displacement(at=7),
+        htf_trend="BULLISH",
+    )
+
+    report = await run(svc, "BULLISH")
+
+    assert next(c for c in report.candidates if c.direction == "UP").archetype is None
+
+
+@pytest.mark.asyncio
+async def test_classification_and_publication_are_separate_decisions() -> None:
+    """§8.6: below-floor candidates "are recorded internally ... never published".
+
+    Matching a chain is not the same as clearing its floor, and conflating the
+    two would publish every context that merely looked like a setup.
+    """
+    setup = bullish_setup()
+    setup["zones"] = [zone("fvg", zone_type="FVG", grade="FVG", state="OPEN", confirmed_index=46)]
+
+    svc, _ = service(
+        **setup,
+        candles=series_with_displacement(),
+        htf_trend="BULLISH",
+    )
+
+    report = await run(svc, "BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    assert up.archetype == "A4"
+    assert up.confidence is not None
+    assert up.publishable is (up.confidence >= Decimal(70))

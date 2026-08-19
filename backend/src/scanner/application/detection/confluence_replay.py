@@ -39,7 +39,7 @@ from scanner.application.ports.ict_evidence import (
     LiquidityEvidenceRecord,
 )
 from scanner.application.ports.ict_zones import IctZoneRecord, IctZoneRepository
-from scanner.domain.common import Candle, wilder_atr
+from scanner.domain.common import Candle, wilder_atr, wilder_atr_series
 from scanner.domain.common.rvol import relative_volume
 from scanner.domain.confluence import (
     Adjustment,
@@ -61,11 +61,22 @@ from scanner.domain.confluence import (
     volume_factor,
     zone_factor,
 )
-from scanner.domain.momentum import momentum_phase, momentum_score
-from scanner.domain.structure import TrendState
+from scanner.domain.ict import detect_displacement
+from scanner.domain.momentum import (
+    Leg,
+    LegKind,
+    anchoring_legs,
+    momentum_phase,
+    momentum_score,
+    segment_legs,
+)
+from scanner.domain.structure import TrendState, detect_external_swings
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v4"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v5"
+
+# §8.2 G5: "no opposing displacement in last 3 candles".
+G5_DISPLACEMENT_WINDOW = 3
 
 # §8.2 G4: a zone counts when its band "contains or is adjacent (<= 0.5 x ATR)
 # to current price".
@@ -103,6 +114,37 @@ class _Reading:
     direction: str | None
     accelerating: bool
     exhausted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _Legs:
+    """§7.5's leg picture at the close, plus the displacement it was built on.
+
+    Recomputed here rather than read back, for the same reason §6 and §7 are
+    (see `_read_participation`): legs are a pure function of closed candles,
+    confirmed swings and §5.10 displacement, so a recomputation cannot disagree
+    with the engine that owns them -- and nothing persists them to read.
+    """
+
+    legs: tuple[Leg, ...]
+    displacement: frozenset[int]
+
+    def latest(self, kind: LegKind, direction: str) -> Leg | None:
+        for leg in reversed(anchoring_legs(self.legs)):
+            if leg.kind is kind and leg.direction == direction:
+                return leg
+
+        return None
+
+    def current(self) -> Leg | None:
+        anchoring = anchoring_legs(self.legs)
+
+        return anchoring[-1] if anchoring else None
+
+    def displaced_recently(self, last_index: int) -> bool:
+        window = range(last_index - G5_DISPLACEMENT_WINDOW + 1, last_index + 1)
+
+        return any(index in self.displacement for index in window)
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +233,10 @@ class ConfluenceReplayService:
         price = series[-1].close
         atr = wilder_atr(series, len(series) - 1)
 
+        legs = _read_legs(series)
+
+        bos_breaks = _bos_break_indices(events)
+
         htf = await self._read_htf_state(symbol, timeframe)
 
         candidates: list[SetupCandidate] = []
@@ -210,6 +256,8 @@ class ConfluenceReplayService:
                 htf=htf,
                 price=price,
                 atr=atr,
+                legs=legs,
+                bos_breaks=bos_breaks,
             )
 
             candidates.append(candidate)
@@ -246,6 +294,8 @@ class ConfluenceReplayService:
         htf: str | None,
         price: Decimal,
         atr: Decimal | None,
+        legs: _Legs,
+        bos_breaks: dict[str, frozenset[int]],
     ) -> SetupCandidate:
         polarity = "BULLISH" if direction == "UP" else "BEARISH"
 
@@ -282,6 +332,17 @@ class ConfluenceReplayService:
         # real BTCUSDT H1 on G5, because a liquid market sweeps both sides.
         contrary = [s for s in live_sweeps if s.reclaimed and s.supports(direction)]
 
+        # G5's other readable clause: "no opposing displacement in last 3
+        # candles". The displacement set is computed for §7.5's legs anyway, so
+        # this costs nothing and turns one more hardcoded pass into a check.
+        opposing_leg = legs.current()
+
+        counter_displacement = (
+            opposing_leg is not None
+            and opposing_leg.direction != direction
+            and legs.displaced_recently(last_index)
+        )
+
         # §8.2 G2: "trend-following: state matches D; reversal: valid MSS or
         # Sweep-Reversal conditions §8.6".
         trend_following = _state_direction(trend_state) == direction
@@ -310,7 +371,7 @@ class ConfluenceReplayService:
                 # `unreachable` so the pass is not mistaken for a check.
                 pd_context_ok=True,
                 zone_present=bool(matching_zones),
-                contrary_fact_present=bool(contrary),
+                contrary_fact_present=bool(contrary) or counter_displacement,
                 volume_integrity_ok=True,
             )
         )
@@ -384,23 +445,39 @@ class ConfluenceReplayService:
 
         confidence = final_confidence(factors, _synergies(event_types, matching_zones))
 
-        # §8.6's five chains each end in a *retest*: "retest of MSS-origin
-        # zone", "first retest with Respect", "retrace into OTE/OB/FVG", "first
-        # touch". Every one of those links a specific zone to a specific entry,
-        # and this service has no entry price to anchor them with -- it grades a
-        # context, not a trade. So no archetype can currently classify, and the
-        # chain terms below are the ones that *are* readable rather than a
-        # plausible-looking set that happens to never match.
+        # The retest each §8.6 chain ends in is now anchorable: G4 established
+        # that price is *at* `best_zone`, which is exactly what "retrace into
+        # OTE/OB/FVG" and "first touch" were missing. A3 and A4 close on that.
+        #
+        # A1, A2 and A5 still cannot. A1 wants §5.7's range-extreme PD, A2 wants
+        # a Respect from §5.9's interaction record -- which is written but has
+        # no read method -- and A5 wants the dealing range's width. Their terms
+        # below are the ones genuinely readable, so those chains fail on the
+        # link that is missing rather than on a fabricated one.
+        impulse = legs.latest(LegKind.IMPULSE, direction)
+
         archetype = classify_archetype(
             ArchetypeEvidence(
                 external_sweep=any(s.external for s in supporting),
                 mss_confirmed=trend_following and f"MSS_{direction}" in event_types,
                 stop_hunt_confirmed="LIQUIDITY_STOP_HUNT" in event_types,
                 breaker_formed=any(z.grade == "BRK_A" for z in matching_zones),
+                breaker_grade_a=best_zone.grade == "BRK_A",
                 trend_active=trend_following,
-                displaced_bos=f"MSS_{direction}" in event_types,
-                retraced_into_zone=bool(matching_zones),
+                # §8.6 A3 wants a *displaced* BOS and the BOS event does not
+                # record displacement. The impulse leg it sits in does -- and
+                # using the leg scopes it too, since a BOS from two months back
+                # is not what the current pullback is retracing.
+                displaced_bos=_bos_inside(impulse, bos_breaks.get(direction, frozenset())),
+                # G4 already established price is at this zone.
+                retraced_into_zone=True,
                 htf_aligned=htf == direction,
+                retracement_leg=_is_retracement_against(legs.current(), direction),
+                counter_displacement=counter_displacement,
+                displacement_fvg=_is_displacement_fvg(best_zone, legs.displacement),
+                fvg_first_touch=_is_first_touch(best_zone, price),
+                fvg_age_candles=max(0, last_index - best_zone.confirmed_index),
+                ranging=trend_state == TrendState.RANGING.value,
             )
         )
 
@@ -533,6 +610,93 @@ class _Sweep:
         side = self._e.get("side")
 
         return bool(side == "SSL") if direction == "UP" else bool(side == "BSL")
+
+
+def _read_legs(series: list[Candle]) -> _Legs:
+    """§7.5 legs over the window, with the §5.10 displacement they need."""
+    atrs = wilder_atr_series(series)
+
+    displacement = frozenset(
+        index
+        for index, atr in enumerate(atrs)
+        if atr is not None and atr > 0 and detect_displacement(series, index, atr=atr) is not None
+    )
+
+    return _Legs(
+        legs=segment_legs(series, detect_external_swings(series), displacement),
+        displacement=displacement,
+    )
+
+
+def _is_retracement_against(leg: Leg | None, direction: str) -> bool:
+    """§8.6 A3's "retracement leg (§7.5), not counter-displacement".
+
+    A pullback inside a D-trend travels *against* D. A retracement running with
+    D is the trend leg itself, and calling that a pullback would classify every
+    trending context as a setup.
+    """
+    return leg is not None and leg.kind is LegKind.RETRACEMENT and leg.direction != direction
+
+
+def _bos_break_indices(
+    events: tuple[EngineEventRecord, ...],
+) -> dict[str, frozenset[int]]:
+    """Where each BOS actually broke, by direction.
+
+    Parsed once per run rather than per direction, and keyed on the payload's
+    `break_index` rather than the event's own timestamp -- the two differ,
+    because a break is stamped at the candle that closed through the level.
+    """
+    breaks: dict[str, set[int]] = {"UP": set(), "DOWN": set()}
+
+    for record in events:
+        if not record.event_type.startswith("BOS_"):
+            continue
+
+        direction = record.event_type.removeprefix("BOS_")
+
+        if direction not in breaks:
+            continue
+
+        index = json.loads(record.payload).get("break_index")
+
+        if index is not None:
+            breaks[direction].add(int(index))
+
+    return {key: frozenset(value) for key, value in breaks.items()}
+
+
+def _bos_inside(impulse: Leg | None, breaks: frozenset[int]) -> bool:
+    """§8.6 A3's "displaced BOS", scoped to the leg that is being retraced."""
+    if impulse is None or not impulse.displaced:
+        return False
+
+    return any(impulse.start_index <= index <= impulse.end_index for index in breaks)
+
+
+def _is_displacement_fvg(zone: IctZoneRecord, displacement: frozenset[int]) -> bool:
+    """§8.6 A4 wants a *displacement* FVG, and the zone record does not say.
+
+    §5.4 detects gaps without asking what made them, so the origin is recovered
+    from the same §5.10 set §7.5 uses: a displacement on any candle of the
+    three the gap spans.
+    """
+    if zone.zone_type not in {"FVG", "IFVG", "BPR"}:
+        return False
+
+    return any(
+        index in displacement for index in range(zone.created_index - 2, zone.created_index + 1)
+    )
+
+
+def _is_first_touch(zone: IctZoneRecord, price: Decimal) -> bool:
+    """§8.6 A4's "first touch": an untouched zone that price is now inside.
+
+    §5 spells untouched two ways -- FRESH for OB-family zones, OPEN for the FVG
+    family -- so both are named. The zone's own state is the record of whether
+    it has been touched before, which is why no interaction lookup is needed.
+    """
+    return zone.state in {"FRESH", "OPEN"} and zone.band_low <= price <= zone.band_high
 
 
 def _near_price(zone: IctZoneRecord, price: Decimal, atr: Decimal | None) -> bool:
