@@ -29,9 +29,11 @@ from scanner.domain.common import (
     detection_is_warm,
     quantise_derived,
     wilder_atr,
+    wilder_atr_series,
 )
 from scanner.domain.ict import DisplacementDirection, detect_displacement
 from scanner.domain.liquidity import (
+    EqualLevelCluster,
     LiquidityClass,
     LiquidityPool,
     LiquiditySide,
@@ -39,13 +41,16 @@ from scanner.domain.liquidity import (
     PoolState,
     PoolStrength,
     SweepEvent,
+    detect_equal_level_clusters,
     detect_single_candle_sweep,
     detect_stop_hunt,
     detect_two_candle_sweep,
+    pool_from_cluster,
     pool_from_swing,
     should_expire_pool,
 )
 from scanner.domain.structure import (
+    SwingKind,
     SwingPoint,
     detect_external_swings,
     detect_internal_swings,
@@ -53,7 +58,7 @@ from scanner.domain.structure import (
 )
 from scanner.shared import Timeframe
 
-LIQUIDITY_ALGO_VERSION = "s5-v3"
+LIQUIDITY_ALGO_VERSION = "s5-v4"
 
 _ATR_PERIOD = 14
 _EPSILON_ATR = Decimal("0.05")
@@ -68,6 +73,8 @@ class LiquidityReplayReport:
     candles: int
     internal_pools: int
     external_pools: int
+    clusters: int
+    clustered_swings: int
     pools_upserted: int
     active_pools: int
     sweeps: int
@@ -133,6 +140,8 @@ class LiquidityReplayService:
                 candles=len(candles),
                 internal_pools=0,
                 external_pools=0,
+                clusters=0,
+                clustered_swings=0,
                 pools_upserted=0,
                 active_pools=0,
                 sweeps=0,
@@ -144,11 +153,44 @@ class LiquidityReplayService:
         internal_swings = detect_internal_swings(candles)
         external_swings = detect_external_swings(candles)
 
+        atrs = wilder_atr_series(candles)
+
+        clusters = detect_equal_level_clusters(
+            [*internal_swings, *external_swings],
+            atrs=atrs,
+        )
+
+        # §4.2's edge case is a dedup rule, not an optimisation: "one price
+        # zone = one pool per side per TF". Cluster members sit within epsilon
+        # of each other by construction, so persisting both the cluster pool
+        # and each member's own swing pool would put two pools on one level --
+        # and a sweep of that level would then transition both, double-counting
+        # in anything that ranks or scores pools.
+        clustered = {
+            (index, cluster.side) for cluster in clusters for index in cluster.member_indices
+        }
+
+        # A k=5 pivot is necessarily also a k=2 pivot, so every external swing
+        # comes back out of the internal detector too. Registering both put two
+        # pools on one price: measured on real BTCUSDT H1, all 238 external
+        # swings shared a (swing_index, side) with an internal pool, so 238 of
+        # 758 pools were duplicates. §4.2 forbids it -- "one price zone = one
+        # pool per side per TF" -- and §4.1 partitions the two: external swings
+        # register external levels, internal swings register internal ones
+        # "(lower weight)". A swing that is external is external.
+        promoted = {(swing.index, swing.kind) for swing in external_swings}
+
         internal_count = 0
         external_count = 0
         upserted = 0
 
         for swing in internal_swings:
+            if (swing.index, swing.kind) in promoted:
+                continue
+
+            if (swing.index, _side_of(swing)) in clustered:
+                continue
+
             persisted = await self._persist_swing_pool(
                 symbol,
                 timeframe,
@@ -162,6 +204,9 @@ class LiquidityReplayService:
                 upserted += 1
 
         for swing in external_swings:
+            if (swing.index, _side_of(swing)) in clustered:
+                continue
+
             persisted = await self._persist_swing_pool(
                 symbol,
                 timeframe,
@@ -172,6 +217,13 @@ class LiquidityReplayService:
 
             if persisted:
                 external_count += 1
+                upserted += 1
+
+        cluster_count = 0
+
+        for cluster in clusters:
+            if await self._persist_cluster_pool(symbol, timeframe, cluster, candles):
+                cluster_count += 1
                 upserted += 1
 
         lifecycle_pools = await self._pools.list_active(
@@ -213,6 +265,8 @@ class LiquidityReplayService:
             candles=len(candles),
             internal_pools=internal_count,
             external_pools=external_count,
+            clusters=cluster_count,
+            clustered_swings=len(clustered),
             pools_upserted=upserted,
             active_pools=len(active),
             sweeps=sweeps,
@@ -305,6 +359,92 @@ class LiquidityReplayService:
         )
 
         await self._pools.upsert(record)
+
+        return True
+
+    async def _persist_cluster_pool(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        cluster: EqualLevelCluster,
+        candles: Sequence[Candle],
+    ) -> bool:
+        if cluster.confirmed_index >= len(candles):
+            return False
+
+        confirmation_candle = candles[cluster.confirmed_index]
+
+        age_candles = max(0, len(candles) - 1 - cluster.confirmed_index)
+
+        timeframe_rank, max_rank = _timeframe_rank(timeframe)
+
+        pool_id = _build_cluster_pool_id(
+            symbol=symbol,
+            timeframe=timeframe,
+            cluster=cluster,
+            algo_version=self._algo_version,
+        )
+
+        pool = pool_from_cluster(
+            cluster,
+            pool_id=pool_id,
+            # §4.4's positional reading is not implemented anywhere (see the
+            # static assignment on the swing path); a cluster of engineered
+            # stops is external liquidity by construction, which is the one
+            # case where the static answer is also the right one.
+            liquidity_class=LiquidityClass.EXTERNAL,
+            created_at=confirmation_candle.close_time,
+            touches=0,
+            timeframe_rank=timeframe_rank,
+            max_timeframe_rank=max_rank,
+            age_candles=age_candles,
+        )
+
+        evidence = json.dumps(
+            {
+                "algo_version": self._algo_version,
+                "source": "equal_level_cluster",
+                "cluster_id": cluster.cluster_id,
+                "member_indices": list(cluster.member_indices),
+                "member_prices": [str(price) for price in cluster.member_prices],
+                "member_count": cluster.member_count,
+                "confirmed_index": cluster.confirmed_index,
+                "confirmation_close_time": (confirmation_candle.close_time.isoformat()),
+                "band_low": str(cluster.band_low),
+                "band_high": str(cluster.band_high),
+                "touches": 0,
+                "age_candles": age_candles,
+                "strength_components": {
+                    "touches": str(pool.strength.touches_component),
+                    "timeframe": str(pool.strength.timeframe_component),
+                    "age": str(pool.strength.age_component),
+                    "cluster": str(pool.strength.cluster_component),
+                },
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+        await self._pools.upsert(
+            LiquidityPoolRecord(
+                pool_id=pool.pool_id,
+                symbol=symbol,
+                timeframe=timeframe,
+                side=pool.side.value,
+                liquidity_class=pool.liquidity_class.value,
+                source=pool.source.value,
+                price=pool.price,
+                band_low=pool.band_low,
+                band_high=pool.band_high,
+                strength=pool.strength.total,
+                state=pool.state.value,
+                member_count=pool.member_count,
+                created_index=cluster.confirmed_index,
+                created_at=confirmation_candle.close_time,
+                updated_at=self._clock.now(),
+                evidence=evidence,
+            )
+        )
 
         return True
 
@@ -768,6 +908,31 @@ def _atr_at(
     """
 
     return wilder_atr(candles, index) or Decimal("0")
+
+
+def _side_of(swing: SwingPoint) -> LiquiditySide:
+    return LiquiditySide.BSL if swing.kind is SwingKind.HIGH else LiquiditySide.SSL
+
+
+def _build_cluster_pool_id(
+    *,
+    symbol: str,
+    timeframe: Timeframe,
+    cluster: EqualLevelCluster,
+    algo_version: str,
+) -> str:
+    raw = "|".join(
+        (
+            algo_version,
+            symbol,
+            timeframe.value,
+            "CLUSTER",
+            cluster.side.value,
+            cluster.cluster_id,
+        )
+    )
+
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _build_pool_id(

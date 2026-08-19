@@ -101,3 +101,41 @@ def quantise_derived(value: Decimal) -> Decimal:
     """
 
     return value.quantize(_DERIVED_EXPONENT, rounding=ROUND_HALF_EVEN)
+
+
+def wilder_atr_series(
+    candles: Sequence[Candle],
+) -> tuple[Decimal | None, ...]:
+    """Wilder ATR at every index, in one pass.
+
+    Identical results to calling `wilder_atr` per index, including the `None`
+    seeding region — but that costs O(n) each time, because the recurrence is
+    re-seeded from candle zero on every call. Callers that need ATR at many
+    points were therefore quadratic, which is why they mostly asked for one
+    ATR and reused it across a whole window. Reusing one is not always sound:
+    §0.4 makes ATR the denominator under every threshold, so a threshold
+    evaluated against the *window's last* ATR changes meaning as the window
+    slides, and a detector that re-derives history can then disagree with
+    itself between runs.
+    """
+
+    if not candles:
+        return ()
+
+    out: list[Decimal | None] = [None] * len(candles)
+
+    if len(candles) < ATR_PERIOD:
+        return tuple(out)
+
+    atr = sum(
+        (true_range(candles, offset) for offset in range(ATR_PERIOD)),
+        Decimal(0),
+    ) / Decimal(ATR_PERIOD)
+
+    out[ATR_PERIOD - 1] = atr
+
+    for current in range(ATR_PERIOD, len(candles)):
+        atr = (atr * Decimal(ATR_PERIOD - 1) + true_range(candles, current)) / Decimal(ATR_PERIOD)
+        out[current] = atr
+
+    return tuple(out)
