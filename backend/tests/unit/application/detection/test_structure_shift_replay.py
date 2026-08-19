@@ -7,8 +7,13 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from tests.golden.harness.memory import InMemoryEngineStateStore
 
 import scanner.application.detection.structure_shift_replay as shift_module
+from scanner.application.detection.state import (
+    SHIFT_NAMESPACE,
+    EngineStateManager,
+)
 from scanner.application.detection.structure_shift_replay import (
     StructureShiftReplayService,
 )
@@ -263,6 +268,7 @@ async def test_external_sweep_choch_confirms_mss(
         events,
         evidence,
         FakeClock(),
+        EngineStateManager(InMemoryEngineStateStore(), namespace=SHIFT_NAMESPACE),
     )
 
     report = await service.run(
@@ -326,6 +332,7 @@ async def test_structure_shift_replay_is_idempotent(
         events,
         evidence,
         FakeClock(),
+        EngineStateManager(InMemoryEngineStateStore(), namespace=SHIFT_NAMESPACE),
     )
 
     first = await service.run(
@@ -353,6 +360,7 @@ async def test_empty_shift_history_is_safe() -> None:
         FakeEventRepository(),
         FakeEvidenceRepository(()),
         FakeClock(),
+        EngineStateManager(InMemoryEngineStateStore(), namespace=SHIFT_NAMESPACE),
     )
 
     report = await service.run(
@@ -427,6 +435,7 @@ async def test_unparseable_liquidity_evidence_raises_rather_than_downgrading(
         FakeEventRepository(),
         evidence,
         FakeClock(),
+        EngineStateManager(InMemoryEngineStateStore(), namespace=SHIFT_NAMESPACE),
     )
 
     with pytest.raises(DomainInvariantError) as caught:

@@ -27,6 +27,8 @@ from datetime import datetime
 from decimal import Decimal
 
 from scanner.application.detection.orchestrator import build_event_key
+from scanner.application.detection.state import EngineStateManager
+from scanner.application.marketdata.contexts import higher_timeframe
 from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.detection import (
     EngineEventRecord,
@@ -63,7 +65,7 @@ from scanner.domain.momentum import momentum_phase, momentum_score
 from scanner.domain.structure import TrendState
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v2"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v3"
 
 # Inputs §8 asks for that no engine currently produces. Listed rather than
 # silently defaulted -- see the module docstring.
@@ -76,11 +78,16 @@ UNREACHABLE_INPUTS: tuple[str, ...] = (
     "target_pool_strength",
     "target_pool_unclaimed",
     "target_pool_fresh",
-    "htf_state",  # §8.4 needs the timeframe above; nothing reads the ladder here
     # §8.6 archetype chains all terminate in a retest tied to an entry
     # price. Without one, no chain closes and no candidate can classify.
     "archetype_retest_chain",
 )
+
+# Not in the constant above, because unlike those it is only *sometimes*
+# unreachable: §8.4 reads the timeframe one rung up, which may be the top of
+# the ladder or may simply never have been replayed. Reporting it always would
+# be as misleading as reporting it never.
+HTF_STATE_UNREACHABLE = "htf_state"
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +123,8 @@ class ConfluenceReplayReport:
     timeframe: Timeframe
     candidates: tuple[SetupCandidate, ...]
     events_inserted: int
+    htf_state: str | None = None
+    """§8.4's bias from the rung above, or None when it could not be read."""
     unreachable: tuple[str, ...] = UNREACHABLE_INPUTS
 
 
@@ -129,7 +138,9 @@ class ConfluenceReplayService:
         zones: IctZoneRepository,
         evidence: IctEvidenceRepository,
         clock: Clock,
+        shift_state: EngineStateManager,
         *,
+        shift_algo_version: str,
         algo_version: str = CONFLUENCE_ALGO_VERSION,
     ) -> None:
         self._candles = candles
@@ -137,6 +148,8 @@ class ConfluenceReplayService:
         self._zones = zones
         self._evidence = evidence
         self._clock = clock
+        self._shift_state = shift_state
+        self._shift_algo_version = shift_algo_version
         self._algo_version = algo_version
 
     async def run(
@@ -171,6 +184,8 @@ class ConfluenceReplayService:
 
         reading = _read_participation(series)
 
+        htf = await self._read_htf_state(symbol, timeframe)
+
         candidates: list[SetupCandidate] = []
         inserted = 0
 
@@ -185,6 +200,7 @@ class ConfluenceReplayService:
                 liquidity=liquidity,
                 live_zones=live_zones,
                 reading=reading,
+                htf=htf,
             )
 
             candidates.append(candidate)
@@ -197,6 +213,13 @@ class ConfluenceReplayService:
             timeframe=timeframe,
             candidates=tuple(candidates),
             events_inserted=inserted,
+            htf_state=htf,
+            # Taken from the same helper the candidates use. It defaulted to
+            # the module constant before, so on a context whose ladder could
+            # not be read the report announced `htf_state` as reachable while
+            # the line above it said `unread` -- the two disagreeing about the
+            # same run.
+            unreachable=_unreachable(htf),
         )
 
     def _evaluate(
@@ -211,6 +234,7 @@ class ConfluenceReplayService:
         liquidity: tuple[LiquidityEvidenceRecord, ...],
         live_zones: tuple[IctZoneRecord, ...],
         reading: _Reading,
+        htf: str | None,
     ) -> SetupCandidate:
         polarity = "BULLISH" if direction == "UP" else "BEARISH"
 
@@ -281,7 +305,7 @@ class ConfluenceReplayService:
                 grade=None,
                 archetype=None,
                 publishable=False,
-                unreachable=UNREACHABLE_INPUTS,
+                unreachable=_unreachable(htf),
             )
 
         # The best zone in the stack, not the newest one. §8.3 F3 asks for the
@@ -327,11 +351,12 @@ class ConfluenceReplayService:
                     exhaustion_against=reading.exhausted,
                 )
             ).score,
-            # The HTF's own state is a ladder read this service does not have
-            # (§8.4 wants timeframe T+1); scoring T's state here would claim an
-            # alignment nobody checked. Named in UNREACHABLE_INPUTS instead.
             Factor.HTF_ALIGNMENT: htf_alignment_factor(
-                htf_state=TrendState.RANGING.value,
+                # RANGING when the rung above has no state, and said so in
+                # `unreachable`. It is F6's neutral value, so an unread ladder
+                # neither rewards nor punishes a candidate -- but a reader can
+                # tell that from the record instead of having to guess.
+                htf_state=htf if htf is not None else TrendState.RANGING.value,
                 direction=direction,
             ).score,
         }
@@ -354,6 +379,7 @@ class ConfluenceReplayService:
                 trend_active=trend_following,
                 displaced_bos=f"MSS_{direction}" in event_types,
                 retraced_into_zone=bool(matching_zones),
+                htf_aligned=htf == direction,
             )
         )
 
@@ -375,7 +401,7 @@ class ConfluenceReplayService:
             publishable=publishable,
             factors={f.value: score for f, score in factors.items()},
             zone_id=best_zone.zone_id,
-            unreachable=UNREACHABLE_INPUTS,
+            unreachable=_unreachable(htf),
         )
 
     async def _record(
@@ -422,6 +448,36 @@ class ConfluenceReplayService:
 
         return 1 if inserted else 0
 
+    async def _read_htf_state(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+    ) -> str | None:
+        """§8.4's HTF bias, in F6's vocabulary, or None if it cannot be read.
+
+        None covers two genuinely different situations that both mean "do not
+        claim an alignment": the top of the ladder has no timeframe above, and
+        a lower rung may simply never have been replayed for this symbol. The
+        second is the failure recorded in the timeframe-ladder notes -- an
+        unpopulated neighbour yields a plausible number rather than an error --
+        so it is reported rather than smoothed over.
+        """
+        above = higher_timeframe(timeframe)
+
+        if above is None:
+            return None
+
+        state = await self._shift_state.load(
+            symbol,
+            above.value,
+            self._shift_algo_version,
+        )
+
+        if state is None:
+            return None
+
+        return _f6_vocabulary(state.trend_state)
+
 
 class _Sweep:
     """A §4.6 sweep transition, read through the questions §8 asks of it."""
@@ -456,6 +512,29 @@ class _Sweep:
         side = self._e.get("side")
 
         return bool(side == "SSL") if direction == "UP" else bool(side == "BSL")
+
+
+def _f6_vocabulary(trend_state: str) -> str:
+    """§3.7's states as §8.3's F6 table names them.
+
+    F6 wants UP / DOWN / RANGING / CAUTION_<D>; §3.7 says BULLISH, BEARISH and
+    their CAUTION variants. Two spellings of one idea is how §8.3.1's zone table
+    came to score every FVG at zero, so the translation is explicit here rather
+    than left to a string that happens to match.
+    """
+    return {
+        TrendState.BULLISH.value: "UP",
+        TrendState.BEARISH.value: "DOWN",
+        TrendState.BULLISH_CAUTION.value: "CAUTION_UP",
+        TrendState.BEARISH_CAUTION.value: "CAUTION_DOWN",
+    }.get(trend_state, TrendState.RANGING.value)
+
+
+def _unreachable(htf: str | None) -> tuple[str, ...]:
+    if htf is None:
+        return (*UNREACHABLE_INPUTS, HTF_STATE_UNREACHABLE)
+
+    return UNREACHABLE_INPUTS
 
 
 def _state_direction(trend_state: str) -> str | None:

@@ -9,6 +9,10 @@ from datetime import datetime
 from decimal import Decimal
 
 from scanner.application.detection.orchestrator import build_event_key
+from scanner.application.detection.state import (
+    EngineStateManager,
+    StructureEngineState,
+)
 from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.detection import (
     EngineEventRecord,
@@ -81,6 +85,7 @@ class StructureShiftReplayService:
         events: EngineEventRepository,
         evidence: IctEvidenceRepository,
         clock: Clock,
+        state: EngineStateManager,
         *,
         algo_version: str = STRUCTURE_SHIFT_ALGO_VERSION,
     ) -> None:
@@ -88,6 +93,7 @@ class StructureShiftReplayService:
         self._events = events
         self._evidence = evidence
         self._clock = clock
+        self._state = state
         self._algo_version = algo_version
 
     async def run(
@@ -304,6 +310,12 @@ class StructureShiftReplayService:
                 has_failure_swing=has_failure_swing,
             )
 
+        # §3.7's state is what §8.2's G2 and §8.3's F6 both ask for, and F6
+        # asks for it on the *timeframe above*. A value that exists only in a
+        # return object cannot be read across contexts, so the ladder had no
+        # way to see it and confluence scored a constant instead.
+        await self._save_state(symbol, timeframe, machine.state, candles[-1].open_time)
+
         return StructureShiftReplayReport(
             symbol=symbol,
             timeframe=timeframe,
@@ -312,6 +324,23 @@ class StructureShiftReplayService:
             failed_candidates=failed_candidates,
             events_inserted=inserted,
             trend_state=machine.state.value,
+        )
+
+    async def _save_state(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        trend: TrendState,
+        last_open_time: datetime,
+    ) -> None:
+        await self._state.save(
+            StructureEngineState(
+                symbol=symbol,
+                timeframe=timeframe.value,
+                algo_version=self._algo_version,
+                last_processed_open_time=last_open_time.isoformat(),
+                trend_state=trend.value,
+            )
         )
 
     async def _persist_choch(

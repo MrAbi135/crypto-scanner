@@ -21,6 +21,20 @@ _LADDER: tuple[Timeframe, ...] = (
 )
 
 
+def higher_timeframe(timeframe: Timeframe) -> Timeframe | None:
+    """The timeframe one rung above, or None at the top of the ladder.
+
+    §8.4's HTF alignment is defined against the next TF up, and W1 has no next
+    TF up -- so `None` here is a real answer, not a lookup failure.
+    """
+    position = _LADDER.index(timeframe)
+
+    if position + 1 >= len(_LADDER):
+        return None
+
+    return _LADDER[position + 1]
+
+
 def parse_symbols(raw: str) -> tuple[str, ...]:
     symbols = tuple(part.strip().upper() for part in raw.split(",") if part.strip())
 

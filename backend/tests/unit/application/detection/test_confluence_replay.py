@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+from tests.golden.harness.memory import InMemoryEngineStateStore
 from tests.support.builders import make_candle
 
 from scanner.application.detection.confluence_replay import (
     CONFLUENCE_ALGO_VERSION,
-    UNREACHABLE_INPUTS,
+    HTF_STATE_UNREACHABLE,
     ConfluenceReplayService,
+)
+from scanner.application.detection.state import (
+    SHIFT_NAMESPACE,
+    EngineStateManager,
+    StructureEngineState,
 )
 from scanner.application.ports.detection import EngineEventRecord
 from scanner.application.ports.ict_evidence import LiquidityEvidenceRecord
@@ -195,14 +202,40 @@ def sweep(
     )
 
 
+SHIFT_ALGO = "s4b-shift-test"
+
+# The rung above H4 is D1 (contexts._LADDER), so that is where an HTF state has
+# to be written for this fixture's candidates to read one.
+HTF = Timeframe.D1
+
+
 def service(
     *,
     events: list[EngineEventRecord] | None = None,
     zones: list[IctZoneRecord] | None = None,
     liquidity: list[LiquidityEvidenceRecord] | None = None,
     candles: list | None = None,
+    htf_trend: str | None = None,
 ):
     repo = FakeEventRepository(events)
+
+    store = InMemoryEngineStateStore()
+    shift_state = EngineStateManager(store, namespace=SHIFT_NAMESPACE)
+
+    if htf_trend is not None:
+        # Written straight into the store rather than through `save`, so the
+        # fixture stays synchronous and every test keeps the same two-value
+        # unpack it had before the ladder existed.
+        store.values[shift_state.context_key("BTCUSDT", HTF.value, SHIFT_ALGO)] = json.dumps(
+            asdict(
+                StructureEngineState(
+                    symbol="BTCUSDT",
+                    timeframe=HTF.value,
+                    algo_version=SHIFT_ALGO,
+                    trend_state=htf_trend,
+                )
+            )
+        )
 
     svc = ConfluenceReplayService(
         FakeCandleRepository(make_series() if candles is None else candles),
@@ -210,6 +243,8 @@ def service(
         FakeZoneRepository(zones or []),
         FakeEvidenceRepository(liquidity),
         FakeClock(),
+        shift_state,
+        shift_algo_version=SHIFT_ALGO,
     )
 
     return svc, repo
@@ -527,9 +562,12 @@ async def test_unreachable_inputs_are_named_in_the_stored_record() -> None:
 
     payload = json.loads(next(iter(repo.appended.values())).payload)
 
-    assert payload["unreachable_inputs"] == list(UNREACHABLE_INPUTS)
     assert "wash_risk" in payload["unreachable_inputs"]
     assert "target_pool_strength" in payload["unreachable_inputs"]
+
+    # Nothing wrote a state for the timeframe above, so F6 was defaulted --
+    # and the record says which of its inputs was read and which was not.
+    assert HTF_STATE_UNREACHABLE in payload["unreachable_inputs"]
 
 
 @pytest.mark.asyncio
@@ -636,3 +674,95 @@ async def test_an_inverted_window_is_refused() -> None:
 
     with pytest.raises(ValueError, match="end must be greater"):
         await svc.run("BTCUSDT", TF, BASE, BASE)
+
+
+@pytest.mark.asyncio
+async def test_f6_reads_the_state_of_the_timeframe_above() -> None:
+    """The bug this test exists for.
+
+    `htf_state` was hardcoded to RANGING, so `htf_alignment_factor` took the
+    same branch on every candidate in both directions -- F6 was a constant, and
+    §8.3 weights it at 15% of the confidence.
+    """
+    setup = bullish_setup()
+
+    up_htf, _ = service(**setup, htf_trend="BULLISH")
+    down_htf, _ = service(**setup, htf_trend="BEARISH")
+
+    a = next(c for c in (await run(up_htf, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(down_htf, "BULLISH")).candidates if c.direction == "UP")
+
+    assert a.factors["F6"] > b.factors["F6"]
+
+
+@pytest.mark.asyncio
+async def test_caution_toward_the_direction_scores_between_aligned_and_opposed() -> None:
+    """§3.7's CAUTION carries a direction, and F6's table keeps it."""
+    setup = bullish_setup()
+
+    scores = {}
+
+    for label, trend in (
+        ("aligned", "BULLISH"),
+        ("caution", "BULLISH_CAUTION"),
+        ("opposed", "BEARISH"),
+    ):
+        svc, _ = service(**setup, htf_trend=trend)
+
+        candidate = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
+
+        scores[label] = candidate.factors["F6"]
+
+    assert scores["aligned"] > scores["caution"] > scores["opposed"]
+
+
+@pytest.mark.asyncio
+async def test_an_unread_ladder_is_named_rather_than_scored_as_ranging() -> None:
+    """The timeframe-ladder failure, one level up.
+
+    A neighbour that was never replayed yields a plausible number rather than
+    an error. F6 still takes its neutral value -- there is nothing better to
+    take -- but the record distinguishes "the HTF is ranging" from "nobody
+    looked", which are the same 15% otherwise.
+    """
+    setup = bullish_setup()
+
+    unread, _ = service(**setup)
+    ranging, _ = service(**setup, htf_trend="RANGING")
+
+    a = next(c for c in (await run(unread, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(ranging, "BULLISH")).candidates if c.direction == "UP")
+
+    assert a.factors["F6"] == b.factors["F6"]
+    assert HTF_STATE_UNREACHABLE in a.unreachable
+    assert HTF_STATE_UNREACHABLE not in b.unreachable
+
+
+@pytest.mark.asyncio
+async def test_the_report_and_its_candidates_name_the_same_gaps() -> None:
+    """They disagreed, and the CLI printed the wrong one.
+
+    The report's `unreachable` defaulted to the module constant while the
+    candidates computed theirs, so on a context whose ladder could not be read
+    `engine run` announced `htf: unread` and, one line down, an unreachable
+    list that did not mention `htf_state`.
+    """
+    svc, _ = service(**bullish_setup())
+
+    report = await run(svc, "BULLISH")
+
+    assert report.htf_state is None
+    assert HTF_STATE_UNREACHABLE in report.unreachable
+
+    for candidate in report.candidates:
+        assert candidate.unreachable == report.unreachable
+
+
+@pytest.mark.asyncio
+async def test_a_read_ladder_leaves_the_report_clean() -> None:
+    svc, _ = service(**bullish_setup(), htf_trend="BEARISH")
+
+    report = await run(svc, "BULLISH")
+
+    assert report.htf_state == "DOWN"
+    assert HTF_STATE_UNREACHABLE not in report.unreachable
