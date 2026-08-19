@@ -66,6 +66,8 @@ def build_detection_pipeline(
     events = PgEngineEventRepository(sessions)
     evidence = PgIctEvidenceRepository(sessions)
 
+    zone_interactions = PgIctZoneInteractionRepository(sessions)
+
     zones = PgIctZoneRepository(sessions)
     zone_transitions = PgIctZoneTransitionRepository(sessions)
     zone_state = RedisIctZoneStateStore(redis_client)
@@ -119,7 +121,7 @@ def build_detection_pipeline(
         ict_interaction=IctZoneInteractionReplayService(
             candles,
             PgIctZoneInteractionContextRepository(sessions),
-            PgIctZoneInteractionRepository(sessions),
+            zone_interactions,
         ),
         participation=ParticipationReplayService(
             candles,
@@ -131,6 +133,7 @@ def build_detection_pipeline(
             events,
             zones,
             evidence,
+            zone_interactions,
             clock,
             EngineStateManager(
                 RedisEngineStateStore(redis_client),

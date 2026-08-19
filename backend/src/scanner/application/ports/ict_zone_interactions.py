@@ -37,6 +37,16 @@ class IctZoneInteractionRepository(Protocol):
         interaction: IctZoneInteractionRecord,
     ) -> bool: ...
 
+    # §5.9's interactions were write-only: the engine recorded every TOUCH,
+    # REJECTION, RESPECT and CONFIRMATION and nothing could read one back. That
+    # is what kept §8.6's A2 ("first retest with Respect") and §8.3.1's
+    # entry-confirmation term out of reach -- both are questions about a
+    # specific zone's history, and history you cannot query is not history.
+    async def list_for_zone(
+        self,
+        zone_id: str,
+    ) -> tuple[IctZoneInteractionRecord, ...]: ...
+
 
 class IctZoneInteractionContextRepository(Protocol):
     async def list_zones(
