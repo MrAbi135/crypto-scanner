@@ -10,6 +10,13 @@ from scanner.application.ports.detection import (
     EngineStateStore,
 )
 
+# Two engines keep a per-context snapshot and they are not the same quantity:
+# §3.4's trend inferred from external swing labels (structure), and §3.7's
+# TrendStateMachine moved by CHoCH and MSS (shift). Sharing one key would give
+# a single field two writers, and whichever ran last would win silently.
+STRUCTURE_NAMESPACE = "structure"
+SHIFT_NAMESPACE = "shift"
+
 
 @dataclass(frozen=True, slots=True)
 class StructureEngineState:
@@ -24,16 +31,19 @@ class EngineStateManager:
     def __init__(
         self,
         store: EngineStateStore,
+        *,
+        namespace: str = STRUCTURE_NAMESPACE,
     ) -> None:
         self._store = store
+        self._namespace = namespace
 
-    @staticmethod
     def context_key(
+        self,
         symbol: str,
         timeframe: str,
         algo_version: str,
     ) -> str:
-        return f"structure:{algo_version}:{symbol}:{timeframe}"
+        return f"{self._namespace}:{algo_version}:{symbol}:{timeframe}"
 
     async def load(
         self,

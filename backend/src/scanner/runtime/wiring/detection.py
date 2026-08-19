@@ -23,9 +23,13 @@ from scanner.application.detection.participation_replay import (
     ParticipationReplayService,
 )
 from scanner.application.detection.pipeline import DetectionPipeline
-from scanner.application.detection.state import EngineStateManager
+from scanner.application.detection.state import (
+    SHIFT_NAMESPACE,
+    EngineStateManager,
+)
 from scanner.application.detection.structure_replay import StructureReplayService
 from scanner.application.detection.structure_shift_replay import (
+    STRUCTURE_SHIFT_ALGO_VERSION,
     StructureShiftReplayService,
 )
 from scanner.application.ports import Clock
@@ -86,6 +90,10 @@ def build_detection_pipeline(
             events,
             evidence,
             clock,
+            EngineStateManager(
+                RedisEngineStateStore(redis_client),
+                namespace=SHIFT_NAMESPACE,
+            ),
         ),
         ict=IctReplayService(
             candles,
@@ -124,5 +132,10 @@ def build_detection_pipeline(
             zones,
             evidence,
             clock,
+            EngineStateManager(
+                RedisEngineStateStore(redis_client),
+                namespace=SHIFT_NAMESPACE,
+            ),
+            shift_algo_version=STRUCTURE_SHIFT_ALGO_VERSION,
         ),
     )

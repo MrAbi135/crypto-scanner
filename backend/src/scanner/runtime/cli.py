@@ -442,6 +442,10 @@ async def _run_engine(
                     f"blocked_by={','.join(candidate.failed_gates)}"
                 )
 
+        # Printed because "the HTF is ranging" and "nobody looked" are the
+        # same F6 score, and only the second is a reason to check the ladder.
+        print(f"  confluence htf: {confluence_report.htf_state or 'unread'}")
+
         if confluence_report.unreachable:
             print(f"  confluence unreachable: {','.join(confluence_report.unreachable)}")
 
