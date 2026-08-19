@@ -13,6 +13,7 @@ from scanner.domain.liquidity.model import (
     SweepEvent,
 )
 from scanner.domain.liquidity.pools import (
+    pool_from_cluster,
     pool_from_swing,
     score_pool_strength,
 )
@@ -48,6 +49,7 @@ __all__ = [
     "detect_two_candle_sweep",
     "mark_displaced_after",
     "mark_stop_hunt_failed",
+    "pool_from_cluster",
     "pool_from_swing",
     "score_pool_strength",
     "should_expire_pool",

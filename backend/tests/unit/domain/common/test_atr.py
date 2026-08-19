@@ -15,6 +15,7 @@ from scanner.domain.common import (
     quantise_derived,
     true_range,
     wilder_atr,
+    wilder_atr_series,
 )
 from scanner.shared import Timeframe
 
@@ -156,3 +157,43 @@ def test_quantisation_never_feeds_a_comparison() -> None:
 
     assert quantise_derived(a) == quantise_derived(b)
     assert a != b
+
+
+class TestWilderAtrSeries:
+    """The series must be indistinguishable from the per-index function.
+
+    It exists only to make many lookups affordable. If it drifted, every
+    threshold evaluated through it would drift with it (§0.4).
+    """
+
+    @staticmethod
+    def _varied(count: int) -> list[Candle]:
+        return [
+            candle(
+                i,
+                high=str(100 + i + (i % 5)),
+                low=str(98 + i - (i % 3)),
+                close=str(99 + i),
+            )
+            for i in range(count)
+        ]
+
+    def test_it_agrees_with_the_per_index_function_at_every_index(self) -> None:
+        candles = self._varied(40)
+
+        series = wilder_atr_series(candles)
+
+        assert len(series) == len(candles)
+        assert list(series) == [wilder_atr(candles, i) for i in range(len(candles))]
+
+    def test_the_seeding_region_is_none_not_zero(self) -> None:
+        series = wilder_atr_series(self._varied(20))
+
+        assert all(value is None for value in series[: ATR_PERIOD - 1])
+        assert series[ATR_PERIOD - 1] is not None
+
+    def test_a_series_shorter_than_the_period_is_all_none(self) -> None:
+        assert wilder_atr_series(self._varied(5)) == (None,) * 5
+
+    def test_an_empty_series_is_empty(self) -> None:
+        assert wilder_atr_series([]) == ()

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 
 from scanner.domain.liquidity.model import (
+    EqualLevelCluster,
     LiquidityClass,
     LiquidityPool,
     LiquiditySide,
@@ -107,4 +109,53 @@ def pool_from_swing(
         created_index=swing.index,
         strength=strength,
         member_count=1,
+    )
+
+
+def pool_from_cluster(
+    cluster: EqualLevelCluster,
+    *,
+    pool_id: str,
+    liquidity_class: LiquidityClass,
+    created_at: datetime,
+    touches: int,
+    timeframe_rank: int,
+    max_timeframe_rank: int,
+    age_candles: int,
+) -> LiquidityPool:
+    """§4.2(b): the pool an EQH/EQL cluster creates.
+
+    This is the only constructor that can move `cluster_factor` off its
+    single-swing floor. With no caller for §4.3, every pool in production was
+    built by `pool_from_swing` with `member_count=1`, pinning `cluster_factor`
+    at 0.25 and `cluster_component` at exactly 6.25 -- a quarter of the strength
+    score that could not vary, on a formula whose whole purpose is to rank.
+
+    Price is the extreme of the members, not the band midpoint: §4.2 says
+    *"clusters: the extreme of the member candles"*, and the band is retained
+    separately *"for sweep tolerance"*. A midpoint would sit inside the band,
+    so a sweep that took the cluster's stops could close back through it and
+    read as no sweep at all.
+    """
+
+    strength = score_pool_strength(
+        touches=touches,
+        timeframe_rank=timeframe_rank,
+        max_timeframe_rank=max_timeframe_rank,
+        age_candles=age_candles,
+        member_count=cluster.member_count,
+    )
+
+    return LiquidityPool(
+        pool_id=pool_id,
+        side=cluster.side,
+        liquidity_class=liquidity_class,
+        source=PoolSource.CLUSTER,
+        price=cluster.extreme,
+        band_low=cluster.band_low,
+        band_high=cluster.band_high,
+        created_at=created_at,
+        created_index=cluster.confirmed_index,
+        strength=strength,
+        member_count=cluster.member_count,
     )

@@ -79,10 +79,18 @@ class EqualLevelCluster:
     member_prices: tuple[Decimal, ...]
     band_low: Decimal
     band_high: Decimal
+    # §4.3: the candle at which the second member's swing confirms. Later
+    # members append, so this is the cluster's birth stamp and does not move.
+    confirmed_index: int
 
     @property
     def member_count(self) -> int:
         return len(self.member_indices)
+
+    @property
+    def extreme(self) -> Decimal:
+        """§4.2: a cluster pool's price is the extreme of its members."""
+        return self.band_high if self.side is LiquiditySide.BSL else self.band_low
 
 
 @dataclass(frozen=True, slots=True)

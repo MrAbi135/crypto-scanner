@@ -6,6 +6,7 @@ from scanner.domain.common.atr import (
     quantise_derived,
     true_range,
     wilder_atr,
+    wilder_atr_series,
 )
 from scanner.domain.common.candle import Candle, CandleSource
 from scanner.domain.common.rvol import (
@@ -54,4 +55,5 @@ __all__ = [
     "true_range",
     "uses_seasonal_baseline",
     "wilder_atr",
+    "wilder_atr_series",
 ]
