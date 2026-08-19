@@ -214,6 +214,12 @@ class ConfluenceReplayService:
             candidates=tuple(candidates),
             events_inserted=inserted,
             htf_state=htf,
+            # Taken from the same helper the candidates use. It defaulted to
+            # the module constant before, so on a context whose ladder could
+            # not be read the report announced `htf_state` as reachable while
+            # the line above it said `unread` -- the two disagreeing about the
+            # same run.
+            unreachable=_unreachable(htf),
         )
 
     def _evaluate(

@@ -736,3 +736,33 @@ async def test_an_unread_ladder_is_named_rather_than_scored_as_ranging() -> None
     assert a.factors["F6"] == b.factors["F6"]
     assert HTF_STATE_UNREACHABLE in a.unreachable
     assert HTF_STATE_UNREACHABLE not in b.unreachable
+
+
+@pytest.mark.asyncio
+async def test_the_report_and_its_candidates_name_the_same_gaps() -> None:
+    """They disagreed, and the CLI printed the wrong one.
+
+    The report's `unreachable` defaulted to the module constant while the
+    candidates computed theirs, so on a context whose ladder could not be read
+    `engine run` announced `htf: unread` and, one line down, an unreachable
+    list that did not mention `htf_state`.
+    """
+    svc, _ = service(**bullish_setup())
+
+    report = await run(svc, "BULLISH")
+
+    assert report.htf_state is None
+    assert HTF_STATE_UNREACHABLE in report.unreachable
+
+    for candidate in report.candidates:
+        assert candidate.unreachable == report.unreachable
+
+
+@pytest.mark.asyncio
+async def test_a_read_ladder_leaves_the_report_clean() -> None:
+    svc, _ = service(**bullish_setup(), htf_trend="BEARISH")
+
+    report = await run(svc, "BULLISH")
+
+    assert report.htf_state == "DOWN"
+    assert HTF_STATE_UNREACHABLE not in report.unreachable
