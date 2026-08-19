@@ -39,7 +39,7 @@ from scanner.application.ports.ict_evidence import (
     LiquidityEvidenceRecord,
 )
 from scanner.application.ports.ict_zones import IctZoneRecord, IctZoneRepository
-from scanner.domain.common import Candle
+from scanner.domain.common import Candle, wilder_atr
 from scanner.domain.common.rvol import relative_volume
 from scanner.domain.confluence import (
     Adjustment,
@@ -65,7 +65,11 @@ from scanner.domain.momentum import momentum_phase, momentum_score
 from scanner.domain.structure import TrendState
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v3"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v4"
+
+# §8.2 G4: a zone counts when its band "contains or is adjacent (<= 0.5 x ATR)
+# to current price".
+G4_ADJACENCY_ATR = Decimal("0.5")
 
 # Inputs §8 asks for that no engine currently produces. Listed rather than
 # silently defaulted -- see the module docstring.
@@ -184,6 +188,9 @@ class ConfluenceReplayService:
 
         reading = _read_participation(series)
 
+        price = series[-1].close
+        atr = wilder_atr(series, len(series) - 1)
+
         htf = await self._read_htf_state(symbol, timeframe)
 
         candidates: list[SetupCandidate] = []
@@ -201,6 +208,8 @@ class ConfluenceReplayService:
                 live_zones=live_zones,
                 reading=reading,
                 htf=htf,
+                price=price,
+                atr=atr,
             )
 
             candidates.append(candidate)
@@ -235,10 +244,22 @@ class ConfluenceReplayService:
         live_zones: tuple[IctZoneRecord, ...],
         reading: _Reading,
         htf: str | None,
+        price: Decimal,
+        atr: Decimal | None,
     ) -> SetupCandidate:
         polarity = "BULLISH" if direction == "UP" else "BEARISH"
 
-        matching_zones = [z for z in live_zones if z.polarity == polarity]
+        # §8.2 G4 asks for a zone of polarity D "whose band contains or is
+        # adjacent (<= 0.5 x ATR) to current price". Only the polarity half was
+        # implemented, so any live zone passed the gate wherever price stood --
+        # on real BTCUSDT H1, 9 BULLISH and 16 BEARISH zones, and the gate could
+        # not fail. It also meant DOWN reached grade B with its nearest zone
+        # 302.7 away, five times the 60.97 the tolerance allowed.
+        matching_zones = [
+            zone
+            for zone in live_zones
+            if zone.polarity == polarity and _near_price(zone, price, atr)
+        ]
 
         sweeps = [_Sweep(r) for r in liquidity if r.reason == "liquidity_sweep"]
 
@@ -512,6 +533,27 @@ class _Sweep:
         side = self._e.get("side")
 
         return bool(side == "SSL") if direction == "UP" else bool(side == "BSL")
+
+
+def _near_price(zone: IctZoneRecord, price: Decimal, atr: Decimal | None) -> bool:
+    """§8.2 G4's proximity test.
+
+    A missing ATR fails closed. The alternative -- treating an unmeasurable
+    tolerance as an infinite one -- restores exactly the gate this replaces,
+    and G1 already refuses a context too short to measure.
+    """
+    if zone.band_low <= price <= zone.band_high:
+        return True
+
+    if atr is None or atr <= 0:
+        return False
+
+    tolerance = G4_ADJACENCY_ATR * atr
+
+    if price < zone.band_low:
+        return zone.band_low - price <= tolerance
+
+    return price - zone.band_high <= tolerance
 
 
 def _f6_vocabulary(trend_state: str) -> str:
