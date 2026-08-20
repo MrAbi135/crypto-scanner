@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
+
+from scanner.domain.structure import SwingKind, SwingPoint
 
 _ZERO = Decimal("0")
 _HALF = Decimal("0.5")
@@ -123,6 +126,45 @@ def evaluate_pd_context(
         short_gate=(range_position >= _HALF),
         sweep_long_gate=(range_position <= _EXTREME_THIRD),
         sweep_short_gate=(range_position >= _UPPER_EXTREME_THIRD),
+    )
+
+
+def dealing_range_at(
+    swings: Sequence[SwingPoint],
+    *,
+    close: Decimal,
+    index: int,
+    range_id: str | None = None,
+) -> DealingRange | None:
+    """§5.7's dealing range as of `index`.
+
+    "Most recent confirmed external swing low <-> external swing high that
+    bracket current price." Most recent on each side independently, because the
+    range re-anchors "whenever a new external swing confirms" and a new high
+    does not invalidate the low it is measured against.
+
+    Returns None when either side has no swing yet, or when price has left the
+    bracket -- which is not a failure but §5.7's own condition: a range price
+    is outside is not the range price is in.
+    """
+    eligible = [swing for swing in swings if swing.index <= index]
+
+    highs = [swing for swing in eligible if swing.kind is SwingKind.HIGH]
+    lows = [swing for swing in eligible if swing.kind is SwingKind.LOW]
+
+    if not highs or not lows:
+        return None
+
+    high = max(highs, key=lambda swing: swing.index)
+    low = max(lows, key=lambda swing: swing.index)
+
+    return bracketed_dealing_range(
+        range_id=range_id if range_id is not None else f"{low.index}:{high.index}",
+        external_low=low.price,
+        external_high=high.price,
+        low_anchor_index=low.index,
+        high_anchor_index=high.index,
+        close=close,
     )
 
 

@@ -1039,7 +1039,7 @@ async def test_the_unreachable_list_does_not_disown_a_chain_that_closed() -> Non
     up = next(c for c in report.candidates if c.direction == "UP")
 
     assert up.archetype == "A4"
-    assert "archetype_a1_a5" in up.unreachable
+    assert "archetype_a1_mss_origin" in up.unreachable
     assert not any(name == "archetype_retest_chain" for name in up.unreachable)
 
 
@@ -1147,3 +1147,144 @@ async def test_an_entry_confirmation_pays_its_f3_points() -> None:
     b = next(c for c in (await run(with_confirmation, "BULLISH")).candidates if c.direction == "UP")
 
     assert b.factors["F3"] - a.factors["F3"] == Decimal(10)
+
+
+# §5.7's range is the most recent confirmed external swing on each side that
+# bracket price. A monotonic ramp has no external swings at all, so every PD
+# assertion on `make_series` would pass on an absent context.
+RANGE_LOW = Decimal(954)
+RANGE_HIGH = Decimal(1100)
+
+
+def ranged_series(settle: int) -> list:
+    """A peak, then a trough, then price settling between them."""
+    out = [
+        make_candle(
+            timeframe=TF,
+            open_time=BASE + TF.duration * i,
+            open_=Decimal(1000) + Decimal(i) / 100,
+            close=Decimal(1000) + Decimal(i) / 100 + Decimal("0.05"),
+            high=Decimal(1000) + Decimal(i) / 100 + Decimal("0.1"),
+            low=Decimal(1000) + Decimal(i) / 100 - Decimal("0.1"),
+            volume=Decimal(50),
+        )
+        for i in range(300)
+    ]
+
+    for k in range(12):
+        base = Decimal(1003 + k * 8)
+        out.append(
+            make_candle(
+                timeframe=TF,
+                open_time=BASE + TF.duration * (300 + k),
+                open_=base,
+                close=base + 8,
+                high=base + 9,
+                low=base - 1,
+                volume=Decimal(50),
+            )
+        )
+
+    for k in range(24):
+        base = Decimal(1099 - k * 6)
+        out.append(
+            make_candle(
+                timeframe=TF,
+                open_time=BASE + TF.duration * (312 + k),
+                open_=base,
+                close=base - 6,
+                high=base + 1,
+                low=base - 7,
+                volume=Decimal(50),
+            )
+        )
+
+    for k in range(14):
+        out.append(
+            make_candle(
+                timeframe=TF,
+                open_time=BASE + TF.duration * (336 + k),
+                open_=Decimal(settle),
+                close=Decimal(settle),
+                high=Decimal(settle + 1),
+                low=Decimal(settle - 1),
+                volume=Decimal(50),
+            )
+        )
+
+    return out
+
+
+def ranged_setup(settle: int) -> dict:
+    setup = bullish_setup()
+    setup["zones"] = [zone("z1", band_low=Decimal(settle - 1), band_high=Decimal(settle + 1))]
+
+    return setup
+
+
+@pytest.mark.asyncio
+async def test_g3_blocks_a_long_in_premium() -> None:
+    """§5.7's directional gate: "long-side setups require range_position <= 0.5".
+
+    G3 was `pd_context_ok=True`, so it could not fail -- the doctrine's *where*
+    filter was absent from the engine entirely.
+    """
+    settle = 1050  # (1050 - 954) / 146 = 0.6575, premium
+
+    svc, _ = service(**ranged_setup(settle), candles=ranged_series(settle))
+
+    report = await run(svc, "BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    assert not up.gates_passed
+    assert "G3" in up.failed_gates
+
+
+@pytest.mark.asyncio
+async def test_g3_allows_a_long_in_discount() -> None:
+    settle = 990  # (990 - 954) / 146 = 0.2466, discount
+
+    svc, _ = service(**ranged_setup(settle), candles=ranged_series(settle))
+
+    report = await run(svc, "BULLISH")
+
+    assert next(c for c in report.candidates if c.direction == "UP").gates_passed
+
+
+@pytest.mark.asyncio
+async def test_the_short_side_gate_mirrors_it() -> None:
+    settle = 1050
+
+    svc, _ = service(**ranged_setup(settle), candles=ranged_series(settle))
+
+    report = await run(svc, "BEARISH")
+
+    down = next(c for c in report.candidates if c.direction == "DOWN")
+
+    assert "G3" not in down.failed_gates
+
+
+@pytest.mark.asyncio
+async def test_a_readable_pd_context_is_not_reported_as_a_gap() -> None:
+    settle = 990
+
+    svc, _ = service(**ranged_setup(settle), candles=ranged_series(settle))
+
+    report = await run(svc, "BULLISH")
+
+    assert "pd_context" not in report.unreachable
+
+
+@pytest.mark.asyncio
+async def test_a_market_outside_any_range_names_pd_as_unread() -> None:
+    """§5.7 needs both anchors to bracket price.
+
+    A ramp that never turns has no range at all -- and that is reported rather
+    than scored as though the gate had been checked.
+    """
+    svc, _ = service(**bullish_setup())
+
+    report = await run(svc, "BULLISH")
+
+    assert "pd_context" in report.unreachable

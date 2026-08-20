@@ -65,7 +65,14 @@ from scanner.domain.confluence import (
     volume_factor,
     zone_factor,
 )
-from scanner.domain.ict import detect_displacement
+from scanner.domain.confluence.archetypes import Archetype
+from scanner.domain.ict import (
+    PdContext,
+    PdState,
+    dealing_range_at,
+    detect_displacement,
+    evaluate_pd_context,
+)
 from scanner.domain.momentum import (
     Leg,
     LegKind,
@@ -74,12 +81,16 @@ from scanner.domain.momentum import (
     momentum_score,
     segment_legs,
 )
-from scanner.domain.structure import TrendState, detect_external_swings
+from scanner.domain.structure import SwingPoint, TrendState, detect_external_swings
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v6"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v7"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
+# §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
+# extreme rather than some level near it.
+_EPSILON_ATR = Decimal("0.05")
+
 G5_DISPLACEMENT_WINDOW = 3
 
 # §8.2 G4: a zone counts when its band "contains or is adjacent (<= 0.5 x ATR)
@@ -90,15 +101,16 @@ G4_ADJACENCY_ATR = Decimal("0.5")
 # silently defaulted -- see the module docstring.
 UNREACHABLE_INPUTS: tuple[str, ...] = (
     "wash_risk",  # §6.6 needs aggTrade aggregates (roadmap S2 T4, never built)
-    "pd_context",  # §5.7 directional gate has no persisted output
     # §4.2's strength model exists, but nothing selects which pool a setup is
     # *targeting*, so the three F2 terms that describe that pool are all unread.
     "target_pool_strength",
     "target_pool_unclaimed",
     "target_pool_fresh",
-    # A1 needs §5.7's range-extreme PD and A5 the dealing range's width. A2
-    # left this list once §5.9's interactions became readable.
-    "archetype_a1_a5",
+    # A5 left this list with §5.7; A2 left it with §5.9's read method. A1 is
+    # the last one, and its blocker is not PD: `ict_ob_replay` passes
+    # `mss_origin=False` as a literal, so no zone ever records that it came
+    # from an MSS and "retest of the MSS-origin zone" cannot be asked.
+    "archetype_a1_mss_origin",
 )
 
 # Not in the constant above, because unlike those it is only *sometimes*
@@ -106,6 +118,16 @@ UNREACHABLE_INPUTS: tuple[str, ...] = (
 # the ladder or may simply never have been replayed. Reporting it always would
 # be as misleading as reporting it never.
 HTF_STATE_UNREACHABLE = "htf_state"
+
+# Also conditional: §5.7 needs two confirmed external swings bracketing price,
+# and a market that has left its last range simply has no PD context. That is
+# the spec's own answer, not a gap -- but a candidate scored without one must
+# still say so.
+PD_CONTEXT_UNREACHABLE = "pd_context"
+
+# §8.2 G3: "PD_SUSPENDED => only continuation archetypes eligible". §8.6 names
+# exactly two continuations.
+CONTINUATION_ARCHETYPES = frozenset({Archetype.CONTINUATION_PULLBACK, Archetype.FVG_CONTINUATION})
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +153,7 @@ class _Legs:
 
     legs: tuple[Leg, ...]
     displacement: frozenset[int]
+    swings: tuple[SwingPoint, ...]
 
     def latest(self, kind: LegKind, direction: str) -> Leg | None:
         for leg in reversed(anchoring_legs(self.legs)):
@@ -240,6 +263,8 @@ class ConfluenceReplayService:
 
         legs = _read_legs(series)
 
+        pd = _read_pd(series, legs.swings, atr)
+
         bos_breaks = _bos_break_indices(events)
 
         htf = await self._read_htf_state(symbol, timeframe)
@@ -263,6 +288,7 @@ class ConfluenceReplayService:
                 atr=atr,
                 legs=legs,
                 bos_breaks=bos_breaks,
+                pd=pd,
             )
 
             candidates.append(candidate)
@@ -281,7 +307,7 @@ class ConfluenceReplayService:
             # not be read the report announced `htf_state` as reachable while
             # the line above it said `unread` -- the two disagreeing about the
             # same run.
-            unreachable=_unreachable(htf),
+            unreachable=_unreachable(htf, pd),
         )
 
     async def _evaluate(
@@ -301,6 +327,7 @@ class ConfluenceReplayService:
         atr: Decimal | None,
         legs: _Legs,
         bos_breaks: dict[str, frozenset[int]],
+        pd: PdContext | None,
     ) -> SetupCandidate:
         polarity = "BULLISH" if direction == "UP" else "BEARISH"
 
@@ -371,10 +398,11 @@ class ConfluenceReplayService:
                 # longer a bare `True`.
                 data_ready=reading.rvol is not None,
                 structure_compatible=trend_following or reversal,
-                # §5.7 has no persisted output, so this passes rather than
-                # blocking every candidate on an unbuilt gate. Recorded in
-                # `unreachable` so the pass is not mistaken for a check.
-                pd_context_ok=True,
+                # §8.2 G3: "§5.7 directional gate satisfied (or PD_SUSPENDED
+                # => only continuation archetypes eligible)". A range too
+                # narrow to mean anything suspends rather than blocks; the
+                # restriction it implies is applied to the archetype below.
+                pd_context_ok=_pd_gate(pd, direction),
                 zone_present=bool(matching_zones),
                 contrary_fact_present=bool(contrary) or counter_displacement,
                 volume_integrity_ok=True,
@@ -392,7 +420,7 @@ class ConfluenceReplayService:
                 grade=None,
                 archetype=None,
                 publishable=False,
-                unreachable=_unreachable(htf),
+                unreachable=_unreachable(htf, pd),
             )
 
         # The best zone in the stack, not the newest one. §8.3 F3 asks for the
@@ -474,6 +502,7 @@ class ConfluenceReplayService:
         archetype = classify_archetype(
             ArchetypeEvidence(
                 external_sweep=any(s.external for s in supporting),
+                range_extreme_pd=_pd_extreme(pd, direction),
                 mss_confirmed=trend_following and f"MSS_{direction}" in event_types,
                 stop_hunt_confirmed="LIQUIDITY_STOP_HUNT" in event_types,
                 breaker_formed=any(z.grade == "BRK_A" for z in matching_zones),
@@ -495,8 +524,20 @@ class ConfluenceReplayService:
                 fvg_first_touch=_is_first_touch(best_zone, price),
                 fvg_age_candles=max(0, last_index - best_zone.confirmed_index),
                 ranging=trend_state == TrendState.RANGING.value,
+                range_extreme_swept=_swept_a_range_extreme(supporting, pd, atr),
+                rejection_confirmed=history.rejected,
+                range_width_atr=(pd.range_high - pd.range_low) / atr
+                if pd is not None and atr
+                else Decimal(0),
             )
         )
+
+        # §8.2 G3's other half. Suspending PD does not block the candidate,
+        # it narrows what the candidate may be called -- so a reversal chain
+        # that happened to match is withdrawn rather than published under a
+        # context the doctrine says cannot support it.
+        if archetype is not None and _pd_suspended(pd) and archetype not in CONTINUATION_ARCHETYPES:
+            archetype = None
 
         publishable = (
             archetype is not None
@@ -516,7 +557,7 @@ class ConfluenceReplayService:
             publishable=publishable,
             factors={f.value: score for f, score in factors.items()},
             zone_id=best_zone.zone_id,
-            unreachable=_unreachable(htf),
+            unreachable=_unreachable(htf, pd),
         )
 
     async def _record(
@@ -608,6 +649,12 @@ class _Sweep:
         return bool(self._e.get("reclaimed"))
 
     @property
+    def reference_level(self) -> Decimal | None:
+        raw = self._e.get("reference_level")
+
+        return Decimal(str(raw)) if raw is not None else None
+
+    @property
     def external(self) -> bool:
         return bool(self._e.get("liquidity_class") == "EXTERNAL")
 
@@ -643,6 +690,11 @@ class _History:
         return any(item.kind == "CONFIRMATION" for item in self._items)
 
     @property
+    def rejected(self) -> bool:
+        """§8.6 A5's "rejection" -- §5.9 records it as a fact on the zone."""
+        return any(item.kind == "REJECTION" for item in self._items)
+
+    @property
     def first_retest_respected(self) -> bool:
         """§8.6 A2: "Breaker formed -> *first* retest with Respect".
 
@@ -664,6 +716,91 @@ class _History:
         return any(item.kind == "RESPECT" and item.candle_index == first for item in self._items)
 
 
+def _read_pd(
+    series: list[Candle],
+    swings: tuple[SwingPoint, ...],
+    atr: Decimal | None,
+) -> PdContext | None:
+    """§5.7 at the close, or None when no range brackets price.
+
+    Recomputed rather than read back for the same reason as §6, §7 and §7.5:
+    the range is the most recent confirmed external swing on each side, and the
+    context a pure function of that range, the close and ATR. The OTE engine
+    computes exactly this per candle and keeps it to itself, which is why G3
+    was a hardcoded pass.
+    """
+    if atr is None or atr <= 0:
+        return None
+
+    dealing_range = dealing_range_at(
+        swings,
+        close=series[-1].close,
+        index=len(series) - 1,
+    )
+
+    if dealing_range is None:
+        return None
+
+    return evaluate_pd_context(dealing_range, close=series[-1].close, atr=atr)
+
+
+def _swept_a_range_extreme(
+    sweeps: list[_Sweep],
+    pd: PdContext | None,
+    atr: Decimal | None,
+) -> bool:
+    """§8.6 A5: "sweep of range extreme".
+
+    Matched on the level the sweep referenced rather than on the pool's source:
+    §4.2 creates a pool for each dealing-range extreme, but nothing in this
+    build does -- pools come from swings and clusters. The range's own anchors
+    are external swings, so the swing pool at that price *is* the range extreme,
+    and comparing levels finds it without depending on a source that is never
+    written. The tolerance is §4.6's epsilon, the same one the sweep was
+    detected with.
+    """
+    if pd is None or atr is None or atr <= 0:
+        return False
+
+    tolerance = _EPSILON_ATR * atr
+
+    return any(
+        sweep.reference_level is not None
+        and (
+            abs(sweep.reference_level - pd.range_high) <= tolerance
+            or abs(sweep.reference_level - pd.range_low) <= tolerance
+        )
+        for sweep in sweeps
+    )
+
+
+def _pd_suspended(pd: PdContext | None) -> bool:
+    return pd is not None and pd.state is PdState.SUSPENDED
+
+
+def _pd_gate(pd: PdContext | None, direction: str) -> bool:
+    """§5.7's directional gate: long needs range_position <= 0.5, short >= 0.5.
+
+    An unreadable or suspended context passes. §8.2 G3 is explicit that
+    PD_SUSPENDED narrows the archetype set rather than failing the gate, and a
+    context with no range at all is named in `unreachable` instead -- blocking
+    every candidate on a range the market has simply left would be a gate on
+    the absence of evidence.
+    """
+    if pd is None or pd.state is PdState.SUSPENDED:
+        return True
+
+    return pd.long_gate if direction == "UP" else pd.short_gate
+
+
+def _pd_extreme(pd: PdContext | None, direction: str) -> bool:
+    """§5.7's extreme third, which §8.6 A1 requires on top of the gate."""
+    if pd is None or pd.state is PdState.SUSPENDED:
+        return False
+
+    return pd.sweep_long_gate if direction == "UP" else pd.sweep_short_gate
+
+
 def _read_legs(series: list[Candle]) -> _Legs:
     """§7.5 legs over the window, with the §5.10 displacement they need."""
     atrs = wilder_atr_series(series)
@@ -674,9 +811,12 @@ def _read_legs(series: list[Candle]) -> _Legs:
         if atr is not None and atr > 0 and detect_displacement(series, index, atr=atr) is not None
     )
 
+    swings = detect_external_swings(series)
+
     return _Legs(
-        legs=segment_legs(series, detect_external_swings(series), displacement),
+        legs=segment_legs(series, swings, displacement),
         displacement=displacement,
+        swings=swings,
     )
 
 
@@ -788,11 +928,18 @@ def _f6_vocabulary(trend_state: str) -> str:
     }.get(trend_state, TrendState.RANGING.value)
 
 
-def _unreachable(htf: str | None) -> tuple[str, ...]:
-    if htf is None:
-        return (*UNREACHABLE_INPUTS, HTF_STATE_UNREACHABLE)
+def _unreachable(htf: str | None, pd: PdContext | None) -> tuple[str, ...]:
+    names = list(UNREACHABLE_INPUTS)
 
-    return UNREACHABLE_INPUTS
+    if htf is None:
+        names.append(HTF_STATE_UNREACHABLE)
+
+    # Suspended is a *reading*, not an absence: §5.7 looked and found the range
+    # too narrow to divide. Only a range it could not build at all is unread.
+    if pd is None:
+        names.append(PD_CONTEXT_UNREACHABLE)
+
+    return tuple(names)
 
 
 def _state_direction(trend_state: str) -> str | None:

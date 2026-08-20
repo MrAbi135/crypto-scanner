@@ -28,7 +28,7 @@ from scanner.domain.ict.ote import (
 from scanner.domain.ict.pd import (
     DealingRange,
     PdContext,
-    bracketed_dealing_range,
+    dealing_range_at,
     evaluate_pd_context,
 )
 from scanner.domain.structure import (
@@ -379,34 +379,28 @@ def _dealing_range_at(
     candles: list[Candle],
     index: int,
 ) -> DealingRange | None:
+    """§5.7's range selection, which now lives in the domain beside the rule.
+
+    It was private here, so §8's PD gate had no way to ask the same question
+    and G3 stayed a hardcoded pass. The `range_id` shape is preserved because
+    it is already stored on every OTE zone.
+    """
     eligible = [swing for swing in swings if swing.index <= index]
 
     highs = [swing for swing in eligible if swing.kind is SwingKind.HIGH]
-
     lows = [swing for swing in eligible if swing.kind is SwingKind.LOW]
 
     if not highs or not lows:
         return None
 
-    high = max(
-        highs,
-        key=lambda swing: swing.index,
-    )
+    high = max(highs, key=lambda swing: swing.index)
+    low = max(lows, key=lambda swing: swing.index)
 
-    low = max(
-        lows,
-        key=lambda swing: swing.index,
-    )
-
-    range_id = _range_id(low, high)
-
-    return bracketed_dealing_range(
-        range_id=range_id,
-        external_low=low.price,
-        external_high=high.price,
-        low_anchor_index=low.index,
-        high_anchor_index=high.index,
+    return dealing_range_at(
+        swings,
         close=candles[index].close,
+        index=index,
+        range_id=_range_id(low, high),
     )
 
 
