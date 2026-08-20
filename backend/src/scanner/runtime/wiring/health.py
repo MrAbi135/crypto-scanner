@@ -25,6 +25,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from scanner.config.base import BaseProcessSettings
+from scanner.infrastructure.redis.client import build_redis
 
 # Containers must bind all interfaces; single reviewed exception (TAD §22).
 _BIND_HOST = "0.0.0.0"  # noqa: S104
@@ -57,7 +58,7 @@ async def _check_postgres(db_dsn: str) -> tuple[bool, str]:
 
 
 async def _check_redis(redis_url: str) -> tuple[bool, str]:
-    client: aioredis.Redis = aioredis.from_url(redis_url)
+    client: aioredis.Redis = build_redis(redis_url)
 
     try:
         pong = await asyncio.wait_for(

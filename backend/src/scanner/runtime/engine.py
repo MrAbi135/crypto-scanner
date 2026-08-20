@@ -16,8 +16,8 @@ import signal
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-import redis.asyncio as aioredis
 import structlog
+from redis.exceptions import RedisError
 from starlette.applications import Starlette
 
 from scanner.application.detection.candle_close_consumer import CandleCloseConsumer
@@ -31,6 +31,7 @@ from scanner.infrastructure.persistence.database import (
     build_engine,
     build_session_factory,
 )
+from scanner.infrastructure.redis.client import build_redis
 from scanner.infrastructure.redis.event_consumer import RedisEventStreamConsumer
 from scanner.runtime.wiring.bootstrap import bootstrap
 from scanner.runtime.wiring.detection import build_detection_pipeline
@@ -45,6 +46,10 @@ _BLOCK_MS = 5_000
 # mid-pass, short enough that a killed process's entries are picked up within a
 # minute rather than at the next restart.
 _CLAIM_IDLE_MS = 60_000
+
+# Long enough not to hammer a Redis that is genuinely down, short enough that a
+# recovered one is picked up before the next candle closes.
+_RECONNECT_BACKOFF_S = 5
 
 
 def _consumer_name() -> str:
@@ -97,39 +102,58 @@ async def _consume_forever(
         )
 
     while True:
-        # Stale entries first. A batch abandoned by a killed process is older
-        # than anything unread, and the market does not care that we restarted.
-        entries = await consumer.claim_stale(
+        try:
+            await _consume_once(consumer, closes, name)
+        except RedisError:
+            # A blip, not a bug. The engine holds a connection across a batch
+            # that can run for minutes, so a reconnect mid-run is expected over
+            # 72 hours -- and killing the process for one would turn every
+            # network hiccup into an outage. Unacked entries stay pending and
+            # come back; that is what the consumer group is for.
+            log.warning("engine_redis_unavailable", exc_info=True)
+
+            await asyncio.sleep(_RECONNECT_BACKOFF_S)
+
+
+async def _consume_once(
+    consumer: RedisEventStreamConsumer,
+    closes: CandleCloseConsumer,
+    name: str,
+) -> None:
+    """One claim-read-process-ack cycle."""
+    # Stale entries first. A batch abandoned by a killed process is older
+    # than anything unread, and the market does not care that we restarted.
+    entries = await consumer.claim_stale(
+        CANDLE_STREAM,
+        CANDLE_GROUP,
+        name,
+        min_idle_ms=_CLAIM_IDLE_MS,
+        count=_READ_BATCH,
+    )
+
+    if not entries:
+        entries = await consumer.read(
             CANDLE_STREAM,
             CANDLE_GROUP,
             name,
-            min_idle_ms=_CLAIM_IDLE_MS,
             count=_READ_BATCH,
+            block_ms=_BLOCK_MS,
         )
 
-        if not entries:
-            entries = await consumer.read(
-                CANDLE_STREAM,
-                CANDLE_GROUP,
-                name,
-                count=_READ_BATCH,
-                block_ms=_BLOCK_MS,
-            )
+    if not entries:
+        return
 
-        if not entries:
-            continue
+    report, acked = await closes.consume(entries)
 
-        report, acked = await closes.consume(entries)
+    if acked:
+        await consumer.ack(CANDLE_STREAM, CANDLE_GROUP, list(acked))
 
-        if acked:
-            await consumer.ack(CANDLE_STREAM, CANDLE_GROUP, list(acked))
-
-        log.info(
-            "engine_batch_processed",
-            received=report.received,
-            processed=report.processed,
-            failed=report.failed,
-        )
+    log.info(
+        "engine_batch_processed",
+        received=report.received,
+        processed=report.processed,
+        failed=report.failed,
+    )
 
 
 def _on_consumer_exit(task: asyncio.Task[None]) -> None:
@@ -160,7 +184,7 @@ def main() -> None:
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
         db = build_engine(settings.db_dsn)
-        redis_client = aioredis.from_url(settings.redis_url)
+        redis_client = build_redis(settings.redis_url)
 
         pipeline = build_detection_pipeline(
             build_session_factory(db),

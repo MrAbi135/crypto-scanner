@@ -209,3 +209,33 @@ async def test_draining_does_not_steal_another_consumers_work(redis_client) -> N
     await consumer.read(CANDLE_STREAM, CANDLE_GROUP, "engine-a", count=10, block_ms=50)
 
     assert await consumer.drain_pending(CANDLE_STREAM, CANDLE_GROUP, "engine-b", count=10) == ()
+
+
+async def test_an_idle_blocking_read_returns_empty_rather_than_raising(
+    redis_client,
+) -> None:
+    """The bug that made a healthy container consume nothing.
+
+    redis-py raises `TimeoutError` rather than returning empty when BLOCK
+    elapses with nothing to hand over -- and an idle stream is the normal state
+    between candle closes, most of every five minutes. Propagated, it killed
+    the engine's consumer task within five seconds of the engine catching up
+    with its backlog, leaving a process that was running, healthy, and doing
+    nothing at all.
+
+    Verified against a bare client too: no combination of `socket_keepalive`,
+    `retry_on_timeout` or `health_check_interval` changes it.
+    """
+    consumer = RedisEventStreamConsumer(redis_client)
+
+    await consumer.ensure_group(CANDLE_STREAM, CANDLE_GROUP)
+
+    taken = await consumer.read(
+        CANDLE_STREAM,
+        CANDLE_GROUP,
+        "engine-idle",
+        count=8,
+        block_ms=100,
+    )
+
+    assert taken == ()

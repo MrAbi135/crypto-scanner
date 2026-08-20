@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import httpx
-import redis.asyncio as aioredis
 
 from scanner.application.marketdata import (
     BackfillService,
@@ -42,6 +41,7 @@ from scanner.infrastructure.persistence.repositories import (
     PgIncidentRepository,
     PgSymbolRepository,
 )
+from scanner.infrastructure.redis.client import build_redis
 from scanner.interfaces.cli.main import build_parser
 from scanner.runtime.wiring.detection import build_detection_pipeline
 
@@ -256,7 +256,7 @@ async def _run_engine(
 
     engine = build_engine(settings.db_dsn)
 
-    redis_client = aioredis.from_url(settings.redis_url)
+    redis_client = build_redis(settings.redis_url)
 
     try:
         sessions = build_session_factory(engine)
