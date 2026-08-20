@@ -332,6 +332,7 @@ def make_invalidated_bearish_ob(
             tzinfo=UTC,
         ),
         grade="OB_B",
+        mss_origin=False,
         origin_swept=origin_swept,
         origin_failure_swing=origin_failure_swing,
         stale_context=False,

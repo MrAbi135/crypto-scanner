@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from sqlalchemy import select
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import (
 from scanner.application.ports.ict_evidence import (
     IctEvidenceRepository,
     LiquidityEvidenceRecord,
+    ShiftEvidenceRecord,
     StructureEvidenceRecord,
 )
 from scanner.infrastructure.persistence.detection_models import (
@@ -69,6 +71,54 @@ class PgIctEvidenceRepository(IctEvidenceRepository):
                 )
                 for row in rows
             )
+
+    async def list_shifts(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[ShiftEvidenceRecord, ...]:
+        async with self._sessions() as session:
+            result = await session.execute(
+                select(EngineEventRow)
+                .where(
+                    EngineEventRow.symbol == symbol,
+                    EngineEventRow.timeframe == timeframe.value,
+                    EngineEventRow.event_at >= start,
+                    EngineEventRow.event_at < end,
+                    EngineEventRow.event_type.like("MSS_%")
+                    | EngineEventRow.event_type.like("CHOCH_%"),
+                )
+                .order_by(
+                    EngineEventRow.event_at.asc(),
+                    EngineEventRow.event_key.asc(),
+                )
+            )
+
+            records: list[ShiftEvidenceRecord] = []
+
+            for row in result.scalars().all():
+                payload = json.loads(row.payload)
+
+                choch_index = payload.get("choch_index", payload.get("break_index"))
+                followthrough = payload.get("followthrough_index", choch_index)
+
+                if choch_index is None:
+                    continue
+
+                records.append(
+                    ShiftEvidenceRecord(
+                        event_type=row.event_type,
+                        direction=str(payload.get("direction", "")),
+                        choch_index=int(choch_index),
+                        followthrough_index=int(followthrough),
+                        event_at=row.event_at,
+                        payload=row.payload,
+                    )
+                )
+
+            return tuple(records)
 
     async def list_liquidity(
         self,

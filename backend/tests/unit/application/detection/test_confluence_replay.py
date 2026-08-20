@@ -183,6 +183,7 @@ def zone(
     confirmed_index: int = 5,
     band_low: Decimal | None = None,
     band_high: Decimal | None = None,
+    evidence: str = "{}",
 ) -> IctZoneRecord:
     return IctZoneRecord(
         zone_id=zone_id,
@@ -205,7 +206,7 @@ def zone(
         stale_context=False,
         gap_adjacent=False,
         origin_swept=None,
-        evidence="{}",
+        evidence=evidence,
     )
 
 
@@ -1039,8 +1040,8 @@ async def test_the_unreachable_list_does_not_disown_a_chain_that_closed() -> Non
     up = next(c for c in report.candidates if c.direction == "UP")
 
     assert up.archetype == "A4"
-    assert "archetype_a1_mss_origin" in up.unreachable
-    assert not any(name == "archetype_retest_chain" for name in up.unreachable)
+    # Every §8.6 chain is reachable now, so no archetype entry should survive.
+    assert not [name for name in up.unreachable if name.startswith("archetype")]
 
 
 @pytest.mark.asyncio
@@ -1215,9 +1216,16 @@ def ranged_series(settle: int) -> list:
     return out
 
 
+# `ranged_series` is 350 candles, so the default sweep -- sized for the
+# 60-candle fixture -- is long past §4.6's 15-candle relevance and silently
+# absent, taking A1's `external_sweep` with it.
+RANGED_LAST = 349
+
+
 def ranged_setup(settle: int) -> dict:
     setup = bullish_setup()
     setup["zones"] = [zone("z1", band_low=Decimal(settle - 1), band_high=Decimal(settle + 1))]
+    setup["liquidity"] = [sweep(confirmed_index=RANGED_LAST - 5)]
 
     return setup
 
@@ -1288,3 +1296,70 @@ async def test_a_market_outside_any_range_names_pd_as_unread() -> None:
     report = await run(svc, "BULLISH")
 
     assert "pd_context" in report.unreachable
+
+
+@pytest.mark.asyncio
+async def test_a_swept_mss_origin_zone_at_the_extreme_classifies_as_a1() -> None:
+    """§8.6 A1: external sweep -> MSS -> retest of the MSS-origin zone, with
+    range-extreme PD and a confirmed stop hunt.
+
+    The last chain to close. It needed three separate things: §5.7's extreme
+    third (#57), §5.9's readable history for the retest, and a zone that
+    records it came from an MSS -- which nothing wrote, because
+    `ict_ob_replay` passed `mss_origin=False` as a literal.
+    """
+    settle = 990  # range_position 0.2466, inside the lower third
+
+    setup = ranged_setup(settle)
+    setup["events"] = [
+        event("BOS_UP", 3, direction="UP"),
+        event("MSS_UP", 6, direction="UP"),
+        event("LIQUIDITY_STOP_HUNT", 7),
+    ]
+    setup["zones"] = [
+        zone(
+            "ob",
+            grade="OB_A",
+            band_low=Decimal(settle - 1),
+            band_high=Decimal(settle + 1),
+            evidence=json.dumps({"mss_origin": True}),
+        )
+    ]
+
+    svc, _ = service(**setup, candles=ranged_series(settle), htf_trend="BULLISH")
+
+    report = await run(svc, "BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    assert up.gates_passed
+    assert up.archetype == "A1"
+
+
+@pytest.mark.asyncio
+async def test_a_zone_with_no_mss_origin_is_not_the_a1_retest() -> None:
+    """§5.1 awards OB_A for an external break *or* an MSS origin, so the grade
+    alone cannot say which happened -- the flag has to be read."""
+    settle = 990
+
+    setup = ranged_setup(settle)
+    setup["events"] = [
+        event("BOS_UP", 3, direction="UP"),
+        event("MSS_UP", 6, direction="UP"),
+        event("LIQUIDITY_STOP_HUNT", 7),
+    ]
+    setup["zones"] = [
+        zone(
+            "ob",
+            grade="OB_A",
+            band_low=Decimal(settle - 1),
+            band_high=Decimal(settle + 1),
+            evidence=json.dumps({"mss_origin": False}),
+        )
+    ]
+
+    svc, _ = service(**setup, candles=ranged_series(settle), htf_trend="BULLISH")
+
+    report = await run(svc, "BULLISH")
+
+    assert next(c for c in report.candidates if c.direction == "UP").archetype != "A1"
