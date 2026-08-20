@@ -67,6 +67,42 @@ class PgIctZoneInteractionRepository:
 
             return bool(result.rowcount)  # type: ignore[attr-defined]
 
+    async def list_for_zone(
+        self,
+        zone_id: str,
+    ) -> tuple[IctZoneInteractionRecord, ...]:
+        async with self._sessions() as session:
+            result = await session.execute(
+                select(IctZoneInteractionRow)
+                .where(IctZoneInteractionRow.zone_id == zone_id)
+                # Ordered so that "first retest" is answerable at all. The
+                # interaction_id tie-break keeps two interactions on one candle
+                # in a stable order rather than whatever the planner returns.
+                .order_by(
+                    IctZoneInteractionRow.candle_index.asc(),
+                    IctZoneInteractionRow.interaction_id.asc(),
+                )
+            )
+
+            return tuple(
+                IctZoneInteractionRecord(
+                    interaction_id=row.interaction_id,
+                    zone_id=row.zone_id,
+                    symbol=row.symbol,
+                    timeframe=Timeframe(row.timeframe),
+                    zone_type=row.zone_type,
+                    kind=row.kind,
+                    observed_at=row.observed_at,
+                    candle_index=row.candle_index,
+                    penetration_depth=row.penetration_depth,
+                    close_price=row.close_price,
+                    rejection_wick=row.rejection_wick,
+                    close_through=row.close_through,
+                    evidence=row.evidence,
+                )
+                for row in result.scalars().all()
+            )
+
 
 class PgIctZoneInteractionContextRepository:
     """Read all zone facts plus their lifecycle boundaries."""

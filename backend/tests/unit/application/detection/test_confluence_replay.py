@@ -23,6 +23,7 @@ from scanner.application.detection.state import (
 )
 from scanner.application.ports.detection import EngineEventRecord
 from scanner.application.ports.ict_evidence import LiquidityEvidenceRecord
+from scanner.application.ports.ict_zone_interactions import IctZoneInteractionRecord
 from scanner.application.ports.ict_zones import IctZoneRecord
 from scanner.shared import Timeframe
 
@@ -108,6 +109,39 @@ class FakeZoneRepository:
 
     async def list_live(self, symbol, timeframe):
         return tuple(self.zones)
+
+
+class FakeInteractions:
+    """§5.9 history, keyed by zone."""
+
+    def __init__(self, items: dict[str, list] | None = None) -> None:
+        self.items = items or {}
+
+    async def append(self, interaction) -> bool:
+        return True
+
+    async def list_for_zone(self, zone_id: str) -> tuple:
+        return tuple(
+            sorted(self.items.get(zone_id, []), key=lambda i: (i.candle_index, i.interaction_id))
+        )
+
+
+def interaction(zone_id: str, kind: str, index: int) -> IctZoneInteractionRecord:
+    return IctZoneInteractionRecord(
+        interaction_id=f"{zone_id}:{kind}:{index}",
+        zone_id=zone_id,
+        symbol="BTCUSDT",
+        timeframe=TF,
+        zone_type="BREAKER",
+        kind=kind,
+        observed_at=BASE + TF.duration * index,
+        candle_index=index,
+        penetration_depth=Decimal("0.2"),
+        close_price=LAST_CLOSE,
+        rejection_wick=Decimal("0.4"),
+        close_through=False,
+        evidence="{}",
+    )
 
 
 class FakeEvidenceRepository:
@@ -225,6 +259,7 @@ def service(
     liquidity: list[LiquidityEvidenceRecord] | None = None,
     candles: list | None = None,
     htf_trend: str | None = None,
+    interactions: dict[str, list] | None = None,
 ):
     repo = FakeEventRepository(events)
 
@@ -251,6 +286,7 @@ def service(
         repo,
         FakeZoneRepository(zones or []),
         FakeEvidenceRepository(liquidity),
+        FakeInteractions(interactions),
         FakeClock(),
         shift_state,
         shift_algo_version=SHIFT_ALGO,
@@ -1003,7 +1039,7 @@ async def test_the_unreachable_list_does_not_disown_a_chain_that_closed() -> Non
     up = next(c for c in report.candidates if c.direction == "UP")
 
     assert up.archetype == "A4"
-    assert "archetype_a1_a2_a5" in up.unreachable
+    assert "archetype_a1_a5" in up.unreachable
     assert not any(name == "archetype_retest_chain" for name in up.unreachable)
 
 
@@ -1030,3 +1066,84 @@ async def test_classification_and_publication_are_separate_decisions() -> None:
     assert up.archetype == "A4"
     assert up.confidence is not None
     assert up.publishable is (up.confidence >= Decimal(70))
+
+
+@pytest.mark.asyncio
+async def test_a_breaker_respected_on_its_first_retest_classifies_as_a2() -> None:
+    """§8.6 A2: "Breaker formed -> first retest with Respect (§5.9)".
+
+    §5.9's interactions were write-only until this change, so A2 could never
+    close no matter what the market did.
+    """
+    setup = bullish_setup()
+    setup["zones"] = [zone("brk", zone_type="BREAKER", grade="BRK_A", state="TESTED")]
+
+    svc, _ = service(
+        **setup,
+        htf_trend="BULLISH",
+        interactions={"brk": [interaction("brk", "RESPECT", 40)]},
+    )
+
+    report = await run(svc, "BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    assert up.gates_passed
+    assert up.archetype == "A2"
+
+
+@pytest.mark.asyncio
+async def test_a_breaker_that_failed_its_first_retest_is_not_a2() -> None:
+    """The first retest, not any of them.
+
+    A zone that was violated and only later respected is a different story from
+    one that held on the first approach, and A2 is about the second.
+    """
+    setup = bullish_setup()
+    setup["zones"] = [zone("brk", zone_type="BREAKER", grade="BRK_A", state="TESTED")]
+
+    svc, _ = service(
+        **setup,
+        htf_trend="BULLISH",
+        interactions={
+            "brk": [
+                interaction("brk", "VIOLATION", 30),
+                interaction("brk", "RESPECT", 40),
+            ]
+        },
+    )
+
+    report = await run(svc, "BULLISH")
+
+    assert next(c for c in report.candidates if c.direction == "UP").archetype != "A2"
+
+
+@pytest.mark.asyncio
+async def test_a_breaker_with_no_interaction_history_is_not_a2() -> None:
+    setup = bullish_setup()
+    setup["zones"] = [zone("brk", zone_type="BREAKER", grade="BRK_A", state="TESTED")]
+
+    svc, _ = service(**setup, htf_trend="BULLISH")
+
+    assert (
+        next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP").archetype
+        != "A2"
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_entry_confirmation_pays_its_f3_points() -> None:
+    """§8.3.1 gives the §5.9 Confirmation 10 points, and it was hardcoded off."""
+    setup = bullish_setup()
+
+    without, _ = service(**setup, htf_trend="BULLISH")
+    with_confirmation, _ = service(
+        **setup,
+        htf_trend="BULLISH",
+        interactions={"z1": [interaction("z1", "CONFIRMATION", 50)]},
+    )
+
+    a = next(c for c in (await run(without, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(with_confirmation, "BULLISH")).candidates if c.direction == "UP")
+
+    assert b.factors["F3"] - a.factors["F3"] == Decimal(10)

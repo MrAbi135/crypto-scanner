@@ -38,6 +38,10 @@ from scanner.application.ports.ict_evidence import (
     IctEvidenceRepository,
     LiquidityEvidenceRecord,
 )
+from scanner.application.ports.ict_zone_interactions import (
+    IctZoneInteractionRecord,
+    IctZoneInteractionRepository,
+)
 from scanner.application.ports.ict_zones import IctZoneRecord, IctZoneRepository
 from scanner.domain.common import Candle, wilder_atr, wilder_atr_series
 from scanner.domain.common.rvol import relative_volume
@@ -73,7 +77,7 @@ from scanner.domain.momentum import (
 from scanner.domain.structure import TrendState, detect_external_swings
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v5"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v6"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 G5_DISPLACEMENT_WINDOW = 3
@@ -87,18 +91,14 @@ G4_ADJACENCY_ATR = Decimal("0.5")
 UNREACHABLE_INPUTS: tuple[str, ...] = (
     "wash_risk",  # §6.6 needs aggTrade aggregates (roadmap S2 T4, never built)
     "pd_context",  # §5.7 directional gate has no persisted output
-    "entry_confirmation",  # §5.9 Confirmations need the LTF ladder populated
     # §4.2's strength model exists, but nothing selects which pool a setup is
     # *targeting*, so the three F2 terms that describe that pool are all unread.
     "target_pool_strength",
     "target_pool_unclaimed",
     "target_pool_fresh",
-    # Not "archetype chains" in general -- A3 and A4 close now that G4
-    # anchors the retest. These three are the ones still short a link:
-    # A1 needs §5.7's range-extreme PD, A2 needs a Respect from §5.9's
-    # interaction record (written, but with no read method), A5 needs the
-    # dealing range's width.
-    "archetype_a1_a2_a5",
+    # A1 needs §5.7's range-extreme PD and A5 the dealing range's width. A2
+    # left this list once §5.9's interactions became readable.
+    "archetype_a1_a5",
 )
 
 # Not in the constant above, because unlike those it is only *sometimes*
@@ -186,6 +186,7 @@ class ConfluenceReplayService:
         events: EngineEventRepository,
         zones: IctZoneRepository,
         evidence: IctEvidenceRepository,
+        interactions: IctZoneInteractionRepository,
         clock: Clock,
         shift_state: EngineStateManager,
         *,
@@ -196,6 +197,7 @@ class ConfluenceReplayService:
         self._events = events
         self._zones = zones
         self._evidence = evidence
+        self._interactions = interactions
         self._clock = clock
         self._shift_state = shift_state
         self._shift_algo_version = shift_algo_version
@@ -246,7 +248,7 @@ class ConfluenceReplayService:
         inserted = 0
 
         for direction in ("UP", "DOWN"):
-            candidate = self._evaluate(
+            candidate = await self._evaluate(
                 symbol=symbol,
                 timeframe=timeframe,
                 last_index=len(series) - 1,
@@ -282,7 +284,7 @@ class ConfluenceReplayService:
             unreachable=_unreachable(htf),
         )
 
-    def _evaluate(
+    async def _evaluate(
         self,
         *,
         symbol: str,
@@ -402,6 +404,12 @@ class ConfluenceReplayService:
             key=lambda z: (_zone_score(z, len(matching_zones)), z.confirmed_index),
         )
 
+        # Only for the zone actually being scored. §5.9 records interactions
+        # against every zone the engine tracks, and the questions A2 and F3 ask
+        # -- was the *first* retest respected, is there an entry-grade
+        # Confirmation -- are about this one's own history.
+        history = _History(await self._interactions.list_for_zone(best_zone.zone_id))
+
         factors = {
             Factor.STRUCTURE: structure_factor(
                 StructureEvidence(
@@ -426,7 +434,11 @@ class ConfluenceReplayService:
                     target_pool_strength=Decimal(0),
                 )
             ).score,
-            Factor.ZONE: _zone_score(best_zone, len(matching_zones)),
+            Factor.ZONE: _zone_score(
+                best_zone,
+                len(matching_zones),
+                entry_confirmation=history.confirmed,
+            ),
             Factor.VOLUME: volume_factor(reading.rvol or Decimal(0)).score,
             Factor.MOMENTUM: momentum_factor(
                 MomentumEvidence(
@@ -466,6 +478,8 @@ class ConfluenceReplayService:
                 stop_hunt_confirmed="LIQUIDITY_STOP_HUNT" in event_types,
                 breaker_formed=any(z.grade == "BRK_A" for z in matching_zones),
                 breaker_grade_a=best_zone.grade == "BRK_A",
+                breaker_first_retest_respected=history.first_retest_respected,
+                entry_grade_confirmation=history.confirmed,
                 trend_active=trend_following,
                 # §8.6 A3 wants a *displaced* BOS and the BOS event does not
                 # record displacement. The impulse leg it sits in does -- and
@@ -613,6 +627,41 @@ class _Sweep:
         side = self._e.get("side")
 
         return bool(side == "SSL") if direction == "UP" else bool(side == "BSL")
+
+
+class _History:
+    """One zone's §5.9 interaction record, in the terms §8 asks about."""
+
+    __slots__ = ("_items",)
+
+    def __init__(self, items: tuple[IctZoneInteractionRecord, ...]) -> None:
+        self._items = items
+
+    @property
+    def confirmed(self) -> bool:
+        """§5.9's entry-grade Confirmation, scored by §8.3.1 and A2 alike."""
+        return any(item.kind == "CONFIRMATION" for item in self._items)
+
+    @property
+    def first_retest_respected(self) -> bool:
+        """§8.6 A2: "Breaker formed -> *first* retest with Respect".
+
+        The first retest, not any of them. A zone that was violated and only
+        later respected is a different story from one that held on the first
+        approach, and A2 is about the second.
+        """
+        retests = [
+            item
+            for item in self._items
+            if item.kind in {"TOUCH", "REJECTION", "RESPECT", "VIOLATION", "MITIGATION"}
+        ]
+
+        if not retests:
+            return False
+
+        first = retests[0].candle_index
+
+        return any(item.kind == "RESPECT" and item.candle_index == first for item in self._items)
 
 
 def _read_legs(series: list[Candle]) -> _Legs:
@@ -809,15 +858,25 @@ _FVG_STATE_EQUIVALENT: dict[str, str] = {
 }
 
 
-def _zone_score(zone: IctZoneRecord, stack_depth: int) -> Decimal:
-    """F3 for one zone — §8.3.1."""
+def _zone_score(
+    zone: IctZoneRecord,
+    stack_depth: int,
+    *,
+    entry_confirmation: bool = False,
+) -> Decimal:
+    """F3 for one zone — §8.3.1.
+
+    The ranking key that picks `best_zone` leaves `entry_confirmation` at its
+    default: reading every candidate zone's interaction history to choose
+    between them would be a query per zone, and the term is worth 10 of 100 —
+    not enough to reorder a stack, and the chosen zone is scored with it.
+    """
     return zone_factor(
         ZoneEvidence(
             grade=zone.grade,
             state=_FVG_STATE_EQUIVALENT.get(zone.state, zone.state),
             stack_depth=stack_depth,
-            # §5.9 Confirmations need the LTF ladder populated; see UNREACHABLE_INPUTS.
-            entry_confirmation=False,
+            entry_confirmation=entry_confirmation,
         )
     ).score
 
