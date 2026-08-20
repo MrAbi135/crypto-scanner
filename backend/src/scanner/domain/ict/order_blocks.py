@@ -36,6 +36,10 @@ class OrderBlock:
     confirmed_index: int
     created_at: datetime
     grade: str
+    # §5.1 calls the grade "evidence-derived and immutable", and half the rule
+    # is this flag -- so without it stored, an OB_A cannot be traced back to
+    # the reason it was awarded.
+    mss_origin: bool
     origin_swept: bool
     origin_failure_swing: bool
     stale_context: bool
@@ -143,6 +147,7 @@ def detect_order_block(
         confirmed_index=(displacement_index),
         created_at=created_at,
         grade=grade,
+        mss_origin=mss_origin,
         origin_swept=origin_swept,
         origin_failure_swing=(origin_failure_swing),
         stale_context=stale_context,

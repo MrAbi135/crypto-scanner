@@ -117,6 +117,7 @@ def make_ob(
         confirmed_index=confirmed_index,
         created_at=BASE_TIME,
         grade="OB_A",
+        mss_origin=False,
         origin_swept=origin_swept,
         origin_failure_swing=origin_failure_swing,
         stale_context=False,

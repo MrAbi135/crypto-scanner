@@ -16,6 +16,7 @@ from scanner.application.ports import (
 from scanner.application.ports.ict_evidence import (
     IctEvidenceRepository,
     LiquidityEvidenceRecord,
+    ShiftEvidenceRecord,
     StructureEvidenceRecord,
 )
 from scanner.application.ports.ict_zones import (
@@ -174,6 +175,15 @@ class IctOrderBlockReplayService:
             end,
         )
 
+        shift_records = await self._evidence.list_shifts(
+            symbol,
+            timeframe,
+            start,
+            end,
+        )
+
+        mss_spans = _mss_spans(shift_records)
+
         liquidity_records = await self._evidence.list_liquidity(
             symbol,
             timeframe,
@@ -196,6 +206,7 @@ class IctOrderBlockReplayService:
                 swings=swings,
                 sweeps=sweeps,
                 displacement=displacement,
+                mss_spans=mss_spans,
             )
 
             if ob is None:
@@ -312,6 +323,7 @@ class IctOrderBlockReplayService:
             ...,
         ],
         displacement: Displacement,
+        mss_spans: dict[str, tuple[tuple[int, int], ...]],
     ) -> OrderBlock | None:
         displacement_index = displacement.candle_index
 
@@ -355,7 +367,12 @@ class IctOrderBlockReplayService:
                 atr=atr,
                 external_structure_break=(break_flags.external),
                 internal_structure_break=(break_flags.internal),
-                mss_origin=False,
+                # §5.1: OB_A "if the qualifying move broke external structure
+                # **or the candidate sits at the origin of an MSS**". Passed as
+                # a literal `False` until now, so the second half of the grade
+                # rule never fired and OB_A could only ever come from an
+                # external break.
+                mss_origin=_within_mss(mss_spans, displacement),
                 fvg_created=fvg_created,
                 origin_swept=False,
                 origin_failure_swing=False,
@@ -1083,6 +1100,62 @@ def _has_failure_swing_before_invalidation(
     return latest.price < previous.price
 
 
+# §3.6 stamps MSS direction as UP/DOWN; §5.10 stamps displacement as
+# BULLISH/BEARISH. Both are `str`, so comparing them directly type-checks and
+# yields False forever -- the same trap that silently produced zero stop hunts
+# before PR #20.
+_DISPLACEMENT_TO_SHIFT: dict[str, str] = {
+    DisplacementDirection.BULLISH.value: "UP",
+    DisplacementDirection.BEARISH.value: "DOWN",
+}
+
+
+def _mss_spans(
+    shifts: tuple[ShiftEvidenceRecord, ...],
+) -> dict[str, tuple[tuple[int, int], ...]]:
+    """Each MSS's confirming span, by direction.
+
+    §3.6 builds an MSS from a CHoCH plus displacement plus follow-through, so
+    the span [choch_index, followthrough_index] is where its move happened.
+    CHoCH records are ignored here: §5.1 asks about an MSS specifically.
+    """
+    spans: dict[str, list[tuple[int, int]]] = {"UP": [], "DOWN": []}
+
+    for shift in shifts:
+        if not shift.event_type.startswith("MSS_"):
+            continue
+
+        if shift.direction not in spans:
+            continue
+
+        spans[shift.direction].append(
+            (
+                min(shift.choch_index, shift.followthrough_index),
+                max(shift.choch_index, shift.followthrough_index),
+            )
+        )
+
+    return {key: tuple(value) for key, value in spans.items()}
+
+
+def _within_mss(
+    spans: dict[str, tuple[tuple[int, int], ...]],
+    displacement: Displacement,
+) -> bool:
+    """Does this displacement sit inside an MSS's confirming move?
+
+    That is what "the candidate sits at the origin of an MSS" means for an OB:
+    the candidate is the footprint immediately before the displacement, so if
+    the displacement is the MSS's own, the candidate is its origin.
+    """
+    direction = _DISPLACEMENT_TO_SHIFT.get(displacement.direction.value)
+
+    if direction is None:
+        return False
+
+    return any(start <= displacement.candle_index <= end for start, end in spans.get(direction, ()))
+
+
 def _structure_break_flags(
     candle: Candle,
     displacement: Displacement,
@@ -1197,6 +1270,7 @@ def _order_block_record(
             "internal_break_level": (
                 None if break_flags.internal_level is None else str(break_flags.internal_level)
             ),
+            "mss_origin": (ob.mss_origin),
             "origin_swept": (ob.origin_swept),
             "origin_failure_swing": (ob.origin_failure_swing),
             "stale_context": (ob.stale_context),
@@ -1350,6 +1424,7 @@ def _record_to_ob(
     raw: object = json.loads(record.evidence)
 
     origin_failure_swing = False
+    mss_origin = False
 
     if isinstance(
         raw,
@@ -1362,6 +1437,17 @@ def _record_to_ob(
             bool,
         ):
             origin_failure_swing = value
+
+        # Absent on zones written before the flag was stored. False is right
+        # for those: their grade was computed with it False, so reading it
+        # back that way keeps the reconstruction faithful to the record.
+        stored = raw.get("mss_origin")
+
+        if isinstance(
+            stored,
+            bool,
+        ):
+            mss_origin = stored
 
     return OrderBlock(
         ob_id=record.zone_id,
@@ -1378,6 +1464,7 @@ def _record_to_ob(
         confirmed_index=(record.confirmed_index),
         created_at=(record.created_at),
         grade=record.grade,
+        mss_origin=mss_origin,
         origin_swept=bool(record.origin_swept),
         origin_failure_swing=(origin_failure_swing),
         stale_context=(record.stale_context),

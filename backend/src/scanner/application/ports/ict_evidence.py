@@ -18,6 +18,18 @@ class StructureEvidenceRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class ShiftEvidenceRecord:
+    """A §3.6 CHoCH or MSS, with the span its payload records."""
+
+    event_type: str
+    direction: str
+    choch_index: int
+    followthrough_index: int
+    event_at: datetime
+    payload: str
+
+
+@dataclass(frozen=True, slots=True)
 class LiquidityEvidenceRecord:
     pool_id: str
     from_state: str
@@ -36,6 +48,17 @@ class IctEvidenceRepository(Protocol):
         start: datetime,
         end: datetime,
     ) -> tuple[StructureEvidenceRecord, ...]: ...
+
+    # §5.1's Inputs name "BOS/MSS events", and `list_structure` cannot supply
+    # them: it filters to SWING_*/STRUCTURE_*, so the ICT engine has never been
+    # able to see an MSS. That is why `mss_origin` was passed as a literal.
+    async def list_shifts(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[ShiftEvidenceRecord, ...]: ...
 
     async def list_liquidity(
         self,

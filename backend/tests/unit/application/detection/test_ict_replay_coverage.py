@@ -21,6 +21,7 @@ from scanner.application.detection.ict_replay import (
 )
 from scanner.application.ports.ict_evidence import (
     LiquidityEvidenceRecord,
+    ShiftEvidenceRecord,
     StructureEvidenceRecord,
 )
 from scanner.application.ports.ict_zones import (
@@ -165,9 +166,11 @@ class FakeEvidenceRepository:
         self,
         structure: tuple[StructureEvidenceRecord, ...] = (),
         liquidity: tuple[LiquidityEvidenceRecord, ...] = (),
+        shifts: tuple[ShiftEvidenceRecord, ...] = (),
     ) -> None:
         self.structure = structure
         self.liquidity = liquidity
+        self.shifts = shifts
 
     async def list_structure(
         self,
@@ -177,6 +180,15 @@ class FakeEvidenceRepository:
         end: datetime,
     ) -> tuple[StructureEvidenceRecord, ...]:
         return self.structure
+
+    async def list_shifts(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[ShiftEvidenceRecord, ...]:
+        return self.shifts
 
     async def list_liquidity(
         self,
@@ -828,3 +840,84 @@ async def test_transition_helpers_cover_success_and_failure() -> None:
     )
 
     assert not unchanged
+
+
+async def _ob_grades(shifts: tuple[ShiftEvidenceRecord, ...]) -> set[str]:
+    """Run the OB replay over the shared fixture and collect the zone grades."""
+    candles = pad_for_warmup(fixture_series())
+    zones = FakeZoneRepository()
+
+    service = IctOrderBlockReplayService(
+        FakeCandleRepository(candles),
+        zones,
+        FakeTransitionRepository(),
+        FakeSnapshotStore(),
+        FakeEvidenceRepository((), (), shifts),
+        FakeClock(),
+    )
+
+    await service.run(
+        "S6COVUSDT",
+        Timeframe.M5,
+        candles[0].open_time,
+        candles[-1].close_time,
+    )
+
+    return {zone.grade for zone in zones.zones.values() if zone.zone_type == "OB"}
+
+
+def _mss(direction: str, choch: int, followthrough: int) -> ShiftEvidenceRecord:
+    return ShiftEvidenceRecord(
+        event_type=f"MSS_{direction}",
+        direction=direction,
+        choch_index=choch,
+        followthrough_index=followthrough,
+        event_at=datetime(2026, 8, 16, 6, tzinfo=UTC),
+        payload=json.dumps({"direction": direction}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_mss_over_the_displacement_grades_the_ob_a() -> None:
+    """§5.1: OB_A "if the qualifying move broke external structure **or the
+    candidate sits at the origin of an MSS**".
+
+    `mss_origin` was a literal `False`, so the second half of the grade rule
+    never fired and OB_A could only ever come from an external break. The
+    fixture supplies no structure evidence at all here, so an OB_A can only
+    have come from the MSS.
+    """
+    without = await _ob_grades(())
+    covering = await _ob_grades((_mss("UP", 0, 400), _mss("DOWN", 0, 400)))
+
+    assert without, "fixture produced no order blocks, so this proves nothing"
+    assert without == {"OB_B"}
+    assert "OB_A" in covering
+
+
+@pytest.mark.asyncio
+async def test_an_mss_elsewhere_in_the_window_does_not_grade_the_ob_a() -> None:
+    """The span has to contain the displacement, not merely exist.
+
+    §3.6 builds an MSS from a CHoCH plus displacement plus follow-through, so
+    its span is where its move happened -- an MSS two hundred candles away is
+    not the origin of this block.
+    """
+    elsewhere = await _ob_grades((_mss("UP", 0, 5), _mss("DOWN", 0, 5)))
+
+    assert elsewhere == {"OB_B"}
+
+
+@pytest.mark.asyncio
+async def test_the_mss_direction_vocabulary_is_translated() -> None:
+    """§3.6 says UP/DOWN; §5.10 says BULLISH/BEARISH.
+
+    Both are `str`, so comparing them directly type-checks and yields False
+    forever -- the trap that silently produced zero stop hunts before PR #20.
+    A record spelled the displacement's way must not match.
+    """
+    mistyped = await _ob_grades(
+        (_mss("BULLISH", 0, 400), _mss("BEARISH", 0, 400)),
+    )
+
+    assert mistyped == {"OB_B"}

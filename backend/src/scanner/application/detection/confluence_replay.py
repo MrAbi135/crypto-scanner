@@ -84,7 +84,7 @@ from scanner.domain.momentum import (
 from scanner.domain.structure import SwingPoint, TrendState, detect_external_swings
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v7"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v8"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -106,11 +106,6 @@ UNREACHABLE_INPUTS: tuple[str, ...] = (
     "target_pool_strength",
     "target_pool_unclaimed",
     "target_pool_fresh",
-    # A5 left this list with §5.7; A2 left it with §5.9's read method. A1 is
-    # the last one, and its blocker is not PD: `ict_ob_replay` passes
-    # `mss_origin=False` as a literal, so no zone ever records that it came
-    # from an MSS and "retest of the MSS-origin zone" cannot be asked.
-    "archetype_a1_mss_origin",
 )
 
 # Not in the constant above, because unlike those it is only *sometimes*
@@ -504,6 +499,9 @@ class ConfluenceReplayService:
                 external_sweep=any(s.external for s in supporting),
                 range_extreme_pd=_pd_extreme(pd, direction),
                 mss_confirmed=trend_following and f"MSS_{direction}" in event_types,
+                # G4 already established price is at this zone, so a zone that
+                # records an MSS origin *is* the MSS-origin zone being retested.
+                mss_origin_zone_retested=_is_mss_origin(best_zone),
                 stop_hunt_confirmed="LIQUIDITY_STOP_HUNT" in event_types,
                 breaker_formed=any(z.grade == "BRK_A" for z in matching_zones),
                 breaker_grade_a=best_zone.grade == "BRK_A",
@@ -879,6 +877,21 @@ def _is_displacement_fvg(zone: IctZoneRecord, displacement: frozenset[int]) -> b
     return any(
         index in displacement for index in range(zone.created_index - 2, zone.created_index + 1)
     )
+
+
+def _is_mss_origin(zone: IctZoneRecord) -> bool:
+    """§8.6 A1's "retest of the MSS-origin zone".
+
+    Read from the zone's own evidence rather than inferred from its grade:
+    §5.1 awards OB_A for an external break *or* an MSS origin, so the grade
+    alone cannot say which of the two happened.
+    """
+    try:
+        evidence = json.loads(zone.evidence)
+    except (ValueError, TypeError):
+        return False
+
+    return bool(evidence.get("mss_origin")) if isinstance(evidence, dict) else False
 
 
 def _is_first_touch(zone: IctZoneRecord, price: Decimal) -> bool:
