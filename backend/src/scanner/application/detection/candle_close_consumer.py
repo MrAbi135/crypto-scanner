@@ -132,10 +132,27 @@ class CandleCloseConsumer:
         if not entries:
             return ConsumeReport(0, 0, 0, 0), ()
 
-        closes = order_for_detection([parse_close(entry) for entry in entries])
-
+        parsed: list[CandleClose] = []
         acked: list[str] = []
         failed = 0
+
+        for entry in entries:
+            try:
+                parsed.append(parse_close(entry))
+            except DomainInvariantError:
+                failed += 1
+
+                # Outside the loop below, this comprehension used to sit in the
+                # open: one unparseable entry raised, `consume` propagated, and
+                # the engine's consumer task died -- process alive, health
+                # green, nothing consumed again until someone restarted it.
+                # A malformed entry is a poison pill, and a poison pill must
+                # not be able to stop the queue.
+                log.exception("candle_close_unparseable", entry_id=entry.entry_id)
+
+                continue
+
+        closes = order_for_detection(parsed)
 
         for close in closes:
             try:

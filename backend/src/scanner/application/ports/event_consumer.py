@@ -47,6 +47,15 @@ class EventStreamConsumer(Protocol):
         """Block for up to `block_ms` waiting for undelivered entries."""
         ...
 
+    async def drain_pending(
+        self,
+        stream: str,
+        group: str,
+        consumer: str,
+        *,
+        count: int,
+    ) -> Sequence[StreamEntry]: ...
+
     async def claim_stale(
         self,
         stream: str,

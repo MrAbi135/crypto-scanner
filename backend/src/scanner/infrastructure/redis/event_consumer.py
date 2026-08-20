@@ -59,6 +59,35 @@ class RedisEventStreamConsumer:
 
         return _flatten(response)
 
+    async def drain_pending(
+        self,
+        stream: str,
+        group: str,
+        consumer: str,
+        *,
+        count: int,
+    ) -> Sequence[StreamEntry]:
+        """This consumer's own unacked entries, oldest first.
+
+        `read` asks for ">", which means "entries never delivered to anyone" --
+        it does **not** return the caller's own pending list. So a process that
+        died mid-batch cannot get its work back by reading again under the same
+        name, however stable that name is; only an explicit "0" does that.
+
+        Without this, a killed engine's unfinished batch waits for the idle
+        claim in `claim_stale` -- correct, but a minute later. G1b asks for
+        resume proven rather than assumed, and a minute of silence after a
+        crash looks exactly like a loss until it is not.
+        """
+        response = await self._client.xreadgroup(
+            group,
+            consumer,
+            {stream: "0"},
+            count=count,
+        )
+
+        return _flatten(response)
+
     async def claim_stale(
         self,
         stream: str,

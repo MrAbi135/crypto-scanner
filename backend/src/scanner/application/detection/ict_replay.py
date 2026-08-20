@@ -21,7 +21,7 @@ from scanner.application.ports.ict_zones import (
     IctZoneTransitionRecord,
     IctZoneTransitionRepository,
 )
-from scanner.domain.common import Candle, detection_is_warm, wilder_atr
+from scanner.domain.common import Candle, detection_is_warm, wilder_atr_series
 from scanner.domain.ict import (
     BalancedPriceRange,
     FairValueGap,
@@ -124,7 +124,10 @@ class IctReplayService:
                 last_processed_open_time=(candles[-1].open_time if candles else None),
             )
 
-        displacement_indices = self._detect_displacements(candles)
+        # Once per run, not once per candle -- see `_atr_at`.
+        atrs = wilder_atr_series(candles)
+
+        displacement_indices = self._detect_displacements(candles, atrs)
 
         detected_fvgs: list[FairValueGap] = []
 
@@ -136,7 +139,7 @@ class IctReplayService:
             len(candles),
         ):
             atr = _atr_at(
-                candles,
+                atrs,
                 index,
             )
 
@@ -211,6 +214,7 @@ class IctReplayService:
                 transition_count += await self._replay_ifvg_lifecycle(
                     record,
                     candles,
+                    atrs,
                 )
 
             elif record.zone_type == "BPR":
@@ -247,12 +251,13 @@ class IctReplayService:
     def _detect_displacements(
         self,
         candles: list[Candle],
+        atrs: Sequence[Decimal | None],
     ) -> set[int]:
         displacement_indices: set[int] = set()
 
         for index in range(len(candles)):
             atr = _atr_at(
-                candles,
+                atrs,
                 index,
             )
 
@@ -414,6 +419,7 @@ class IctReplayService:
         self,
         record: IctZoneRecord,
         candles: list[Candle],
+        atrs: Sequence[Decimal | None],
     ) -> int:
         current = _record_to_ifvg(record)
 
@@ -435,7 +441,7 @@ class IctReplayService:
                 break
 
             atr = _atr_at(
-                candles,
+                atrs,
                 index,
             )
 
@@ -905,15 +911,21 @@ def _build_transition_id(
 
 
 def _atr_at(
-    candles: Sequence[Candle],
+    atrs: Sequence[Decimal | None],
     index: int,
 ) -> Decimal:
-    """Wilder ATR (SLS §2), with the seeding window reported as zero.
+    """Wilder ATR at `index`, with the seeding window reported as zero.
 
-    The domain function returns None while ATR is still seeding. Every call
-    site in this module already guards with ``if atr <= 0``, so zero routes to
-    the same skip; this shim avoids threading Optional through them all.
-    §1.9's warm-up gate keeps production out of the seeding region.
+    Reads a series computed once per run. `wilder_atr` re-seeds the recurrence
+    from candle zero on every call, so calling it per candle made each replay
+    quadratic -- together the services spent about 99 seconds of CPU per pass
+    inside `true_range`, against a budget of 104 seconds for the whole pass.
+
+    Zero for the seeding window, as before: every call site here guards with
+    ``if atr <= 0``, and §1.9's warm-up gate keeps production out of it.
     """
 
-    return wilder_atr(candles, index) or Decimal("0")
+    if index < 0 or index >= len(atrs):
+        return Decimal("0")
+
+    return atrs[index] or Decimal("0")

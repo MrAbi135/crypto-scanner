@@ -22,6 +22,7 @@ from scanner.application.ports.liquidity_detection import (
 from scanner.domain.common import (
     Candle,
     CandleSource,
+    wilder_atr_series,
 )
 from scanner.infrastructure.redis.liquidity_state import (
     RestingLiquiditySnapshot,
@@ -323,6 +324,7 @@ async def test_active_bsl_pool_sweep_becomes_terminal() -> None:
     result = await service._replay_pool_lifecycle(
         pools.pool,
         candles,
+        wilder_atr_series(candles),
     )
 
     assert result == "SWEPT"
@@ -378,11 +380,13 @@ async def test_terminal_pool_cannot_transition_twice() -> None:
     first = await service._replay_pool_lifecycle(
         pools.pool,
         candles,
+        wilder_atr_series(candles),
     )
 
     second = await service._replay_pool_lifecycle(
         pools.pool,
         candles,
+        wilder_atr_series(candles),
     )
 
     assert first == "SWEPT"
@@ -431,7 +435,7 @@ async def test_external_sweep_plus_reversal_displacement_records_a_stop_hunt() -
         FakeClock(),
     )
 
-    result = await service._replay_pool_lifecycle(pools.pool, candles)
+    result = await service._replay_pool_lifecycle(pools.pool, candles, wilder_atr_series(candles))
 
     assert result == "SWEPT"
 

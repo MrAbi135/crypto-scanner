@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -50,9 +51,9 @@ def _consumer_name() -> str:
     """Stable per-container identity.
 
     The pending list is keyed by consumer name, so a restarted process must
-    present the same one to reclaim its own unfinished work through the normal
-    path. A random name each boot would leave the old consumer's entries to be
-    swept only by the idle-claim, which is the slower fallback.
+    present the same one to find its own unfinished work at all. A random name
+    each boot would strand the previous consumer's entries until the idle claim
+    swept them a minute later.
     """
     return f"engine-{os.getenv('HOSTNAME', 'local')}"
 
@@ -64,7 +65,36 @@ async def _consume_forever(
 ) -> None:
     await consumer.ensure_group(CANDLE_STREAM, CANDLE_GROUP)
 
-    log.info("engine_consumer_started", consumer=name, stream=CANDLE_STREAM)
+    # Whatever this consumer name left unacked last time it ran. A read for ">"
+    # will never return it -- that means "not yet delivered to anyone" -- so
+    # without this pass a crashed batch waits out `_CLAIM_IDLE_MS` before
+    # anything touches it.
+    recovered = await consumer.drain_pending(
+        CANDLE_STREAM,
+        CANDLE_GROUP,
+        name,
+        count=_READ_BATCH,
+    )
+
+    log.info(
+        "engine_consumer_started",
+        consumer=name,
+        stream=CANDLE_STREAM,
+        recovered=len(recovered),
+    )
+
+    if recovered:
+        report, acked = await closes.consume(recovered)
+
+        if acked:
+            await consumer.ack(CANDLE_STREAM, CANDLE_GROUP, list(acked))
+
+        log.info(
+            "engine_resume_processed",
+            received=report.received,
+            processed=report.processed,
+            failed=report.failed,
+        )
 
     while True:
         # Stale entries first. A batch abandoned by a killed process is older
@@ -102,6 +132,27 @@ async def _consume_forever(
         )
 
 
+def _on_consumer_exit(task: asyncio.Task[None]) -> None:
+    """Log why the consumer stopped, and stop the process with it.
+
+    Cancellation during shutdown is the one benign case. Anything else means
+    the engine has no reason to keep running: its only job was the loop that
+    just died, and a live process without it is worse than a dead one because
+    nothing is alerted.
+    """
+    if task.cancelled():
+        return
+
+    error = task.exception()
+
+    if error is None:
+        log.error("engine_consumer_stopped", reason="loop returned")
+    else:
+        log.error("engine_consumer_crashed", exc_info=error)
+
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
 def main() -> None:
     settings: EngineSettings = get_settings("engine")
     bootstrap(settings, "engine")
@@ -126,6 +177,13 @@ def main() -> None:
                 name,
             )
         )
+
+        # A bare `create_task` stores the exception on the task object and
+        # tells no one. The process then keeps serving health checks with a
+        # dead consumer inside it -- container up, readiness green, and not a
+        # single candle close processed. That is the exact failure G1b's "runs
+        # unattended >= 72 h" would sit through and report as a pass.
+        task.add_done_callback(_on_consumer_exit)
 
         app.state.consumer_task = task
         app.state.consumer_name = name

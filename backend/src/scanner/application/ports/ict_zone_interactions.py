@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -36,6 +37,23 @@ class IctZoneInteractionRepository(Protocol):
         self,
         interaction: IctZoneInteractionRecord,
     ) -> bool: ...
+
+    async def append_many(
+        self,
+        interactions: Sequence[IctZoneInteractionRecord],
+    ) -> frozenset[str]:
+        """Insert a batch in one transaction; return the ids actually written.
+
+        One `append` per interaction meant one transaction per interaction. A
+        real BTCUSDT H1 pass produced 57,427 of them -- 630 zones times their
+        candle spans -- and spent most of its time committing, which is most of
+        why a detection pass took four minutes against a target of under two.
+
+        The ids come back rather than a count because `on_conflict_do_nothing`
+        makes a re-run insert nothing, and the report's per-kind tallies have to
+        stay honest about that: a replay that inserted zero must say zero.
+        """
+        ...
 
     # §5.9's interactions were write-only: the engine recorded every TOUCH,
     # REJECTION, RESPECT and CONFIRMATION and nothing could read one back. That
