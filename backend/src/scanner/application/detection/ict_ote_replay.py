@@ -16,7 +16,7 @@ from scanner.application.ports.ict_zones import (
     IctZoneTransitionRecord,
     IctZoneTransitionRepository,
 )
-from scanner.domain.common import Candle, wilder_atr
+from scanner.domain.common import Candle, wilder_atr_series
 from scanner.domain.ict.model import ZoneBand, ZonePolarity, ZoneState
 from scanner.domain.ict.ote import (
     ImpulseDirection,
@@ -107,13 +107,16 @@ class IctOteReplayService:
 
         external_swings = detect_external_swings(candles)
 
+        # Once per run, not once per candle -- see `_atr_at`.
+        atrs = wilder_atr_series(candles)
+
         dealing_ranges = 0
         impulse_legs = 0
         otes_detected = 0
         zones_upserted = 0
 
         for index in range(len(candles)):
-            atr = _atr_at(candles, index)
+            atr = _atr_at(atrs, index)
 
             if atr <= _ZERO:
                 continue
@@ -178,6 +181,7 @@ class IctOteReplayService:
                 record,
                 candles,
                 external_swings,
+                atrs,
             )
 
         live_after = await self._zones.list_live(
@@ -203,6 +207,7 @@ class IctOteReplayService:
         record: IctZoneRecord,
         candles: list[Candle],
         external_swings: tuple[SwingPoint, ...],
+        atrs: Sequence[Decimal | None],
     ) -> int:
         current = _record_to_ote(record)
 
@@ -220,7 +225,7 @@ class IctOteReplayService:
             }:
                 break
 
-            atr = _atr_at(candles, index)
+            atr = _atr_at(atrs, index)
 
             if atr <= _ZERO:
                 continue
@@ -598,15 +603,21 @@ def _transition_id(
 
 
 def _atr_at(
-    candles: Sequence[Candle],
+    atrs: Sequence[Decimal | None],
     index: int,
 ) -> Decimal:
-    """Wilder ATR (SLS §2), with the seeding window reported as zero.
+    """Wilder ATR at `index`, with the seeding window reported as zero.
 
-    The domain function returns None while ATR is still seeding. Every call
-    site in this module already guards with ``if atr <= 0``, so zero routes to
-    the same skip; this shim avoids threading Optional through them all.
-    §1.9's warm-up gate keeps production out of the seeding region.
+    Reads a series computed once per run. `wilder_atr` re-seeds the recurrence
+    from candle zero on every call, so calling it per candle made each replay
+    quadratic -- together the services spent about 99 seconds of CPU per pass
+    inside `true_range`, against a budget of 104 seconds for the whole pass.
+
+    Zero for the seeding window, as before: every call site here guards with
+    ``if atr <= 0``, and §1.9's warm-up gate keeps production out of it.
     """
 
-    return wilder_atr(candles, index) or Decimal("0")
+    if index < 0 or index >= len(atrs):
+        return Decimal("0")
+
+    return atrs[index] or Decimal("0")

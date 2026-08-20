@@ -26,7 +26,7 @@ from scanner.application.ports.ict_zones import (
     IctZoneTransitionRecord,
     IctZoneTransitionRepository,
 )
-from scanner.domain.common import Candle, wilder_atr
+from scanner.domain.common import Candle, wilder_atr_series
 from scanner.domain.ict import (
     BreakerBlock,
     Displacement,
@@ -195,7 +195,10 @@ class IctOrderBlockReplayService:
 
         sweeps = _parse_liquidity_sweeps(liquidity_records)
 
-        displacements = _detect_displacements(candles)
+        # Once per run, not once per candle -- see `_atr_at`.
+        atrs = wilder_atr_series(candles)
+
+        displacements = _detect_displacements(candles, atrs)
 
         detected = 0
         upserted = 0
@@ -207,6 +210,7 @@ class IctOrderBlockReplayService:
                 sweeps=sweeps,
                 displacement=displacement,
                 mss_spans=mss_spans,
+                atrs=atrs,
             )
 
             if ob is None:
@@ -253,6 +257,7 @@ class IctOrderBlockReplayService:
             ) = await self._replay_ob_lifecycle(
                 record=record,
                 candles=candles,
+                atrs=atrs,
                 swings=swings,
             )
 
@@ -324,11 +329,12 @@ class IctOrderBlockReplayService:
         ],
         displacement: Displacement,
         mss_spans: dict[str, tuple[tuple[int, int], ...]],
+        atrs: Sequence[Decimal | None],
     ) -> OrderBlock | None:
         displacement_index = displacement.candle_index
 
         atr = _atr_at(
-            candles,
+            atrs,
             displacement_index,
         )
 
@@ -399,6 +405,7 @@ class IctOrderBlockReplayService:
         *,
         record: IctZoneRecord,
         candles: list[Candle],
+        atrs: Sequence[Decimal | None],
         swings: tuple[
             SwingEvidence,
             ...,
@@ -488,6 +495,7 @@ class IctOrderBlockReplayService:
                     symbol=record.symbol,
                     timeframe=(record.timeframe),
                     candles=candles,
+                    atrs=atrs,
                     swings=swings,
                     invalidation_index=index,
                 )
@@ -500,6 +508,7 @@ class IctOrderBlockReplayService:
                         symbol=record.symbol,
                         timeframe=(record.timeframe),
                         candles=candles,
+                        atrs=atrs,
                         swings=swings,
                         invalidation_index=index,
                     )
@@ -522,6 +531,7 @@ class IctOrderBlockReplayService:
         symbol: str,
         timeframe: Timeframe,
         candles: list[Candle],
+        atrs: Sequence[Decimal | None],
         swings: tuple[
             SwingEvidence,
             ...,
@@ -532,7 +542,7 @@ class IctOrderBlockReplayService:
             return False
 
         atr = _atr_at(
-            candles,
+            atrs,
             invalidation_index,
         )
 
@@ -666,6 +676,7 @@ class IctOrderBlockReplayService:
         symbol: str,
         timeframe: Timeframe,
         candles: list[Candle],
+        atrs: Sequence[Decimal | None],
         swings: tuple[
             SwingEvidence,
             ...,
@@ -676,7 +687,7 @@ class IctOrderBlockReplayService:
             return False
 
         atr = _atr_at(
-            candles,
+            atrs,
             invalidation_index,
         )
 
@@ -852,12 +863,13 @@ class IctOrderBlockReplayService:
 
 def _detect_displacements(
     candles: list[Candle],
+    atrs: Sequence[Decimal | None],
 ) -> tuple[Displacement, ...]:
     detected: list[Displacement] = []
 
     for index in range(len(candles)):
         atr = _atr_at(
-            candles,
+            atrs,
             index,
         )
 
@@ -1621,15 +1633,21 @@ def _build_transition_id(
 
 
 def _atr_at(
-    candles: Sequence[Candle],
+    atrs: Sequence[Decimal | None],
     index: int,
 ) -> Decimal:
-    """Wilder ATR (SLS §2), with the seeding window reported as zero.
+    """Wilder ATR at `index`, with the seeding window reported as zero.
 
-    The domain function returns None while ATR is still seeding. Every call
-    site in this module already guards with ``if atr <= 0``, so zero routes to
-    the same skip; this shim avoids threading Optional through them all.
-    §1.9's warm-up gate keeps production out of the seeding region.
+    Reads a series computed once per run. `wilder_atr` re-seeds the recurrence
+    from candle zero on every call, so calling it per candle made each replay
+    quadratic -- together the services spent about 99 seconds of CPU per pass
+    inside `true_range`, against a budget of 104 seconds for the whole pass.
+
+    Zero for the seeding window, as before: every call site here guards with
+    ``if atr <= 0``, and §1.9's warm-up gate keeps production out of it.
     """
 
-    return wilder_atr(candles, index) or Decimal("0")
+    if index < 0 or index >= len(atrs):
+        return Decimal("0")
+
+    return atrs[index] or Decimal("0")
