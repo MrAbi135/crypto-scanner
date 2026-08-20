@@ -28,7 +28,6 @@ from scanner.domain.common import (
     Candle,
     detection_is_warm,
     quantise_derived,
-    wilder_atr,
     wilder_atr_series,
 )
 from scanner.domain.ict import DisplacementDirection, detect_displacement
@@ -239,6 +238,7 @@ class LiquidityReplayService:
             result = await self._replay_pool_lifecycle(
                 pool,
                 candles,
+                atrs,
             )
 
             if result == "SWEPT":
@@ -452,6 +452,7 @@ class LiquidityReplayService:
         self,
         record: LiquidityPoolRecord,
         candles: Sequence[Candle],
+        atrs: Sequence[Decimal | None],
     ) -> str | None:
         if record.state != "ACTIVE":
             return None
@@ -488,7 +489,7 @@ class LiquidityReplayService:
                 return None
 
             atr = _atr_at(
-                candles,
+                atrs,
                 index,
             )
 
@@ -519,6 +520,7 @@ class LiquidityReplayService:
                     record,
                     sweep,
                     candles,
+                    atrs,
                 )
 
                 if transitioned:
@@ -575,6 +577,7 @@ class LiquidityReplayService:
                         record,
                         two_candle_sweep,
                         candles,
+                        atrs,
                     )
 
                     if transitioned:
@@ -609,6 +612,7 @@ class LiquidityReplayService:
         record: LiquidityPoolRecord,
         sweep: SweepEvent,
         candles: Sequence[Candle],
+        atrs: Sequence[Decimal | None],
     ) -> bool:
         evidence = {
             "pool_id": sweep.pool_id,
@@ -663,7 +667,7 @@ class LiquidityReplayService:
             )
         )
 
-        await self._record_stop_hunt(record, sweep, candles)
+        await self._record_stop_hunt(record, sweep, candles, atrs)
 
         return True
 
@@ -672,6 +676,7 @@ class LiquidityReplayService:
         record: LiquidityPoolRecord,
         sweep: SweepEvent,
         candles: Sequence[Candle],
+        atrs: Sequence[Decimal | None],
     ) -> bool:
         """Detect the §4.7 stop-hunt composite on a just-confirmed sweep.
 
@@ -708,7 +713,7 @@ class LiquidityReplayService:
             if index >= len(candles):
                 return False
 
-            atr = _atr_at(candles, index)
+            atr = _atr_at(atrs, index)
 
             if atr <= 0:
                 continue
@@ -896,7 +901,7 @@ def _within_sweep_scan_range(
 
 
 def _atr_at(
-    candles: Sequence[Candle],
+    atrs: Sequence[Decimal | None],
     index: int,
 ) -> Decimal:
     """Wilder ATR (SLS §2), with the seeding window reported as zero.
@@ -907,7 +912,10 @@ def _atr_at(
     §1.9's warm-up gate keeps production out of the seeding region.
     """
 
-    return wilder_atr(candles, index) or Decimal("0")
+    if index < 0 or index >= len(atrs):
+        return Decimal("0")
+
+    return atrs[index] or Decimal("0")
 
 
 def _side_of(swing: SwingPoint) -> LiquiditySide:

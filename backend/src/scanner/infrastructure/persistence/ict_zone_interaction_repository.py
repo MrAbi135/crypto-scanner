@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import (
@@ -66,6 +68,52 @@ class PgIctZoneInteractionRepository:
             await session.commit()
 
             return bool(result.rowcount)  # type: ignore[attr-defined]
+
+    async def append_many(
+        self,
+        interactions: Sequence[IctZoneInteractionRecord],
+    ) -> frozenset[str]:
+        if not interactions:
+            return frozenset()
+
+        stmt = (
+            pg_insert(IctZoneInteractionRow)
+            .values(
+                [
+                    {
+                        "interaction_id": item.interaction_id,
+                        "zone_id": item.zone_id,
+                        "symbol": item.symbol,
+                        "timeframe": item.timeframe.value,
+                        "zone_type": item.zone_type,
+                        "kind": item.kind,
+                        "observed_at": item.observed_at,
+                        "candle_index": item.candle_index,
+                        "penetration_depth": item.penetration_depth,
+                        "close_price": item.close_price,
+                        "rejection_wick": item.rejection_wick,
+                        "close_through": item.close_through,
+                        "evidence": item.evidence,
+                    }
+                    for item in interactions
+                ]
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    IctZoneInteractionRow.interaction_id,
+                ]
+            )
+            .returning(IctZoneInteractionRow.interaction_id)
+        )
+
+        async with self._sessions() as session:
+            result = await session.execute(stmt)
+
+            written = frozenset(result.scalars().all())
+
+            await session.commit()
+
+            return written
 
     async def list_for_zone(
         self,

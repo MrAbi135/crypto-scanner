@@ -19,7 +19,7 @@ from scanner.application.ports.ict_zones import (
     IctZoneRecord,
     IctZoneTransitionRecord,
 )
-from scanner.domain.common import Candle, wilder_atr
+from scanner.domain.common import Candle, wilder_atr_series
 from scanner.domain.ict import (
     InteractionKind,
     ZoneBand,
@@ -107,6 +107,9 @@ class IctZoneInteractionReplayService:
                 timeframe,
             )
 
+        # Once per run, not once per candle per zone -- see `_atr_at`.
+        atrs = wilder_atr_series(candles)
+
         zones = await self._context.list_zones(
             symbol,
             timeframe,
@@ -168,6 +171,8 @@ class IctZoneInteractionReplayService:
             if stop_index < start_index:
                 continue
 
+            pending: list[tuple[InteractionKind, IctZoneInteractionRecord]] = []
+
             band = ZoneBand(
                 low=record.band_low,
                 high=record.band_high,
@@ -180,7 +185,7 @@ class IctZoneInteractionReplayService:
                 stop_index + 1,
             ):
                 atr = _atr_at(
-                    candles,
+                    atrs,
                     candle_index,
                 )
 
@@ -201,20 +206,21 @@ class IctZoneInteractionReplayService:
                 respect = None
 
                 for interaction in found:
-                    inserted = await self._persist_interaction(
-                        record,
-                        interaction.kind,
-                        interaction.observed_at,
-                        interaction.candle_index,
-                        interaction.penetration_depth,
-                        interaction.close_price,
-                        interaction.rejection_wick,
-                        interaction.close_through,
+                    pending.append(
+                        (
+                            interaction.kind,
+                            self._build_interaction(
+                                record,
+                                interaction.kind,
+                                interaction.observed_at,
+                                interaction.candle_index,
+                                interaction.penetration_depth,
+                                interaction.close_price,
+                                interaction.rejection_wick,
+                                interaction.close_through,
+                            ),
+                        )
                     )
-
-                    if inserted:
-                        counts[interaction.kind] += 1
-                        inserted_total += 1
 
                     if interaction.kind is InteractionKind.RESPECT:
                         respect = interaction
@@ -230,23 +236,36 @@ class IctZoneInteractionReplayService:
                     if confirmation is not None:
                         bos_candle, bos_index, swing = confirmation
 
-                        inserted = await self._persist_confirmation(
-                            record=record,
-                            parent_index=respect.candle_index,
-                            penetration_depth=(respect.penetration_depth),
-                            rejection_wick=respect.rejection_wick,
-                            lower_timeframe=lower_timeframe,
-                            bos_candle=bos_candle,
-                            bos_index=bos_index,
-                            swing=swing,
+                        pending.append(
+                            (
+                                InteractionKind.CONFIRMATION,
+                                self._build_confirmation(
+                                    record=record,
+                                    parent_index=respect.candle_index,
+                                    penetration_depth=(respect.penetration_depth),
+                                    rejection_wick=respect.rejection_wick,
+                                    lower_timeframe=lower_timeframe,
+                                    bos_candle=bos_candle,
+                                    bos_index=bos_index,
+                                    swing=swing,
+                                ),
+                            )
                         )
-
-                        if inserted:
-                            counts[InteractionKind.CONFIRMATION] += 1
-                            inserted_total += 1
 
                 if any(interaction.kind is InteractionKind.VIOLATION for interaction in found):
                     break
+
+            # Flushed per zone rather than per interaction: one transaction
+            # instead of one per row, while keeping the batch bounded by a
+            # single zone's span rather than the whole window.
+            written = await self._interactions.append_many([item for _, item in pending])
+
+            for kind, item in pending:
+                if item.interaction_id in written:
+                    counts[kind] += 1
+                    inserted_total += 1
+
+            pending.clear()
 
         return IctInteractionReplayReport(
             symbol=symbol,
@@ -261,7 +280,7 @@ class IctZoneInteractionReplayService:
             interactions_inserted=inserted_total,
         )
 
-    async def _persist_interaction(
+    def _build_interaction(
         self,
         record: IctZoneRecord,
         kind: InteractionKind,
@@ -271,7 +290,7 @@ class IctZoneInteractionReplayService:
         close_price: Decimal,
         rejection_wick: Decimal,
         close_through: bool,
-    ) -> bool:
+    ) -> IctZoneInteractionRecord:
         evidence = json.dumps(
             {
                 "algo_version": self._algo_version,
@@ -287,30 +306,28 @@ class IctZoneInteractionReplayService:
             separators=(",", ":"),
         )
 
-        return await self._interactions.append(
-            IctZoneInteractionRecord(
-                interaction_id=_interaction_id(
-                    record.zone_id,
-                    kind.value,
-                    candle_index,
-                    observed_at,
-                ),
-                zone_id=record.zone_id,
-                symbol=record.symbol,
-                timeframe=record.timeframe,
-                zone_type=record.zone_type,
-                kind=kind.value,
-                observed_at=observed_at,
-                candle_index=candle_index,
-                penetration_depth=penetration_depth,
-                close_price=close_price,
-                rejection_wick=rejection_wick,
-                close_through=close_through,
-                evidence=evidence,
-            )
+        return IctZoneInteractionRecord(
+            interaction_id=_interaction_id(
+                record.zone_id,
+                kind.value,
+                candle_index,
+                observed_at,
+            ),
+            zone_id=record.zone_id,
+            symbol=record.symbol,
+            timeframe=record.timeframe,
+            zone_type=record.zone_type,
+            kind=kind.value,
+            observed_at=observed_at,
+            candle_index=candle_index,
+            penetration_depth=penetration_depth,
+            close_price=close_price,
+            rejection_wick=rejection_wick,
+            close_through=close_through,
+            evidence=evidence,
         )
 
-    async def _persist_confirmation(
+    def _build_confirmation(
         self,
         *,
         record: IctZoneRecord,
@@ -321,7 +338,7 @@ class IctZoneInteractionReplayService:
         bos_candle: Candle,
         bos_index: int,
         swing: SwingPoint,
-    ) -> bool:
+    ) -> IctZoneInteractionRecord:
         evidence = json.dumps(
             {
                 "algo_version": self._algo_version,
@@ -348,22 +365,20 @@ class IctZoneInteractionReplayService:
             bos_candle.close_time,
         )
 
-        return await self._interactions.append(
-            IctZoneInteractionRecord(
-                interaction_id=interaction_id,
-                zone_id=record.zone_id,
-                symbol=record.symbol,
-                timeframe=record.timeframe,
-                zone_type=record.zone_type,
-                kind=InteractionKind.CONFIRMATION.value,
-                observed_at=bos_candle.close_time,
-                candle_index=parent_index,
-                penetration_depth=penetration_depth,
-                close_price=bos_candle.close,
-                rejection_wick=rejection_wick,
-                close_through=False,
-                evidence=evidence,
-            )
+        return IctZoneInteractionRecord(
+            interaction_id=interaction_id,
+            zone_id=record.zone_id,
+            symbol=record.symbol,
+            timeframe=record.timeframe,
+            zone_type=record.zone_type,
+            kind=InteractionKind.CONFIRMATION.value,
+            observed_at=bos_candle.close_time,
+            candle_index=parent_index,
+            penetration_depth=penetration_depth,
+            close_price=bos_candle.close,
+            rejection_wick=rejection_wick,
+            close_through=False,
+            evidence=evidence,
         )
 
 
@@ -491,18 +506,26 @@ def _confirmation_id(
 
 
 def _atr_at(
-    candles: Sequence[Candle],
+    atrs: Sequence[Decimal | None],
     index: int,
 ) -> Decimal:
-    """Wilder ATR (SLS §2), with the seeding window reported as zero.
+    """Wilder ATR at `index`, with the seeding window reported as zero.
 
-    The domain function returns None while ATR is still seeding. Every call
-    site in this module already guards with ``if atr <= 0``, so zero routes to
-    the same skip; this shim avoids threading Optional through them all.
-    §1.9's warm-up gate keeps production out of the seeding region.
+    Reads a series computed once per run rather than calling `wilder_atr` per
+    candle. That call re-seeds the recurrence from candle zero every time, so
+    this loop -- every candle of every zone's span -- was quadratic: one real
+    BTCUSDT H1 pass made 22 million `true_range` calls and spent about a
+    minute of CPU inside them, which is most of why the engine could not keep
+    up with its own seeded universe.
+
+    Zero for the seeding window, as before: every call site here guards with
+    ``if atr <= 0``, and §1.9's warm-up gate keeps production out of it.
     """
 
-    return wilder_atr(candles, index) or Decimal("0")
+    if index < 0 or index >= len(atrs):
+        return Decimal("0")
+
+    return atrs[index] or Decimal("0")
 
 
 def _empty_report(

@@ -105,6 +105,23 @@ class FakeInteractionRepository:
 
         return True
 
+    async def append_many(self, interactions) -> frozenset[str]:
+        """Mirrors the SQL: ON CONFLICT DO NOTHING ... RETURNING id.
+
+        Only the ids it actually wrote come back, so a second replay reports
+        zero rather than re-counting rows that were already there.
+        """
+        written: set[str] = set()
+
+        for interaction in interactions:
+            if interaction.interaction_id in self.records:
+                continue
+
+            self.records[interaction.interaction_id] = interaction
+            written.add(interaction.interaction_id)
+
+        return frozenset(written)
+
 
 def make_candle(
     *,
