@@ -61,6 +61,7 @@ from scanner.domain.ict.pd import (
     PdContext,
     PdState,
     bracketed_dealing_range,
+    dealing_range_at,
     evaluate_pd_context,
 )
 from scanner.domain.ict.state import (
@@ -108,6 +109,7 @@ __all__ = [
     "create_breaker",
     "create_ifvg",
     "create_mitigation_block",
+    "dealing_range_at",
     "detect_displacement",
     "detect_fvg",
     "detect_order_block",
