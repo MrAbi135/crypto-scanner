@@ -133,3 +133,79 @@ async def test_claiming_ignores_entries_still_being_worked_on(redis_client) -> N
         )
         == ()
     )
+
+
+async def test_a_restart_under_the_same_name_does_not_see_its_own_pending(
+    redis_client,
+) -> None:
+    """The claim the engine's docstring used to make, and it was wrong.
+
+    A stable consumer name does not let a restarted process pick its work back
+    up "through the normal path". `read` asks for ">", which Redis defines as
+    entries never delivered to *anyone* — a consumer's own pending list is not
+    in it. Under the old code the crashed batch waited out the 60-second idle
+    claim, which for a criterion phrased "resume proven, not assumed" is a
+    minute in which the engine looks exactly like it lost the bar.
+    """
+    consumer = RedisEventStreamConsumer(redis_client)
+
+    await consumer.ensure_group(CANDLE_STREAM, CANDLE_GROUP)
+    await RedisEventStreamPublisher(redis_client).publish(CANDLE_STREAM, entries(3))
+
+    taken = await consumer.read(CANDLE_STREAM, CANDLE_GROUP, "engine-a", count=10, block_ms=50)
+
+    assert len(taken) == 3
+
+    # The process dies here, acking nothing, and comes back under its own name.
+    assert await consumer.read(CANDLE_STREAM, CANDLE_GROUP, "engine-a", count=10, block_ms=50) == ()
+
+
+async def test_a_restart_recovers_its_own_pending_immediately(redis_client) -> None:
+    """G1b: "kill -9 on the engine loses no closes (resume proven, not assumed)".
+
+    The explicit "0" read is what makes a restart instant rather than
+    minute-late, and it returns exactly the entries the dead process left.
+    """
+    consumer = RedisEventStreamConsumer(redis_client)
+
+    await consumer.ensure_group(CANDLE_STREAM, CANDLE_GROUP)
+    await RedisEventStreamPublisher(redis_client).publish(CANDLE_STREAM, entries(4))
+
+    taken = await consumer.read(CANDLE_STREAM, CANDLE_GROUP, "engine-a", count=10, block_ms=50)
+
+    await consumer.ack(CANDLE_STREAM, CANDLE_GROUP, [taken[0].entry_id])
+
+    recovered = await consumer.drain_pending(
+        CANDLE_STREAM,
+        CANDLE_GROUP,
+        "engine-a",
+        count=10,
+    )
+
+    assert [entry.fields["event_id"] for entry in recovered] == ["e1", "e2", "e3"]
+
+    await consumer.ack(
+        CANDLE_STREAM,
+        CANDLE_GROUP,
+        [entry.entry_id for entry in recovered],
+    )
+
+    # Drained: a second restart finds nothing left to redo.
+    assert await consumer.drain_pending(CANDLE_STREAM, CANDLE_GROUP, "engine-a", count=10) == ()
+
+
+async def test_draining_does_not_steal_another_consumers_work(redis_client) -> None:
+    """The pending list is per consumer.
+
+    A second engine replica must not replay a batch its sibling is still
+    working through — that is what `claim_stale`'s idle window is for, and the
+    startup drain has to stay narrower than it.
+    """
+    consumer = RedisEventStreamConsumer(redis_client)
+
+    await consumer.ensure_group(CANDLE_STREAM, CANDLE_GROUP)
+    await RedisEventStreamPublisher(redis_client).publish(CANDLE_STREAM, entries(2))
+
+    await consumer.read(CANDLE_STREAM, CANDLE_GROUP, "engine-a", count=10, block_ms=50)
+
+    assert await consumer.drain_pending(CANDLE_STREAM, CANDLE_GROUP, "engine-b", count=10) == ()

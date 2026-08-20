@@ -170,3 +170,40 @@ async def test_an_empty_batch_does_nothing() -> None:
     assert report.received == 0
     assert acked == ()
     assert runner.calls == []
+
+
+@pytest.mark.asyncio
+async def test_one_unparseable_entry_does_not_stop_the_queue() -> None:
+    """The poison pill that could stop the engine for good.
+
+    `parse_close` raised from a list comprehension outside the try, so a single
+    malformed entry propagated out of `consume`, killed the consumer task, and
+    left the process alive with health green and nothing consuming. Every close
+    after it would have been missed until someone noticed and restarted --
+    which is precisely what G1b's "runs unattended >= 72 h" is meant to catch.
+    """
+    runner = RecordingRunner()
+
+    report, acked = await CandleCloseConsumer(runner).consume(
+        [
+            StreamEntry(entry_id="1-1", fields={"payload": "not json at all"}),
+            StreamEntry(
+                entry_id="1-2",
+                fields={
+                    "payload": json.dumps(
+                        {
+                            "payload": {
+                                "symbol": "BTCUSDT",
+                                "timeframe": "H1",
+                                "open_time": "2026-08-17T00:00:00+00:00",
+                            }
+                        }
+                    )
+                },
+            ),
+        ]
+    )
+
+    assert report.failed == 1
+    assert [call[0] for call in runner.calls] == ["BTCUSDT"]
+    assert acked == ("1-2",)
