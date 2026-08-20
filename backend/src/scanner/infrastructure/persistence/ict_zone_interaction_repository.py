@@ -18,6 +18,7 @@ from scanner.application.ports.ict_zones import (
     IctZoneRecord,
     IctZoneTransitionRecord,
 )
+from scanner.domain.ict import TERMINAL_ZONE_STATES
 from scanner.infrastructure.persistence.ict_zone_interaction_models import (
     IctZoneInteractionRow,
 )
@@ -172,6 +173,12 @@ class PgIctZoneInteractionContextRepository:
                 .where(
                     IctZoneRow.symbol == symbol,
                     IctZoneRow.timeframe == timeframe.value,
+                    # §5 makes terminal states permanent, so these zones can
+                    # never interact again. Returning them had the interaction
+                    # replay walk 3,934 zones on real BTCUSDT H1 where 701 were
+                    # still capable of anything -- five sixths of the largest
+                    # service's work, on zones that were dead.
+                    IctZoneRow.state.notin_(sorted(TERMINAL_ZONE_STATES)),
                 )
                 .order_by(
                     IctZoneRow.created_index.asc(),

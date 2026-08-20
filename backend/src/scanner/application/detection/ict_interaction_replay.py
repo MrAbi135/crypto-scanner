@@ -21,6 +21,7 @@ from scanner.application.ports.ict_zones import (
 )
 from scanner.domain.common import Candle, wilder_atr_series
 from scanner.domain.ict import (
+    TERMINAL_ZONE_STATES,
     InteractionKind,
     ZoneBand,
     ZonePolarity,
@@ -43,13 +44,8 @@ _ATR_PERIOD = 14
 _CONFIRMATION_MAX_LTF_CANDLES = 5
 _ZERO = Decimal("0")
 
-_TERMINAL_STATES = {
-    "INVALIDATED",
-    "EXPIRED",
-    "FILLED",
-    "INVERTED",
-    "DEAD",
-}
+# One definition, in the domain beside the state machines that produce them.
+_TERMINAL_STATES = TERMINAL_ZONE_STATES
 
 
 @dataclass(frozen=True, slots=True)

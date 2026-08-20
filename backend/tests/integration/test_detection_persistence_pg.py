@@ -394,8 +394,19 @@ async def test_engine_event_append_is_idempotent_and_queryable(engine) -> None:
 # --------------------------------------------------------------------------
 
 
-async def test_context_reader_includes_terminal_zones_unlike_list_live(engine) -> None:
-    """The interaction context needs the full history, not just live zones."""
+async def test_context_reader_skips_zones_that_can_no_longer_interact(engine) -> None:
+    """§5 makes terminal states permanent -- "no resurrection".
+
+    This reader used to return every zone for the context, which had the
+    interaction replay walk 3,934 zones on real BTCUSDT H1 where only 701 could
+    still do anything. The cost was five sixths of the largest service's work,
+    spent on zones that were dead.
+
+    What that gives up: on an empty database, a terminal zone's historical
+    interactions are no longer re-derived. Nothing reads them -- confluence only
+    ever asks `list_for_zone` about the zone G4 has put price at, which is live
+    by definition -- so the trade was taken deliberately rather than silently.
+    """
 
     sessions = build_session_factory(engine)
     zones = PgIctZoneRepository(sessions)
@@ -408,9 +419,27 @@ async def test_context_reader_includes_terminal_zones_unlike_list_live(engine) -
     context = PgIctZoneInteractionContextRepository(sessions)
     listed = await context.list_zones(symbol, TF)
 
-    assert [z.zone_id for z in listed] == ["c-1", "c-2"]  # created_index ASC
-    assert [z.state for z in listed] == ["FRESH", "EXPIRED"]
-    assert await zones.list_live(symbol, TF) != listed
+    assert [z.zone_id for z in listed] == ["c-1"]
+    assert [z.state for z in listed] == ["FRESH"]
+
+
+async def test_a_mitigated_zone_is_not_terminal_and_is_still_read(engine) -> None:
+    """MITIGATED is in neither §5 terminal set, and the filter must respect that.
+
+    A zone that has been mitigated can still be tested again; excluding it
+    would drop live evidence rather than dead weight.
+    """
+
+    sessions = build_session_factory(engine)
+    zones = PgIctZoneRepository(sessions)
+    symbol = "ZMIT"
+
+    await zones.upsert(zone("m-1", symbol=symbol, created_index=1, zone_type="OB"))
+    assert await zones.transition("m-1", from_state="FRESH", to_state="MITIGATED", updated_at=T0)
+
+    listed = await PgIctZoneInteractionContextRepository(sessions).list_zones(symbol, TF)
+
+    assert [z.zone_id for z in listed] == ["m-1"]
 
 
 async def test_context_reader_orders_transitions_by_candle_index(engine) -> None:
