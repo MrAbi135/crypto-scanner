@@ -77,3 +77,16 @@ class IctZoneInteractionContextRepository(Protocol):
         self,
         zone_id: str,
     ) -> tuple[IctZoneTransitionRecord, ...]: ...
+
+    async def list_transitions_for(
+        self,
+        zone_ids: Sequence[str],
+    ) -> dict[str, tuple[IctZoneTransitionRecord, ...]]:
+        """Every listed zone's transitions, in one query.
+
+        Asked one zone at a time, a pass over 630 live zones makes 630 round
+        trips before it evaluates a single candle -- and after the ATR and
+        batching work that was the largest remaining cost in a detection pass,
+        larger than anything the engine actually computes.
+        """
+        ...

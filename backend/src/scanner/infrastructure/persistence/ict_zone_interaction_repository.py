@@ -201,6 +201,36 @@ class PgIctZoneInteractionContextRepository:
 
             return tuple(_transition_record(row) for row in result.scalars().all())
 
+    async def list_transitions_for(
+        self,
+        zone_ids: Sequence[str],
+    ) -> dict[str, tuple[IctZoneTransitionRecord, ...]]:
+        if not zone_ids:
+            return {}
+
+        async with self._sessions() as session:
+            result = await session.execute(
+                select(IctZoneTransitionRow)
+                .where(
+                    IctZoneTransitionRow.zone_id.in_(list(zone_ids)),
+                )
+                .order_by(
+                    IctZoneTransitionRow.zone_id.asc(),
+                    IctZoneTransitionRow.candle_index.asc(),
+                    IctZoneTransitionRow.transitioned_at.asc(),
+                    IctZoneTransitionRow.transition_id.asc(),
+                )
+            )
+
+            grouped: dict[str, list[IctZoneTransitionRecord]] = {}
+
+            for row in result.scalars().all():
+                grouped.setdefault(row.zone_id, []).append(_transition_record(row))
+
+            # Every requested id gets an entry, so a caller can index without
+            # having to distinguish "no transitions" from "not asked for".
+            return {zone_id: tuple(grouped.get(zone_id, ())) for zone_id in zone_ids}
+
 
 def _zone_record(
     row: IctZoneRow,

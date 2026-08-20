@@ -145,10 +145,16 @@ class IctZoneInteractionReplayService:
         inserted_total = 0
         zones_evaluated = 0
 
+        # One query for every zone's transitions rather than one per zone: the
+        # loop below ran 630 round trips before evaluating a single candle.
+        transitions_by_zone = await self._context.list_transitions_for(
+            [record.zone_id for record in zones]
+        )
+
         for record in zones:
             zones_evaluated += 1
 
-            transitions = await self._context.list_transitions(record.zone_id)
+            transitions = transitions_by_zone.get(record.zone_id, ())
 
             terminal_index = _terminal_index(transitions)
 
