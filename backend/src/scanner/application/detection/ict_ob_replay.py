@@ -47,7 +47,7 @@ from scanner.domain.ict import (
 )
 from scanner.shared import Timeframe
 
-ICT_OB_ALGO_VERSION = "s6-ob-v3"
+ICT_OB_ALGO_VERSION = "s6-ob-v4"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")
