@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -10,7 +11,9 @@ import pytest
 from tests.support.builders import pad_for_warmup
 
 from scanner.application.detection.liquidity_replay import (
+    LIQUIDITY_ALGO_VERSION,
     LiquidityReplayService,
+    _build_pool_id,
 )
 from scanner.application.ports.detection import (
     EngineEventRecord,
@@ -24,6 +27,7 @@ from scanner.domain.common import (
     CandleSource,
     wilder_atr_series,
 )
+from scanner.domain.structure import SwingKind, SwingPoint, SwingStrength
 from scanner.infrastructure.redis.liquidity_state import (
     RestingLiquiditySnapshot,
 )
@@ -454,3 +458,112 @@ async def test_external_sweep_plus_reversal_displacement_records_a_stop_hunt() -
     assert payload["penetration_low"] == "98"
     assert payload["elapsed_candles"] == 1
     assert payload["failed"] is False
+
+
+def _service(candles, pools) -> LiquidityReplayService:
+    return LiquidityReplayService(
+        FakeCandles(candles),  # type: ignore[arg-type]
+        pools,  # type: ignore[arg-type]
+        FakeTransitions(),
+        FakeEvents(),
+        FakeSnapshots(),  # type: ignore[arg-type]
+        FakeClock(),
+    )
+
+
+def _aged_pool(created_at: datetime) -> LiquidityPoolRecord:
+    record = make_pool()
+
+    return replace(record, created_at=created_at, price=Decimal("100000"))
+
+
+def test_the_same_swing_keeps_its_id_as_the_window_slides() -> None:
+    """The window moves one candle per close; the swing does not move with it.
+
+    Keyed on `swing.index`, one level produced a fresh pool row every pass --
+    eight ACTIVE BSL pools at exactly 70022 on the VM's BTCUSDT M5, against
+    §4.2's "one price zone = one pool per side per TF".
+    """
+    open_time = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
+
+    def swing_at(index: int) -> SwingPoint:
+        return SwingPoint(
+            index=index,
+            open_time=open_time,
+            price=Decimal("70022"),
+            kind=SwingKind.HIGH,
+            strength=SwingStrength.EXTERNAL,
+        )
+
+    ids = {
+        _build_pool_id(
+            symbol="BTCUSDT",
+            timeframe=Timeframe.M5,
+            swing=swing_at(index),
+            algo_version=LIQUIDITY_ALGO_VERSION,
+        )
+        # The same candle as seen by eight consecutive passes.
+        for index in range(195, 203)
+    }
+
+    assert len(ids) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_pool_older_than_the_window_expires() -> None:
+    """§4.2: "ACTIVE -> EXPIRED (age > pool_max_age = 500 candles)".
+
+    This is the case production is made of and the one the old code could not
+    reach: it walked from `created_index + 1`, so a pool whose creation candle
+    had left the window took the `start_index >= len(candles)` exit and stayed
+    ACTIVE for good.
+    """
+    candles = pad_for_warmup(
+        [
+            make_candle(0, open_="98", high="99", low="97", close="98"),
+            make_candle(1, open_="98", high="99", low="97", close="98"),
+        ]
+    )
+
+    # 501 candles before the newest close, so age is 501 and the rule asks for
+    # more than 500.
+    created_at = candles[-1].close_time - timedelta(minutes=5) * 501
+
+    pools = FakePools(_aged_pool(created_at))
+
+    result = await _service(candles, pools)._replay_pool_lifecycle(
+        pools.pool,
+        candles,
+        wilder_atr_series(candles),
+    )
+
+    assert result == "EXPIRED"
+    assert pools.pool.state == "EXPIRED"
+
+
+@pytest.mark.asyncio
+async def test_a_pool_one_candle_short_of_retirement_survives() -> None:
+    """The boundary is `age > 500`, so 500 is still ACTIVE.
+
+    Without this the previous test would also pass an implementation that
+    expired every pool whose creation candle is outside the window.
+    """
+    candles = pad_for_warmup(
+        [
+            make_candle(0, open_="98", high="99", low="97", close="98"),
+            make_candle(1, open_="98", high="99", low="97", close="98"),
+        ]
+    )
+
+    created_at = candles[-1].close_time - timedelta(minutes=5) * 500
+
+    pools = FakePools(_aged_pool(created_at))
+
+    result = await _service(candles, pools)._replay_pool_lifecycle(
+        pools.pool,
+        candles,
+        wilder_atr_series(candles),
+    )
+
+    assert result is None
+    assert pools.pool.state == "ACTIVE"
