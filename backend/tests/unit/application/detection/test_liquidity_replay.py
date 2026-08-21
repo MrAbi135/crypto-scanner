@@ -567,3 +567,34 @@ async def test_a_pool_one_candle_short_of_retirement_survives() -> None:
 
     assert result is None
     assert pools.pool.state == "ACTIVE"
+
+
+def test_one_level_is_one_pool_however_the_swing_is_classified() -> None:
+    """A k=5 external pivot is also a k=2 internal one, confirmed sooner.
+
+    Keyed on strength, the early pass wrote an INTERNAL pool and the promoting
+    pass wrote an EXTERNAL one beside it: 5 EXTERNAL and 3 INTERNAL ACTIVE
+    pools at exactly 79500 on the VM's BTCUSDT M5. §4.2 allows one.
+    """
+    open_time = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
+
+    def swing_of(strength: SwingStrength) -> SwingPoint:
+        return SwingPoint(
+            index=42,
+            open_time=open_time,
+            price=Decimal("79500"),
+            kind=SwingKind.HIGH,
+            strength=strength,
+        )
+
+    ids = {
+        _build_pool_id(
+            symbol="BTCUSDT",
+            timeframe=Timeframe.M5,
+            swing=swing_of(strength),
+            algo_version=LIQUIDITY_ALGO_VERSION,
+        )
+        for strength in (SwingStrength.INTERNAL, SwingStrength.EXTERNAL)
+    }
+
+    assert len(ids) == 1

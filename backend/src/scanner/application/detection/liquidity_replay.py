@@ -58,7 +58,7 @@ from scanner.domain.structure import (
 )
 from scanner.shared import Timeframe
 
-LIQUIDITY_ALGO_VERSION = "s5-v5"
+LIQUIDITY_ALGO_VERSION = "s5-v6"
 
 _ATR_PERIOD = 14
 _EPSILON_ATR = Decimal("0.05")
@@ -1015,13 +1015,27 @@ def _build_pool_id(
     for a level that already had one -- on the VM, eight ACTIVE BSL pools at
     exactly 70022 on BTCUSDT M5, against §4.2's "one price zone = one pool per
     side per TF". `swing.open_time` names the same candle from any window.
+
+    **Strength is deliberately not part of the identity.** A k=5 external pivot
+    is necessarily also a k=2 internal one, and the internal detector confirms
+    it three candles sooner. Keyed on strength, the early pass wrote an
+    INTERNAL pool and the pass that promoted the swing wrote a second,
+    EXTERNAL one at the same price -- measured on the VM as 5 EXTERNAL and 3
+    INTERNAL ACTIVE pools at exactly 79500 on BTCUSDT M5, and the same split
+    at 77251. The `promoted` guard in `run` only suppresses that within a
+    single pass.
+
+    One level is one pool, and the class is a property of it rather than of
+    which pool it is -- which is also what §4.4 asks for when it says
+    "classification is recomputed when the dealing range updates". `upsert`
+    already carries `liquidity_class` in its update set, so the promotion now
+    lands on the existing row instead of beside it.
     """
     raw = "|".join(
         (
             algo_version,
             symbol,
             timeframe.value,
-            swing.strength.value,
             swing.kind.value,
             swing.open_time.isoformat(),
             str(swing.price),
