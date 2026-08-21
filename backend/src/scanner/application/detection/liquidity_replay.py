@@ -6,7 +6,7 @@ import hashlib
 import json
 from bisect import bisect_left
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
 
@@ -58,7 +58,7 @@ from scanner.domain.structure import (
 )
 from scanner.shared import Timeframe
 
-LIQUIDITY_ALGO_VERSION = "s5-v6"
+LIQUIDITY_ALGO_VERSION = "s5-v7"
 
 _ATR_PERIOD = 14
 _EPSILON_ATR = Decimal("0.05")
@@ -80,6 +80,7 @@ class LiquidityReplayReport:
     sweeps: int
     broken_pools: int
     expired_pools: int
+    reclassified_pools: int
     last_processed_open_time: datetime | None
     warmup_satisfied: bool = True
     """False when SLS §1.9's closed-candle floor was not met."""
@@ -147,6 +148,7 @@ class LiquidityReplayService:
                 sweeps=0,
                 broken_pools=0,
                 expired_pools=0,
+                reclassified_pools=0,
                 last_processed_open_time=(candles[-1].open_time if candles else None),
             )
 
@@ -188,6 +190,8 @@ class LiquidityReplayService:
 
         levels = _LevelMap(await self._pools.list_active(symbol, timeframe))
 
+        extremes = _extremes_of(external_swings)
+
         internal_count = 0
         external_count = 0
         upserted = 0
@@ -204,7 +208,7 @@ class LiquidityReplayService:
                 timeframe,
                 swing,
                 candles,
-                liquidity_class=LiquidityClass.INTERNAL,
+                liquidity_class=extremes.classify(swing.price, LiquidityClass.INTERNAL),
                 levels=levels,
                 epsilon=epsilon,
             )
@@ -222,7 +226,7 @@ class LiquidityReplayService:
                 timeframe,
                 swing,
                 candles,
-                liquidity_class=LiquidityClass.EXTERNAL,
+                liquidity_class=extremes.classify(swing.price, LiquidityClass.EXTERNAL),
                 levels=levels,
                 epsilon=epsilon,
             )
@@ -239,6 +243,7 @@ class LiquidityReplayService:
                 timeframe,
                 cluster,
                 candles,
+                extremes=extremes,
                 levels=levels,
                 epsilon=epsilon,
             ):
@@ -253,6 +258,22 @@ class LiquidityReplayService:
         sweeps = 0
         broken = 0
         expired = 0
+
+        reclassified = 0
+
+        # §4.4: "classification is recomputed when the dealing range updates
+        # (a new confirmed external swing re-brackets the range)". The persist
+        # loops above only reach pools whose swing is still inside the window,
+        # so without this a pool keeps the label it was born with while the
+        # range moves out from under it.
+        for pool in lifecycle_pools:
+            current = LiquidityClass(pool.liquidity_class)
+            positional = extremes.classify(pool.price, current)
+
+            if positional is not current:
+                await self._pools.upsert(replace(pool, liquidity_class=positional.value))
+
+                reclassified += 1
 
         for pool in lifecycle_pools:
             result = await self._replay_pool_lifecycle(
@@ -292,6 +313,7 @@ class LiquidityReplayService:
             sweeps=sweeps,
             broken_pools=broken,
             expired_pools=expired,
+            reclassified_pools=reclassified,
             last_processed_open_time=candles[-1].open_time,
         )
 
@@ -398,6 +420,7 @@ class LiquidityReplayService:
         cluster: EqualLevelCluster,
         candles: Sequence[Candle],
         *,
+        extremes: _Extremes,
         levels: _LevelMap,
         epsilon: Decimal,
     ) -> bool:
@@ -424,11 +447,13 @@ class LiquidityReplayService:
         pool = pool_from_cluster(
             cluster,
             pool_id=pool_id,
-            # §4.4's positional reading is not implemented anywhere (see the
-            # static assignment on the swing path); a cluster of engineered
-            # stops is external liquidity by construction, which is the one
-            # case where the static answer is also the right one.
-            liquidity_class=LiquidityClass.EXTERNAL,
+            # §4.4 classifies by position, and it does not carve out
+            # clusters: "internal liquidity: pools ... inside the dealing
+            # range". Engineered stops inside the bracket are still internal
+            # liquidity. EXTERNAL stays the fallback for a market with no
+            # bracket yet, which is what the old static answer assumed
+            # everywhere.
+            liquidity_class=extremes.classify(cluster.extreme, LiquidityClass.EXTERNAL),
             created_at=confirmation_candle.close_time,
             touches=0,
             timeframe_rank=timeframe_rank,
@@ -1002,6 +1027,64 @@ def _build_cluster_pool_id(
     )
 
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class _Extremes:
+    """§4.4's dealing-range extremes, used to classify pools by position.
+
+    "External liquidity: pools at/beyond the current external dealing range
+    extremes (§5.7). Internal liquidity: pools ... *inside* the dealing range."
+    The class was assigned statically instead -- internal swing -> INTERNAL
+    pool, external swing -> EXTERNAL -- which answers a different question:
+    how the pivot was detected, not where the level sits.
+
+    Built from the most recent confirmed external swing on each side rather
+    than from `dealing_range_at`, which additionally requires price to be
+    bracketed by them. That condition belongs to §5.7's premium/discount
+    reading; §4.4 only needs the extremes, and on the VM four of six contexts
+    had price outside the bracket, where the stricter helper yields nothing and
+    every pool would keep its static label.
+    """
+
+    high: Decimal | None
+    low: Decimal | None
+
+    def classify(self, price: Decimal, fallback: LiquidityClass) -> LiquidityClass:
+        """The fallback stands until both extremes exist.
+
+        With one side unconfirmed there is no range to be inside of, and
+        guessing would relabel every pool on a market that has not yet shown
+        its bracket.
+        """
+        if self.high is None or self.low is None:
+            return fallback
+
+        if price >= self.high or price <= self.low:
+            return LiquidityClass.EXTERNAL
+
+        return LiquidityClass.INTERNAL
+
+
+def _extremes_of(swings: Sequence[SwingPoint]) -> _Extremes:
+    """§5.7's anchors: the *most recent* external swing on each side.
+
+    Most recent, not highest and lowest. The range "re-anchors whenever a new
+    external swing confirms", so a taller high from earlier in the window is
+    not the current bracket -- taking the extreme value would hold the range
+    open long after the market re-drew it.
+
+    Each side independently, because a new high does not invalidate the low it
+    is measured against. This mirrors `dealing_range_at`, which cannot be
+    reused here: it also demands price sit between the two.
+    """
+    highs = [s for s in swings if s.kind is SwingKind.HIGH]
+    lows = [s for s in swings if s.kind is SwingKind.LOW]
+
+    return _Extremes(
+        high=max(highs, key=lambda s: s.index).price if highs else None,
+        low=max(lows, key=lambda s: s.index).price if lows else None,
+    )
 
 
 class _LevelMap:

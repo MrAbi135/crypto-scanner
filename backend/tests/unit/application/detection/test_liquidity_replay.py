@@ -14,6 +14,8 @@ from scanner.application.detection.liquidity_replay import (
     LIQUIDITY_ALGO_VERSION,
     LiquidityReplayService,
     _build_pool_id,
+    _Extremes,
+    _extremes_of,
     _LevelMap,
 )
 from scanner.application.ports.detection import (
@@ -28,6 +30,7 @@ from scanner.domain.common import (
     CandleSource,
     wilder_atr_series,
 )
+from scanner.domain.liquidity import LiquidityClass
 from scanner.domain.structure import SwingKind, SwingPoint, SwingStrength
 from scanner.infrastructure.redis.liquidity_state import (
     RestingLiquiditySnapshot,
@@ -639,3 +642,65 @@ def test_a_pool_does_not_absorb_itself_on_the_next_pass() -> None:
     levels = _LevelMap([_record_at("100.00", pool_id="a")])
 
     assert not levels.absorbs("BSL", Decimal("100.00"), "a", Decimal("0.05"))
+
+
+def _swing(index: int, price: str, kind: SwingKind) -> SwingPoint:
+    return SwingPoint(
+        index=index,
+        open_time=datetime(2026, 8, 15, 12, 0, tzinfo=UTC) + timedelta(minutes=5 * index),
+        price=Decimal(price),
+        kind=kind,
+        strength=SwingStrength.EXTERNAL,
+    )
+
+
+def test_a_pool_inside_the_range_is_internal_however_its_swing_was_detected() -> None:
+    """§4.4 classifies by position: "internal liquidity: pools ... inside the
+    dealing range". The static rule answered a different question -- how the
+    pivot was found, not where the level sits."""
+    extremes = _Extremes(high=Decimal("110"), low=Decimal("90"))
+
+    assert extremes.classify(Decimal("100"), LiquidityClass.EXTERNAL) is LiquidityClass.INTERNAL
+
+
+def test_a_pool_beyond_an_extreme_is_external() -> None:
+    extremes = _Extremes(high=Decimal("110"), low=Decimal("90"))
+
+    assert extremes.classify(Decimal("120"), LiquidityClass.INTERNAL) is LiquidityClass.EXTERNAL
+    assert extremes.classify(Decimal("80"), LiquidityClass.INTERNAL) is LiquidityClass.EXTERNAL
+
+
+def test_a_pool_sitting_on_an_extreme_is_external() -> None:
+    """§4.4 says "at/beyond", so the boundary belongs to the outside."""
+    extremes = _Extremes(high=Decimal("110"), low=Decimal("90"))
+
+    assert extremes.classify(Decimal("110"), LiquidityClass.INTERNAL) is LiquidityClass.EXTERNAL
+    assert extremes.classify(Decimal("90"), LiquidityClass.INTERNAL) is LiquidityClass.EXTERNAL
+
+
+def test_an_unbracketed_market_keeps_the_static_label() -> None:
+    """With one side unconfirmed there is nothing to be inside of."""
+    assert (
+        _Extremes(high=Decimal("110"), low=None).classify(Decimal("100"), LiquidityClass.EXTERNAL)
+        is LiquidityClass.EXTERNAL
+    )
+
+
+def test_the_range_anchors_on_the_most_recent_swing_not_the_tallest() -> None:
+    """§5.7: the range "re-anchors whenever a new external swing confirms".
+
+    Taking max(price) instead of the latest swing holds a range open long
+    after the market re-drew it, and every pool between the two highs would
+    keep reading as internal.
+    """
+    extremes = _extremes_of(
+        [
+            _swing(0, "200", SwingKind.HIGH),
+            _swing(10, "120", SwingKind.HIGH),
+            _swing(5, "50", SwingKind.LOW),
+            _swing(12, "80", SwingKind.LOW),
+        ]
+    )
+
+    assert extremes.high == Decimal("120")
+    assert extremes.low == Decimal("80")
