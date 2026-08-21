@@ -69,6 +69,10 @@ def build_detection_pipeline(
     zone_interactions = PgIctZoneInteractionRepository(sessions)
 
     zones = PgIctZoneRepository(sessions)
+
+    # Shared: the liquidity engine writes the pool map, confluence reads
+    # it back for 4.5 target selection.
+    pools = PgLiquidityPoolRepository(sessions)
     zone_transitions = PgIctZoneTransitionRepository(sessions)
     zone_state = RedisIctZoneStateStore(redis_client)
 
@@ -81,7 +85,7 @@ def build_detection_pipeline(
         ),
         liquidity=LiquidityReplayService(
             candles,
-            PgLiquidityPoolRepository(sessions),
+            pools,
             PgLiquidityTransitionRepository(sessions),
             events,
             RedisLiquidityStateStore(redis_client),
@@ -134,6 +138,7 @@ def build_detection_pipeline(
             zones,
             evidence,
             zone_interactions,
+            pools,
             clock,
             EngineStateManager(
                 RedisEngineStateStore(redis_client),
