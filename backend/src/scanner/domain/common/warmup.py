@@ -32,12 +32,47 @@ from __future__ import annotations
 
 from enum import Enum
 
+from scanner.domain.common.rvol import BASELINE_DAYS, uses_seasonal_baseline
+from scanner.shared import Timeframe
+
+_MINUTES_PER_DAY = 24 * 60
+
 # SLS §1.9, per timeframe.
 DETECTION_MIN_CANDLES = 300
 VOLUME_MOMENTUM_MIN_CANDLES = 100
 
 # SLS §1.9, not enforced — see the module docstring.
 LISTING_MIN_DAYS = 14
+
+
+def required_warmup_candles(timeframe: Timeframe) -> int:
+    """How much history a timeframe needs before it can score, in candles.
+
+    §1.9's 300-candle floor is not the whole requirement, and treating it as
+    one leaves the fastest timeframes silently unable to produce a candidate.
+    §2.11 makes the RVOL baseline **time-of-day aware** on M5, M15 and H1: it
+    compares a candle against the same slot on each of the previous
+    `BASELINE_DAYS` days, so it needs twenty *days*, not twenty candles.
+
+    Measured on a real backfill of 600 candles per rung:
+
+        M5    600 candles =  2 days   -> RVOL undefined, G1 blocks every
+        M15   600 candles =  6 days   -> candidate for about three weeks
+        H1    600 candles = 25 days   -> fine
+        H4    not seasonal            -> fine
+
+    Nothing looks broken while that is true. Detection keeps producing swings,
+    pools and zones; only §8 is gated, so the scanner simply returns no
+    candidates on its two fastest timeframes and says nothing about why.
+    """
+    floor = DETECTION_MIN_CANDLES
+
+    if not uses_seasonal_baseline(timeframe):
+        return floor
+
+    per_day = _MINUTES_PER_DAY // timeframe.minutes
+
+    return max(floor, BASELINE_DAYS * per_day)
 
 
 class WarmupCapability(str, Enum):

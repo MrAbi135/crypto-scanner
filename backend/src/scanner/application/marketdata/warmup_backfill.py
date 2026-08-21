@@ -19,6 +19,7 @@ import structlog
 from scanner.application.marketdata.backfill import BackfillService
 from scanner.application.marketdata.warmth import assess_context
 from scanner.application.ports import CandleRepository, Clock
+from scanner.domain.common.warmup import required_warmup_candles
 from scanner.shared import Timeframe
 
 log = structlog.get_logger(__name__)
@@ -47,7 +48,7 @@ class WarmupBackfillService:
         self._candles = candles
         self._backfill = backfill
         self._clock = clock
-        self._target = target_candles
+        self._floor = target_candles
 
     async def warm(
         self,
@@ -56,9 +57,15 @@ class WarmupBackfillService:
     ) -> WarmupResult:
         now = self._clock.now()
 
+        # The configured number is a floor, not the answer. §2.11's RVOL
+        # baseline is time-of-day aware on the fast timeframes and needs twenty
+        # *days*, so one flat count across the ladder leaves M5 and M15 unable
+        # to score for weeks while looking perfectly warm.
+        target = max(self._floor, required_warmup_candles(timeframe))
+
         before = await assess_context(self._candles, symbol, timeframe, now=now)
 
-        if before.closed_candles >= self._target:
+        if before.closed_candles >= target:
             return WarmupResult(
                 symbol=symbol,
                 timeframe=timeframe,
@@ -71,7 +78,7 @@ class WarmupBackfillService:
         # existing rows may be an old island with a hole in front of them, and
         # ON CONFLICT DO NOTHING makes re-fetching what we already hold cheap
         # and harmless. Asking only for the difference would leave the hole.
-        start = now - timeframe.duration * self._target
+        start = now - timeframe.duration * target
 
         await self._backfill.backfill(symbol, timeframe, start, now)
 
