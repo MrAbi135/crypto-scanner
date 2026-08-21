@@ -26,6 +26,19 @@ _IFVG_TERMINAL = {
     IfvgState.EXPIRED,
 }
 
+# The three sets above as stored strings, for readers that hold a state column
+# rather than a typed machine. §5 calls terminal states permanent -- "no
+# resurrection" -- so a zone in one of these can never interact again.
+#
+# Kept here rather than restated at each call site: the interaction replay used
+# to carry its own copy of the same five strings, and a sixth terminal state
+# added to a machine would have reached one of them and not the other.
+TERMINAL_ZONE_STATES: frozenset[str] = (
+    frozenset(state.value for state in _ZONE_TERMINAL)
+    | frozenset(state.value for state in _FVG_TERMINAL)
+    | frozenset(state.value for state in _IFVG_TERMINAL)
+)
+
 
 @dataclass(slots=True)
 class ZoneStateMachine:

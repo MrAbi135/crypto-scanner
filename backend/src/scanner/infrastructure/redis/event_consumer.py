@@ -7,6 +7,7 @@ from typing import Any
 
 import redis.asyncio as aioredis
 from redis.exceptions import ResponseError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from scanner.application.ports.event_consumer import StreamEntry
 
@@ -49,13 +50,24 @@ class RedisEventStreamConsumer:
         count: int,
         block_ms: int,
     ) -> Sequence[StreamEntry]:
-        response = await self._client.xreadgroup(
-            group,
-            consumer,
-            {stream: ">"},
-            count=count,
-            block=block_ms,
-        )
+        try:
+            response = await self._client.xreadgroup(
+                group,
+                consumer,
+                {stream: ">"},
+                count=count,
+                block=block_ms,
+            )
+        except RedisTimeoutError:
+            # An idle wait, not a failure. redis-py raises rather than
+            # returning empty when BLOCK elapses with nothing to hand over,
+            # and that is the normal state of this stream between candle
+            # closes -- most of every five minutes.
+            #
+            # Left to propagate it killed the engine's consumer task within
+            # five seconds of the engine catching up, which is why a container
+            # that was running and healthy consumed nothing.
+            return ()
 
         return _flatten(response)
 

@@ -8,7 +8,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 import httpx
-import redis.asyncio as aioredis
 import structlog
 from starlette.applications import Starlette
 
@@ -39,6 +38,7 @@ from scanner.infrastructure.persistence.repositories import (
     PgCandleRepository,
     PgIncidentRepository,
 )
+from scanner.infrastructure.redis.client import build_redis
 from scanner.infrastructure.redis.event_stream import RedisEventStreamPublisher
 from scanner.runtime.wiring.bootstrap import bootstrap
 from scanner.runtime.wiring.health import build_health_app, run_asgi
@@ -208,7 +208,7 @@ def main() -> None:
             app.state.readiness_probe = readiness_probe
             app.state.live_ingest = live_ingest
 
-            redis_client = aioredis.from_url(settings.redis_url)
+            redis_client = build_redis(settings.redis_url)
 
             relay = OutboxRelayService(
                 PgOutboxRepository(sessions),

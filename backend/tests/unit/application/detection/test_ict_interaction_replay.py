@@ -86,6 +86,12 @@ class FakeContextRepository:
     ]:
         return tuple(transition for transition in self.transitions if transition.zone_id == zone_id)
 
+    async def list_transitions_for(
+        self,
+        zone_ids,
+    ) -> dict[str, tuple[IctZoneTransitionRecord, ...]]:
+        return {zone_id: await self.list_transitions(zone_id) for zone_id in zone_ids}
+
 
 class FakeInteractionRepository:
     def __init__(self) -> None:

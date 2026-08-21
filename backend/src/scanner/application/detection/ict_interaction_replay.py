@@ -21,6 +21,7 @@ from scanner.application.ports.ict_zones import (
 )
 from scanner.domain.common import Candle, wilder_atr_series
 from scanner.domain.ict import (
+    TERMINAL_ZONE_STATES,
     InteractionKind,
     ZoneBand,
     ZonePolarity,
@@ -43,13 +44,8 @@ _ATR_PERIOD = 14
 _CONFIRMATION_MAX_LTF_CANDLES = 5
 _ZERO = Decimal("0")
 
-_TERMINAL_STATES = {
-    "INVALIDATED",
-    "EXPIRED",
-    "FILLED",
-    "INVERTED",
-    "DEAD",
-}
+# One definition, in the domain beside the state machines that produce them.
+_TERMINAL_STATES = TERMINAL_ZONE_STATES
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,10 +141,16 @@ class IctZoneInteractionReplayService:
         inserted_total = 0
         zones_evaluated = 0
 
+        # One query for every zone's transitions rather than one per zone: the
+        # loop below ran 630 round trips before evaluating a single candle.
+        transitions_by_zone = await self._context.list_transitions_for(
+            [record.zone_id for record in zones]
+        )
+
         for record in zones:
             zones_evaluated += 1
 
-            transitions = await self._context.list_transitions(record.zone_id)
+            transitions = transitions_by_zone.get(record.zone_id, ())
 
             terminal_index = _terminal_index(transitions)
 
