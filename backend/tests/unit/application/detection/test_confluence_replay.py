@@ -25,6 +25,7 @@ from scanner.application.ports.detection import EngineEventRecord
 from scanner.application.ports.ict_evidence import LiquidityEvidenceRecord
 from scanner.application.ports.ict_zone_interactions import IctZoneInteractionRecord
 from scanner.application.ports.ict_zones import IctZoneRecord
+from scanner.application.ports.liquidity_detection import LiquidityPoolRecord
 from scanner.shared import Timeframe
 
 BASE = datetime(2026, 1, 1, tzinfo=UTC)
@@ -109,6 +110,16 @@ class FakeZoneRepository:
 
     async def list_live(self, symbol, timeframe):
         return tuple(self.zones)
+
+
+class FakePools:
+    """§4.5's ACTIVE pool map, which §8.3.1 reads the target term from."""
+
+    def __init__(self, items: list | None = None) -> None:
+        self.items = items or []
+
+    async def list_active(self, symbol: str, timeframe) -> tuple:
+        return tuple(self.items)
 
 
 class FakeInteractions:
@@ -224,6 +235,7 @@ def sweep(
     confirmed_index: int = RECENT_SWEEP,
     expiry_index: int | None = None,
     reclaimed: bool = False,
+    depth_atr: str = "0.9",
 ) -> LiquidityEvidenceRecord:
     return LiquidityEvidenceRecord(
         pool_id="p1",
@@ -236,7 +248,7 @@ def sweep(
             {
                 "side": side,
                 "liquidity_class": liquidity_class,
-                "sweep_depth_atr": "0.9",
+                "sweep_depth_atr": depth_atr,
                 "reclaimed": reclaimed,
                 "setup_expiry_index": (
                     confirmed_index + 15 if expiry_index is None else expiry_index
@@ -261,6 +273,7 @@ def service(
     candles: list | None = None,
     htf_trend: str | None = None,
     interactions: dict[str, list] | None = None,
+    pools: list | None = None,
 ):
     repo = FakeEventRepository(events)
 
@@ -288,6 +301,7 @@ def service(
         FakeZoneRepository(zones or []),
         FakeEvidenceRepository(liquidity),
         FakeInteractions(interactions),
+        FakePools(pools),
         FakeClock(),
         shift_state,
         shift_algo_version=SHIFT_ALGO,
@@ -298,6 +312,33 @@ def service(
 
 async def run(svc, trend_state: str = "RANGING"):
     return await svc.run("BTCUSDT", TF, BASE, END, trend_state=trend_state)
+
+
+def pool(
+    *,
+    price: Decimal,
+    side: str = "BSL",
+    liquidity_class: str = "EXTERNAL",
+    strength: Decimal = Decimal(80),
+) -> LiquidityPoolRecord:
+    return LiquidityPoolRecord(
+        pool_id=f"p-{side}-{price}",
+        symbol="BTCUSDT",
+        timeframe=TF,
+        side=side,
+        liquidity_class=liquidity_class,
+        source="SWING",
+        price=price,
+        band_low=price,
+        band_high=price,
+        strength=strength,
+        state="ACTIVE",
+        member_count=1,
+        created_index=0,
+        created_at=BASE,
+        updated_at=BASE,
+        evidence="{}",
+    )
 
 
 def bullish_setup() -> dict:
@@ -609,7 +650,10 @@ async def test_unreachable_inputs_are_named_in_the_stored_record() -> None:
     payload = json.loads(next(iter(repo.appended.values())).payload)
 
     assert "wash_risk" in payload["unreachable_inputs"]
-    assert "target_pool_strength" in payload["unreachable_inputs"]
+
+    # §4.5 selects the target pool now, so naming it here would understate a
+    # score that did read it.
+    assert "target_pool_strength" not in payload["unreachable_inputs"]
 
     # Nothing wrote a state for the timeframe above, so F6 was defaulted --
     # and the record says which of its inputs was read and which was not.
@@ -617,26 +661,123 @@ async def test_unreachable_inputs_are_named_in_the_stored_record() -> None:
 
 
 @pytest.mark.asyncio
-async def test_unread_target_pool_terms_do_not_pay_points() -> None:
-    """F2's unclaimed/fresh terms describe a pool nothing selects yet.
+async def test_a_live_unreclaimed_sweep_is_paid_as_unclaimed_and_fresh() -> None:
+    """§8.3.1's "+6 unclaimed" and "+6 fresh" grade the sweep, not a pool.
 
-    Defaulting them True would hand every candidate points for evidence no one
-    fetched, and the score would read as earned.
+    They were passed False on the reading that they described the target pool,
+    which cost every swept setup 12 points the evidence already supported.
     """
     setup = bullish_setup()
 
     with_sweep, _ = service(**setup)
     without, _ = service(**{**setup, "liquidity": []})
 
-    # Both graded under a BULLISH state, so the comparison isolates F2 rather
-    # than turning into "one of them failed G2".
     a = next(c for c in (await run(with_sweep, "BULLISH")).candidates if c.direction == "UP")
     b = next(c for c in (await run(without, "BULLISH")).candidates if c.direction == "UP")
 
-    # The sweep itself pays; the unread target-pool terms do not, so the score
-    # lands short of the F2 ceiling rather than at it.
-    assert a.factors["F2"] > b.factors["F2"]
-    assert a.factors["F2"] < Decimal(100)
+    assert b.factors["F2"] == Decimal(0)
+
+    # Every term §8.3.1 lists for a sweep, spelled out so re-hardcoding either
+    # of the last two shows up here as 46.8 rather than as a passing test:
+    # 20 confirmed + 16 external + 12 x 0.9 depth + 6 unclaimed + 6 fresh.
+    assert a.factors["F2"] == Decimal("58.8")
+
+
+@pytest.mark.asyncio
+async def test_sweep_quality_grades_one_sweep_not_the_best_half_of_several() -> None:
+    """§8.3.1 reads as a single sweep's quality.
+
+    Taking `any(external)` and `max(depth)` across the set paid 60 -- the F2
+    sweep ceiling -- to a pair where the external sweep was shallow and the
+    deep one was internal. No sweep there was both.
+    """
+    setup = bullish_setup()
+
+    svc, _ = service(
+        **{
+            **setup,
+            "liquidity": [
+                sweep(liquidity_class="EXTERNAL", depth_atr="0.1"),
+                sweep(liquidity_class="INTERNAL", depth_atr="1.0"),
+            ],
+        }
+    )
+
+    a = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
+
+    # The external one, which is what §8.3.1 pays most for:
+    # 20 + 16 external + 12 x 0.1 depth + 6 + 6. Mixing the two gave 60.
+    assert a.factors["F2"] == Decimal("49.2")
+
+
+@pytest.mark.asyncio
+async def test_an_expired_sweep_pays_nothing_at_all() -> None:
+    """`supporting` drops it before scoring, so no term survives it."""
+    setup = bullish_setup()
+
+    expired, _ = service(**{**setup, "liquidity": [sweep(expiry_index=0)]})
+    without, _ = service(**{**setup, "liquidity": []})
+
+    a = next(c for c in (await run(expired, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(without, "BULLISH")).candidates if c.direction == "UP")
+
+    assert a.factors["F2"] == b.factors["F2"]
+
+
+@pytest.mark.asyncio
+async def test_the_nearest_external_pool_ahead_of_price_pays_the_target_term() -> None:
+    """§4.5: "nearest opposing external pool = default target zone"."""
+    setup = bullish_setup()
+
+    with_pool, _ = service(**setup, pools=[pool(price=LAST_CLOSE + 10)])
+    without, _ = service(**setup)
+
+    a = next(c for c in (await run(with_pool, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(without, "BULLISH")).candidates if c.direction == "UP")
+
+    # 80 / 100 x 25.
+    assert a.factors["F2"] - b.factors["F2"] == Decimal(20)
+
+
+@pytest.mark.asyncio
+async def test_a_pool_price_has_already_passed_is_not_a_target() -> None:
+    """§4.2: "BSL pools only relevant while price is below them".
+
+    Side alone would count a pool the move has left behind, and on real
+    BTCUSDT H1 most BSL pools are behind price rather than ahead of it.
+    """
+    setup = bullish_setup()
+
+    behind, _ = service(**setup, pools=[pool(price=LAST_CLOSE - 10)])
+    without, _ = service(**setup)
+
+    a = next(c for c in (await run(behind, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(without, "BULLISH")).candidates if c.direction == "UP")
+
+    assert a.factors["F2"] == b.factors["F2"]
+
+
+@pytest.mark.asyncio
+async def test_an_internal_pool_is_not_the_target_and_nearest_wins() -> None:
+    """§4.4 reserves internal liquidity for entry refinement, and of the
+    external ones §4.5 takes the nearest -- not the strongest anywhere above."""
+    setup = bullish_setup()
+
+    svc, _ = service(
+        **setup,
+        pools=[
+            pool(price=LAST_CLOSE + 2, liquidity_class="INTERNAL", strength=Decimal(100)),
+            pool(price=LAST_CLOSE + 5, strength=Decimal(40)),
+            pool(price=LAST_CLOSE + 50, strength=Decimal(100)),
+        ],
+    )
+    without, _ = service(**setup)
+
+    a = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(without, "BULLISH")).candidates if c.direction == "UP")
+
+    # The nearest external pool is the 40-strength one: 40 / 100 x 25 = 10.
+    assert a.factors["F2"] - b.factors["F2"] == Decimal(10)
 
 
 @pytest.mark.asyncio

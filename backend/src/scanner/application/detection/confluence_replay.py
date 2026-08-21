@@ -43,6 +43,10 @@ from scanner.application.ports.ict_zone_interactions import (
     IctZoneInteractionRepository,
 )
 from scanner.application.ports.ict_zones import IctZoneRecord, IctZoneRepository
+from scanner.application.ports.liquidity_detection import (
+    LiquidityPoolRecord,
+    LiquidityPoolRepository,
+)
 from scanner.domain.common import Candle, wilder_atr, wilder_atr_series
 from scanner.domain.common.rvol import relative_volume
 from scanner.domain.confluence import (
@@ -84,7 +88,7 @@ from scanner.domain.momentum import (
 from scanner.domain.structure import SwingPoint, TrendState, detect_external_swings
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v8"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v9"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -101,11 +105,6 @@ G4_ADJACENCY_ATR = Decimal("0.5")
 # silently defaulted -- see the module docstring.
 UNREACHABLE_INPUTS: tuple[str, ...] = (
     "wash_risk",  # §6.6 needs aggTrade aggregates (roadmap S2 T4, never built)
-    # §4.2's strength model exists, but nothing selects which pool a setup is
-    # *targeting*, so the three F2 terms that describe that pool are all unread.
-    "target_pool_strength",
-    "target_pool_unclaimed",
-    "target_pool_fresh",
 )
 
 # Not in the constant above, because unlike those it is only *sometimes*
@@ -205,6 +204,7 @@ class ConfluenceReplayService:
         zones: IctZoneRepository,
         evidence: IctEvidenceRepository,
         interactions: IctZoneInteractionRepository,
+        pools: LiquidityPoolRepository,
         clock: Clock,
         shift_state: EngineStateManager,
         *,
@@ -216,6 +216,7 @@ class ConfluenceReplayService:
         self._zones = zones
         self._evidence = evidence
         self._interactions = interactions
+        self._pools = pools
         self._clock = clock
         self._shift_state = shift_state
         self._shift_algo_version = shift_algo_version
@@ -249,6 +250,11 @@ class ConfluenceReplayService:
         liquidity = await self._evidence.list_liquidity(symbol, timeframe, start, end)
         live_zones = await self._zones.list_live(symbol, timeframe)
 
+        # SLS 4.5 defines resting liquidity as the ACTIVE pool map, and
+        # names target selection as one of its consumers. Read once per
+        # pass; _target_pool picks the side each direction trades toward.
+        resting = await self._pools.list_active(symbol, timeframe)
+
         event_types = {record.event_type for record in events}
 
         reading = _read_participation(series)
@@ -276,6 +282,7 @@ class ConfluenceReplayService:
                 trend_state=trend_state,
                 event_types=event_types,
                 liquidity=liquidity,
+                resting=resting,
                 live_zones=live_zones,
                 reading=reading,
                 htf=htf,
@@ -315,6 +322,7 @@ class ConfluenceReplayService:
         trend_state: str,
         event_types: set[str],
         liquidity: tuple[LiquidityEvidenceRecord, ...],
+        resting: tuple[LiquidityPoolRecord, ...],
         live_zones: tuple[IctZoneRecord, ...],
         reading: _Reading,
         htf: str | None,
@@ -347,6 +355,21 @@ class ConfluenceReplayService:
         live_sweeps = [s for s in sweeps if s.live(last_index)]
 
         supporting = [s for s in live_sweeps if s.supports(direction) and not s.reclaimed]
+
+        # 8.3.1 reads as one sweep's quality: "20 for a confirmed sweep
+        # + 16 external + 12 depth + 6 unclaimed + 6 fresh". Taking
+        # `any(external)` and `max(depth)` across the set awarded 28 to a
+        # pair where one sweep was external and shallow and the other
+        # internal and deep -- 28 points no single sweep had earned.
+        # Ordered by what the section pays for: external (16) outranks
+        # depth (12), and recency breaks ties, as it does for the zone.
+        best_sweep = max(
+            supporting,
+            key=lambda s: (s.external, s.depth_atr, s.confirmed_index),
+            default=None,
+        )
+
+        target_pool = _target_pool(resting, direction, price)
 
         # §8.2 G5 asks for "no unexpired opposing sweep-reclaim (§4.6)" -- a
         # reclaimed sweep, not merely a sweep in the other direction. An SSL
@@ -446,15 +469,22 @@ class ConfluenceReplayService:
             ).score,
             Factor.LIQUIDITY: liquidity_factor(
                 LiquidityEvidence(
-                    sweep_confirmed=bool(supporting),
-                    external=any(s.external for s in supporting),
-                    depth_atr=max((s.depth_atr for s in supporting), default=Decimal(0)),
-                    # Not defaulted True: an unread term must not pay points.
-                    # Both describe the target pool, which nothing selects yet.
-                    unclaimed=False,
-                    fresh=False,
+                    sweep_confirmed=best_sweep is not None,
+                    external=best_sweep is not None and best_sweep.external,
+                    depth_atr=best_sweep.depth_atr if best_sweep else Decimal(0),
+                    # 8.3.1's "+6 unclaimed" and "+6 fresh (inside the 4.6
+                    # expiry)" grade the sweep, not the pool it ran into. Both
+                    # were passed False on the reading that they described a
+                    # target pool nothing selected, which cost every swept
+                    # setup 12 points that the evidence three lines above had
+                    # already established. Asked of `best_sweep` rather than
+                    # hardcoded True: `supporting` filters on both today, so
+                    # the answer is known, but a filter that stops doing so
+                    # must stop paying for it.
+                    unclaimed=not best_sweep.reclaimed if best_sweep else False,
+                    fresh=best_sweep.live(last_index) if best_sweep else False,
                     stop_hunt="LIQUIDITY_STOP_HUNT" in event_types,
-                    target_pool_strength=Decimal(0),
+                    target_pool_strength=(target_pool.strength if target_pool else Decimal(0)),
                 )
             ).score,
             Factor.ZONE: _zone_score(
@@ -672,6 +702,46 @@ class _Sweep:
         side = self._e.get("side")
 
         return bool(side == "SSL") if direction == "UP" else bool(side == "BSL")
+
+
+def _target_pool(
+    resting: tuple[LiquidityPoolRecord, ...],
+    direction: str,
+    price: Decimal,
+) -> LiquidityPoolRecord | None:
+    """SLS 4.5: "nearest opposing external pool = default target zone".
+
+    Opposing means the side the move runs toward -- an UP setup targets the
+    buy-side liquidity resting above it -- and 4.2's validation rule says the
+    same thing from the other end: "BSL pools only relevant while price is
+    below them". A pool already behind price is not a target, so the side test
+    alone is not enough and the position test is not redundant with it.
+
+    Nearest, not strongest. A 100-strength pool eight ranges away would pay the
+    full 25 points to a setup that will reach the weak one first and stop
+    there; 4.5 ranks the map by "strength x proximity", and of the two only
+    proximity decides which pool is the target.
+    """
+
+    up = direction == "UP"
+    side = "BSL" if up else "SSL"
+
+    candidates = [
+        pool
+        for pool in resting
+        # 4.4: external liquidity sits at or beyond the dealing-range
+        # extremes. Internal pools are explicitly "used for target-setting
+        # (15) and entry refinement -- never as reversal evidence"; 4.5 asks
+        # this term for the external one.
+        if pool.side == side
+        and pool.liquidity_class == "EXTERNAL"
+        and (pool.price > price if up else pool.price < price)
+    ]
+
+    if not candidates:
+        return None
+
+    return min(candidates, key=lambda pool: (abs(pool.price - price), -pool.strength))
 
 
 class _History:
