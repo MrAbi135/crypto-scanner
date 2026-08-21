@@ -12,6 +12,7 @@ import redis.asyncio as aioredis
 from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRecord,
 )
+from scanner.domain.liquidity import MAX_POOLS
 from scanner.shared import Timeframe
 
 _PREFIX = "scanner:liquidity-state:"
@@ -47,6 +48,11 @@ class RedisLiquidityStateStore:
         timeframe: Timeframe,
         pools: tuple[LiquidityPoolRecord, ...],
     ) -> None:
+        # §4.2 Performance bounds the published map at `MAX_POOLS`, and the
+        # sort above is the eviction order it asks for -- "evict lowest-
+        # strength ... first". Ranking without truncating was the whole rule
+        # minus the part that costs anything: on the VM this key held 759
+        # pools for one symbol-TF, and §4.5 re-reads the map on every close.
         ranked = sorted(
             pools,
             key=lambda pool: (
@@ -54,7 +60,7 @@ class RedisLiquidityStateStore:
                 pool.price,
                 pool.pool_id,
             ),
-        )
+        )[:MAX_POOLS]
 
         payload = {
             "symbol": symbol,

@@ -6,6 +6,12 @@ from dataclasses import dataclass
 
 from scanner.domain.liquidity.model import PoolState
 
+# §4.2 Performance: "pool set per symbol-TF bounded (P.liquidity.max_pools =
+# 40, evict lowest-strength expired first)". The bound is on the resting map
+# §4.5 exposes, not on the rows: a pool outside the top 40 is still ACTIVE and
+# still transitions, it is simply not part of the map that gets published.
+MAX_POOLS = 40
+
 _TERMINAL_STATES = {
     PoolState.SWEPT,
     PoolState.BROKEN,

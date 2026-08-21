@@ -14,6 +14,7 @@ from scanner.application.detection.liquidity_replay import (
     LIQUIDITY_ALGO_VERSION,
     LiquidityReplayService,
     _build_pool_id,
+    _LevelMap,
 )
 from scanner.application.ports.detection import (
     EngineEventRecord,
@@ -598,3 +599,43 @@ def test_one_level_is_one_pool_however_the_swing_is_classified() -> None:
     }
 
     assert len(ids) == 1
+
+
+def _record_at(price: str, *, pool_id: str, side: str = "BSL") -> LiquidityPoolRecord:
+    return replace(make_pool(), pool_id=pool_id, side=side, price=Decimal(price))
+
+
+def test_a_second_level_inside_epsilon_is_absorbed() -> None:
+    """§4.2: "one price zone = one pool per side per TF".
+
+    §4.3's clustering only groups the swings handed to one pass, so two swings
+    that are not the same swing can still be the same zone.
+    """
+    levels = _LevelMap([_record_at("100.00", pool_id="a")])
+
+    assert levels.absorbs("BSL", Decimal("100.04"), "b", Decimal("0.05"))
+
+
+def test_a_level_outside_epsilon_is_its_own_pool() -> None:
+    levels = _LevelMap([_record_at("100.00", pool_id="a")])
+
+    assert not levels.absorbs("BSL", Decimal("100.06"), "b", Decimal("0.05"))
+
+
+def test_the_other_side_of_the_book_is_never_absorbed() -> None:
+    """BSL and SSL at one price are two pools: §4.2 bounds it "per side"."""
+    levels = _LevelMap([_record_at("100.00", pool_id="a", side="BSL")])
+
+    assert not levels.absorbs("SSL", Decimal("100.00"), "b", Decimal("0.05"))
+
+
+def test_a_pool_does_not_absorb_itself_on_the_next_pass() -> None:
+    """The same pool is re-detected every pass and must keep upserting.
+
+    Comparing price alone, a pool would collide with its own claimed level and
+    stop being rewritten -- and its strength and age would stop maturing,
+    which is a subtler failure than the duplication this rule exists to stop.
+    """
+    levels = _LevelMap([_record_at("100.00", pool_id="a")])
+
+    assert not levels.absorbs("BSL", Decimal("100.00"), "a", Decimal("0.05"))

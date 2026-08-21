@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from bisect import bisect_left
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -180,6 +180,14 @@ class LiquidityReplayService:
         # "(lower weight)". A swing that is external is external.
         promoted = {(swing.index, swing.kind) for swing in external_swings}
 
+        # §4.2's dedup tolerance, at the scale of the market now rather than
+        # at each pool's confirmation: the question the rule asks is whether
+        # two levels are one price zone *in the current map*.
+        newest_atr = atrs[-1] if atrs else None
+        epsilon = _EPSILON_ATR * (newest_atr or Decimal(0))
+
+        levels = _LevelMap(await self._pools.list_active(symbol, timeframe))
+
         internal_count = 0
         external_count = 0
         upserted = 0
@@ -197,6 +205,8 @@ class LiquidityReplayService:
                 swing,
                 candles,
                 liquidity_class=LiquidityClass.INTERNAL,
+                levels=levels,
+                epsilon=epsilon,
             )
 
             if persisted:
@@ -213,6 +223,8 @@ class LiquidityReplayService:
                 swing,
                 candles,
                 liquidity_class=LiquidityClass.EXTERNAL,
+                levels=levels,
+                epsilon=epsilon,
             )
 
             if persisted:
@@ -222,7 +234,14 @@ class LiquidityReplayService:
         cluster_count = 0
 
         for cluster in clusters:
-            if await self._persist_cluster_pool(symbol, timeframe, cluster, candles):
+            if await self._persist_cluster_pool(
+                symbol,
+                timeframe,
+                cluster,
+                candles,
+                levels=levels,
+                epsilon=epsilon,
+            ):
                 cluster_count += 1
                 upserted += 1
 
@@ -284,6 +303,8 @@ class LiquidityReplayService:
         candles: Sequence[Candle],
         *,
         liquidity_class: LiquidityClass,
+        levels: _LevelMap,
+        epsilon: Decimal,
     ) -> bool:
         confirmation_index = swing.index + swing_window(swing.strength)
 
@@ -305,6 +326,11 @@ class LiquidityReplayService:
             swing=swing,
             algo_version=self._algo_version,
         )
+
+        side = _side_of(swing)
+
+        if levels.absorbs(side.value, swing.price, pool_id, epsilon):
+            return False
 
         pool = pool_from_swing(
             swing,
@@ -361,6 +387,8 @@ class LiquidityReplayService:
 
         await self._pools.upsert(record)
 
+        levels.claim(side.value, swing.price, pool_id)
+
         return True
 
     async def _persist_cluster_pool(
@@ -369,6 +397,9 @@ class LiquidityReplayService:
         timeframe: Timeframe,
         cluster: EqualLevelCluster,
         candles: Sequence[Candle],
+        *,
+        levels: _LevelMap,
+        epsilon: Decimal,
     ) -> bool:
         if cluster.confirmed_index >= len(candles):
             return False
@@ -386,6 +417,9 @@ class LiquidityReplayService:
             candles=candles,
             algo_version=self._algo_version,
         )
+
+        if levels.absorbs(cluster.side.value, cluster.extreme, pool_id, epsilon):
+            return False
 
         pool = pool_from_cluster(
             cluster,
@@ -447,6 +481,8 @@ class LiquidityReplayService:
                 evidence=evidence,
             )
         )
+
+        levels.claim(cluster.side.value, cluster.extreme, pool_id)
 
         return True
 
@@ -966,6 +1002,35 @@ def _build_cluster_pool_id(
     )
 
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+class _LevelMap:
+    """The price zones already claimed on this symbol-TF.
+
+    §4.2's Edge Case is a rule about the map, not about one pool: "overlapping
+    pools within epsilon merge into one pool with combined evidence (dedup
+    rule: one price zone = one pool per side per TF)". Two swings that are not
+    the same swing can still be the same zone, and §4.3's clustering only
+    groups the ones it was given in the same pass.
+
+    A level claimed by the pool being rewritten is not a collision: the same
+    pool re-detected on a later pass must still upsert, or its strength and
+    age stop maturing. So the pool_id is compared, not just the price.
+    """
+
+    __slots__ = ("_claimed",)
+
+    def __init__(self, pools: Iterable[LiquidityPoolRecord]) -> None:
+        self._claimed = [(pool.side, pool.price, pool.pool_id) for pool in pools]
+
+    def absorbs(self, side: str, price: Decimal, pool_id: str, epsilon: Decimal) -> bool:
+        return any(
+            claimed_side == side and claimed_id != pool_id and abs(claimed_price - price) <= epsilon
+            for claimed_side, claimed_price, claimed_id in self._claimed
+        )
+
+    def claim(self, side: str, price: Decimal, pool_id: str) -> None:
+        self._claimed.append((side, price, pool_id))
 
 
 def _creation_position(
