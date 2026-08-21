@@ -18,6 +18,7 @@ from scanner.domain.liquidity.pools import (
     score_pool_strength,
 )
 from scanner.domain.liquidity.state import (
+    MAX_POOLS,
     PoolStateMachine,
     should_expire_pool,
 )
@@ -33,6 +34,7 @@ from scanner.domain.liquidity.sweeps import (
 )
 
 __all__ = [
+    "MAX_POOLS",
     "EqualLevelCluster",
     "LiquidityClass",
     "LiquidityPool",
