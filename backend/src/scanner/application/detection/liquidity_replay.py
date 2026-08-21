@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from bisect import bisect_left
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -57,7 +58,7 @@ from scanner.domain.structure import (
 )
 from scanner.shared import Timeframe
 
-LIQUIDITY_ALGO_VERSION = "s5-v4"
+LIQUIDITY_ALGO_VERSION = "s5-v5"
 
 _ATR_PERIOD = 14
 _EPSILON_ATR = Decimal("0.05")
@@ -382,6 +383,7 @@ class LiquidityReplayService:
             symbol=symbol,
             timeframe=timeframe,
             cluster=cluster,
+            candles=candles,
             algo_version=self._algo_version,
         )
 
@@ -459,34 +461,50 @@ class LiquidityReplayService:
 
         pool = _to_domain_pool(record)
 
-        start_index = record.created_index + 1
+        position = _creation_position(candles, record)
 
-        if start_index >= len(candles):
+        # §4.2: "ACTIVE -> EXPIRED (age > P.liquidity.pool_max_age = 500
+        # candles)". Aged once, against the newest candle, before the walk
+        # rather than inside it.
+        #
+        # Aging inside the walk could not retire anything. The walk ran from
+        # `created_index + 1` to the end of a 500-candle window, so the
+        # largest age it could reach was 499, and the predicate asks for more
+        # than 500. Every pool the rule existed to retire instead took the
+        # `start_index >= len(candles)` exit above and stayed ACTIVE forever:
+        # 616 of the VM's 641 ACTIVE pools were past retirement, every M5 and
+        # M15 pool among them, and `max_pools = 40` was overshot 6x on
+        # BTCUSDT M5.
+        age_candles = (
+            len(candles) - 1 - position
+            if position is not None
+            else _elapsed_candles(record, candles[-1])
+        )
+
+        if should_expire_pool(age_candles=age_candles):
+            transitioned = await self._transition_pool(
+                record,
+                to_state="EXPIRED",
+                reason="pool_max_age",
+                candle_index=len(candles) - 1,
+                transitioned_at=candles[-1].close_time,
+                evidence={
+                    "age_candles": age_candles,
+                },
+            )
+
+            if transitioned:
+                return "EXPIRED"
+
             return None
 
-        index = start_index
+        # Surviving that, the pool is younger than the window, so its creation
+        # candle is in it. `None` is reachable only where the window is
+        # shorter than `pool_max_age`, and then the whole window is after it.
+        index = 0 if position is None else position + 1
 
         while index < len(candles):
             candle = candles[index]
-
-            age_candles = index - record.created_index
-
-            if should_expire_pool(age_candles=age_candles):
-                transitioned = await self._transition_pool(
-                    record,
-                    to_state="EXPIRED",
-                    reason="pool_max_age",
-                    candle_index=index,
-                    transitioned_at=candle.close_time,
-                    evidence={
-                        "age_candles": age_candles,
-                    },
-                )
-
-                if transitioned:
-                    return "EXPIRED"
-
-                return None
 
             atr = _atr_at(
                 atrs,
@@ -927,8 +945,15 @@ def _build_cluster_pool_id(
     symbol: str,
     timeframe: Timeframe,
     cluster: EqualLevelCluster,
+    candles: Sequence[Candle],
     algo_version: str,
 ) -> str:
+    """As `_build_pool_id`, and for the same reason.
+
+    `cluster.cluster_id` is its member indices joined -- "BSL:195:203:210" --
+    so it renames itself every time the window slides. The member candles'
+    open times do not.
+    """
     raw = "|".join(
         (
             algo_version,
@@ -936,11 +961,43 @@ def _build_cluster_pool_id(
             timeframe.value,
             "CLUSTER",
             cluster.side.value,
-            cluster.cluster_id,
+            ":".join(candles[i].open_time.isoformat() for i in cluster.member_indices),
         )
     )
 
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _creation_position(
+    candles: Sequence[Candle],
+    record: LiquidityPoolRecord,
+) -> int | None:
+    """Where the pool's creation candle sits in *this* window, or None.
+
+    The stored `created_index` cannot answer this. It is a position in the
+    window of the pass that wrote it, and the window slides one candle per
+    close, so by the next pass it names a different candle. `created_at` names
+    the same one from any window.
+    """
+    position = bisect_left(candles, record.created_at, key=lambda c: c.close_time)
+
+    if position < len(candles) and candles[position].close_time == record.created_at:
+        return position
+
+    return None
+
+
+def _elapsed_candles(record: LiquidityPoolRecord, newest: Candle) -> int:
+    """Age for a pool whose creation candle is no longer in the window.
+
+    Counted in elapsed time rather than in candles, which over-states the age
+    across a DEGRADED gap. That is why it is the fallback: where the creation
+    candle is present the candles themselves are counted, and a pool only
+    reaches this path once it is older than the entire window.
+    """
+    step = record.timeframe.duration
+
+    return max(0, int((newest.close_time - record.created_at) // step))
 
 
 def _build_pool_id(
@@ -950,6 +1007,15 @@ def _build_pool_id(
     swing: SwingPoint,
     algo_version: str,
 ) -> str:
+    """Identity anchored in time, because the index is window-local.
+
+    Detection replays a 500-candle window that slides one candle per close,
+    and `swing.index` is a position inside it. The same swing high therefore
+    hashed to a different id on every pass, and each pass wrote a new pool row
+    for a level that already had one -- on the VM, eight ACTIVE BSL pools at
+    exactly 70022 on BTCUSDT M5, against §4.2's "one price zone = one pool per
+    side per TF". `swing.open_time` names the same candle from any window.
+    """
     raw = "|".join(
         (
             algo_version,
@@ -957,7 +1023,7 @@ def _build_pool_id(
             timeframe.value,
             swing.strength.value,
             swing.kind.value,
-            str(swing.index),
+            swing.open_time.isoformat(),
             str(swing.price),
         )
     )
