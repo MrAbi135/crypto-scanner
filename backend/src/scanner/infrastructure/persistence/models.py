@@ -11,6 +11,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     Integer,
@@ -43,6 +44,10 @@ class SymbolRow(Base):
         CheckConstraint(
             "candidate_tier IS NULL OR candidate_tier IN ('T1','T2','T3','INELIGIBLE')",
             name="ck_symbols_candidate_tier",
+        ),
+        CheckConstraint(
+            "wash_clean_days >= 0 AND wash_clean_days < 3",
+            name="ck_symbols_wash_clean_days",
         ),
         CheckConstraint(
             "consecutive_passes >= 0",
@@ -110,6 +115,10 @@ class SymbolRow(Base):
         default=0,
         server_default="0",
     )
+
+    # §6.6, following §1.4's hysteresis pattern beside the tier.
+    wash_risk: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    wash_clean_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class CandleRow(Base):

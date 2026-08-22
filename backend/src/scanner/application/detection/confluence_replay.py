@@ -48,7 +48,10 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRecord,
     LiquidityPoolRepository,
 )
-from scanner.application.ports.repositories import TradeAggregateRepository
+from scanner.application.ports.repositories import (
+    SymbolRepository,
+    TradeAggregateRepository,
+)
 from scanner.domain.common import Candle, TradeAggregate, wilder_atr, wilder_atr_series
 from scanner.domain.common.rvol import median, relative_volume
 from scanner.domain.confluence import (
@@ -109,7 +112,7 @@ from scanner.domain.volume import (
 )
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v14"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v15"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -124,13 +127,11 @@ G4_ADJACENCY_ATR = Decimal("0.5")
 
 # Inputs §8 asks for that no engine currently produces. Listed rather than
 # silently defaulted -- see the module docstring.
-UNREACHABLE_INPUTS: tuple[str, ...] = (
-    # §6.6 is a symbol-level daily composite and has no detector yet. Its
-    # inputs no longer block it: T4's minute buckets carry the trade-size
-    # dispersion its third test needs, and its depth test waits on the
-    # universe job that #70 unblocked. The detector is the gap now.
-    "wash_risk",
-)
+# Empty, for the first time. Every §8.3.1 input is now read from evidence
+# some engine actually produced. The constant stays because the honesty it
+# enforces is the point, not the list: a term that loses its source must be
+# named here rather than quietly scored as zero or as absent.
+UNREACHABLE_INPUTS: tuple[str, ...] = ()
 
 # Not in the constant above, because unlike those it is only *sometimes*
 # unreachable: §8.4 reads the timeframe one rung up, which may be the top of
@@ -239,6 +240,7 @@ class ConfluenceReplayService:
         interactions: IctZoneInteractionRepository,
         pools: LiquidityPoolRepository,
         trades: TradeAggregateRepository,
+        symbols: SymbolRepository,
         clock: Clock,
         shift_state: EngineStateManager,
         *,
@@ -252,6 +254,7 @@ class ConfluenceReplayService:
         self._interactions = interactions
         self._pools = pools
         self._trades = trades
+        self._symbols = symbols
         self._clock = clock
         self._shift_state = shift_state
         self._shift_algo_version = shift_algo_version
@@ -307,6 +310,11 @@ class ConfluenceReplayService:
 
         reading = _read_participation(series, minutes, timeframe)
 
+        # §6.7 caps on either tag: "hard cap 50 if `wash_risk` or
+        # `suspect_volume`". §6.4's is per candle and this one is the
+        # symbol's, carried by §6.6's daily evaluation.
+        wash_risk = (await self._symbols.get_wash_risk(symbol)).tagged
+
         labels = _read_labels(events)
 
         price = series[-1].close
@@ -334,6 +342,7 @@ class ConfluenceReplayService:
                 events=events,
                 liquidity=liquidity,
                 labels=labels,
+                wash_risk=wash_risk,
                 resting=resting,
                 live_zones=live_zones,
                 reading=reading,
@@ -376,6 +385,7 @@ class ConfluenceReplayService:
         events: tuple[EngineEventRecord, ...],
         liquidity: tuple[LiquidityEvidenceRecord, ...],
         labels: tuple[StructureLabel, ...],
+        wash_risk: bool,
         resting: tuple[LiquidityPoolRecord, ...],
         live_zones: tuple[IctZoneRecord, ...],
         reading: _Reading,
@@ -565,7 +575,7 @@ class ConfluenceReplayService:
                 len(matching_zones),
                 entry_confirmation=history.confirmed,
             ),
-            Factor.VOLUME: _volume_score(reading, direction, structural),
+            Factor.VOLUME: _volume_score(reading, direction, structural, wash_risk),
             Factor.MOMENTUM: momentum_factor(
                 MomentumEvidence(
                     score=reading.score,
@@ -1150,7 +1160,12 @@ def _count_failed_breaks(
     return failed
 
 
-def _volume_score(reading: _Reading, direction: str, structural: bool) -> Decimal:
+def _volume_score(
+    reading: _Reading,
+    direction: str,
+    structural: bool,
+    wash_risk: bool,
+) -> Decimal:
     """F4 — §8.3.1: "Volume Factor Score as published" (§6.7).
 
     It was published as the RVOL *ratio*. `volume_factor` takes a 0-100 score
@@ -1194,8 +1209,8 @@ def _volume_score(reading: _Reading, direction: str, structural: bool) -> Decima
                 contraction_against_claim=reading.contracting,
                 institutional_volume=participation is ParticipationClass.INSTITUTIONAL,
                 stealth_flow=participation is ParticipationClass.STEALTH,
-                # §6.4's tag, which §6.7 turns into its own INTEGRITY_CAP of 50.
-                integrity_suspect=reading.suspect,
+                # §6.7's cap fires on either: §6.4's candle tag or §6.6's symbol one.
+                integrity_suspect=reading.suspect or wash_risk,
             )
         ).score
     ).score
