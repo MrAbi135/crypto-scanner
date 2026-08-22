@@ -44,6 +44,16 @@ from scanner.shared import EventEnvelope, Timeframe
 from scanner.shared.ids import monotonic_factory
 from scanner.shared.types import Ulid
 
+# §1.5 makes these the exchange's call, not the liquidity job's: a symbol on
+# its way out keeps its data but leaves the universe, and no 7-day median
+# brings it back.
+_EXCHANGE_OWNED_STATUSES = frozenset(
+    {
+        SymbolStatus.DELISTING.value,
+        SymbolStatus.DELISTED.value,
+    }
+)
+
 _CANDLE_COLUMNS = (
     "symbol",
     "timeframe",
@@ -108,6 +118,31 @@ class PgSymbolRepository:
             await session.commit()
 
             return int(result.rowcount or 0)  # type: ignore[attr-defined]
+
+    async def list_observable(
+        self,
+    ) -> Sequence[Symbol]:
+        """Symbols the daily universe job should measure.
+
+        Not `list_active()`. A QUARANTINE symbol earns ACTIVE by accumulating
+        §1.4's seven daily observations, so an evaluation loop that only visits
+        symbols which are already ACTIVE can never promote anything -- which is
+        precisely what happened: 484 QUARANTINE, 249 DELISTED, zero ACTIVE, and
+        a nightly loop with nothing to iterate.
+
+        DELISTED is excluded because §1.5 retains its data but stops scanning
+        it; there is nothing to measure and no tier that would bring it back.
+        """
+        async with self._sessions() as session:
+            rows = (
+                await session.execute(
+                    select(SymbolRow).where(
+                        SymbolRow.status != SymbolStatus.DELISTED.value,
+                    )
+                )
+            ).scalars()
+
+            return [_to_symbol(row) for row in rows]
 
     async def list_active(
         self,
@@ -185,6 +220,24 @@ class PgSymbolRepository:
 
             row.consecutive_passes = state.consecutive_passes
             row.consecutive_failures = state.consecutive_failures
+
+            # §1.4's tier decides whether a symbol is in the scanned universe,
+            # so the status has to follow it. Nothing wrote a status after
+            # `symbol_sync` set QUARANTINE at first sight: `SymbolStatus.ACTIVE`
+            # appeared exactly once in the source, inside `list_active`'s own
+            # filter. Every symbol therefore sat in QUARANTINE forever, and the
+            # daily loop -- which iterated `list_active()` -- ran on an empty
+            # list every night and logged nothing at all.
+            #
+            # DELISTED and DELISTING are left alone. §1.5 makes those exchange
+            # facts, not liquidity ones, and a delisted symbol with a good 7-day
+            # median is still delisted.
+            if row.status not in _EXCHANGE_OWNED_STATUSES:
+                row.status = (
+                    SymbolStatus.QUARANTINE.value
+                    if state.tier is UniverseTier.INELIGIBLE
+                    else SymbolStatus.ACTIVE.value
+                )
 
             await session.commit()
 

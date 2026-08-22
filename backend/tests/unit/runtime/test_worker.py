@@ -42,7 +42,7 @@ async def test_daily_loop_waits_until_midnight_before_loading_symbols() -> None:
     job = AsyncMock()
 
     symbols = AsyncMock()
-    symbols.list_active = AsyncMock(side_effect=asyncio.CancelledError)
+    symbols.list_observable = AsyncMock(side_effect=asyncio.CancelledError)
 
     with (
         patch.object(
@@ -82,7 +82,7 @@ async def test_daily_loop_runs_job_for_each_active_symbol() -> None:
     job.run_symbol = AsyncMock(return_value=report)
 
     symbols = AsyncMock()
-    symbols.list_active = AsyncMock(
+    symbols.list_observable = AsyncMock(
         side_effect=[
             [
                 Symbol("BTCUSDT"),
@@ -122,13 +122,13 @@ async def test_the_registry_is_synced_at_boot_before_the_first_sleep() -> None:
     """`market.symbols` held zero rows for the project's whole life.
 
     `sync-symbols` existed only as a CLI command nobody had cause to type, and
-    every loop here iterates `list_active()` -- so an empty registry made the
+    every loop here iterates the registry -- so an empty one made the
     worker a no-op that looked perfectly healthy. Ordering matters: syncing
     after the sleep would leave the first day unusable.
     """
     sync = AsyncMock()
     symbols = AsyncMock()
-    symbols.list_active = AsyncMock(side_effect=asyncio.CancelledError)
+    symbols.list_observable = AsyncMock(side_effect=asyncio.CancelledError)
 
     with (
         patch.object(
@@ -153,3 +153,30 @@ async def test_an_unreachable_venue_does_not_take_the_worker_down() -> None:
     sync.sync = AsyncMock(side_effect=ConnectionError("binance unreachable"))
 
     await worker._sync_symbols(sync)
+
+
+@pytest.mark.asyncio
+async def test_the_loop_measures_quarantined_symbols_not_just_active_ones() -> None:
+    """§1.4 promotes on seven consecutive daily evaluations.
+
+    A symbol has to be measured to accumulate them, so iterating `list_active()`
+    could never promote anything: on the VM that meant 484 QUARANTINE, 249
+    DELISTED, zero ACTIVE, and a nightly loop with an empty list to walk.
+    """
+    symbols = AsyncMock()
+    symbols.list_active = AsyncMock(side_effect=AssertionError("must not narrow to ACTIVE"))
+    symbols.list_observable = AsyncMock(side_effect=asyncio.CancelledError)
+
+    with (
+        patch.object(
+            worker,
+            "_seconds_until_next_utc_midnight",
+            AsyncMock(return_value=1.0),
+        ),
+        patch.object(worker.asyncio, "sleep", AsyncMock()),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await worker._run_daily_universe_loop(AsyncMock(), symbols, AsyncMock())
+
+    symbols.list_observable.assert_awaited()
+    symbols.list_active.assert_not_awaited()
