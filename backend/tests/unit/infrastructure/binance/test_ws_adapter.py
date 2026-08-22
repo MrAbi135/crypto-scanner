@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from scanner.domain.common import CandleSource
 from scanner.infrastructure.exchanges.binance.ws.adapter import (
     build_combined_stream_url,
+    parse_agg_trade,
     parse_closed_kline,
     unwrap_stream_event,
 )
@@ -120,3 +123,49 @@ def test_parse_closed_kline_ignores_unsupported_timeframe() -> None:
     }
 
     assert parse_closed_kline(event) is None
+
+
+def _agg_trade(**overrides) -> dict:
+    event = {
+        "e": "aggTrade",
+        "E": 1_787_000_000_000,
+        "s": "BTCUSDT",
+        "p": "60000.00",
+        "q": "0.25",
+        "T": 1_787_000_000_000,
+        "m": False,
+    }
+    event.update(overrides)
+
+    return event
+
+
+def test_an_agg_trade_becomes_a_print() -> None:
+    parsed = parse_agg_trade(_agg_trade())
+
+    assert parsed is not None
+
+    symbol, print_ = parsed
+
+    assert symbol == "BTCUSDT"
+    assert print_.size == Decimal("0.25")
+
+
+def test_buyer_is_maker_means_the_taker_sold() -> None:
+    """Binance's `m` reads as the opposite of what §2.2 wants counted, so it
+    is inverted once, at the parse boundary."""
+    _, taker_bought = parse_agg_trade(_agg_trade(m=False))  # type: ignore[misc]
+    _, taker_sold = parse_agg_trade(_agg_trade(m=True))  # type: ignore[misc]
+
+    assert taker_bought.taker_is_buyer is True
+    assert taker_sold.taker_is_buyer is False
+
+
+def test_another_event_type_is_not_a_trade() -> None:
+    assert parse_agg_trade({"e": "kline", "s": "BTCUSDT"}) is None
+
+
+def test_a_malformed_frame_is_dropped_rather_than_guessed() -> None:
+    assert parse_agg_trade(_agg_trade(q="0")) is None
+    assert parse_agg_trade(_agg_trade(m="false")) is None
+    assert parse_agg_trade({"e": "aggTrade", "s": "BTCUSDT"}) is None

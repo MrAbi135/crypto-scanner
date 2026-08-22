@@ -10,12 +10,13 @@ from datetime import datetime
 import structlog
 import websockets
 
-from scanner.domain.common import Candle, CandleSource
+from scanner.domain.common import Candle, CandleSource, TradePrint
 from scanner.shared import Timeframe, parse_decimal, utc_from_ms
 
 log = structlog.get_logger(__name__)
 
 CandleHandler = Callable[[Candle, datetime], Awaitable[None]]
+TradeHandler = Callable[[str, TradePrint], Awaitable[None]]
 
 _BINANCE_INTERVALS: dict[str, Timeframe] = {
     "5m": Timeframe.M5,
@@ -101,6 +102,46 @@ def parse_closed_kline(event: dict[str, object]) -> Candle | None:
     )
 
 
+def parse_agg_trade(event: dict[str, object]) -> tuple[str, TradePrint] | None:
+    """Convert a Binance `aggTrade` event into a symbol and a print.
+
+    **Size is the base quantity**, matching what `taker_buy_volume` means on a
+    candle -- §6.5 and §6.6 both compare a trade size against other trade
+    sizes on the same symbol, so the unit only has to be consistent, and
+    picking the one the rest of the schema already uses keeps it so.
+
+    Binance's `m` is *buyer is maker*, which is the taker having **sold**. The
+    flag reads as the opposite of what it counts, and §2.2 keeps aggTrades
+    precisely for the taker side, so it is inverted once, here.
+    """
+    if event.get("e") != "aggTrade":
+        return None
+
+    symbol = event.get("s")
+    quantity = event.get("q")
+    traded_at = event.get("T")
+    buyer_is_maker = event.get("m")
+
+    if not isinstance(symbol, str) or not isinstance(buyer_is_maker, bool):
+        return None
+
+    if not isinstance(quantity, str | int) or not isinstance(traded_at, int):
+        return None
+
+    size = parse_decimal(quantity, field="quantity")
+
+    if size <= 0:
+        # Binance does not print zero-quantity trades; a zero here is a
+        # malformed frame, and `TradePrint` would refuse it anyway.
+        return None
+
+    return symbol, TradePrint(
+        at=utc_from_ms(traded_at),
+        size=size,
+        taker_is_buyer=not buyer_is_maker,
+    )
+
+
 class BinanceWebSocketAdapter:
     """Receive Binance market-stream events with reconnect handling."""
 
@@ -110,10 +151,12 @@ class BinanceWebSocketAdapter:
         *,
         reconnect_delay_seconds: int = 5,
         candle_handler: CandleHandler | None = None,
+        trade_handler: TradeHandler | None = None,
     ) -> None:
         self._url = url
         self._reconnect_delay_seconds = reconnect_delay_seconds
         self._candle_handler = candle_handler
+        self._trade_handler = trade_handler
         self._running = False
 
     async def run(self) -> None:
@@ -151,6 +194,16 @@ class BinanceWebSocketAdapter:
 
     async def handle_event(self, event: dict[str, object]) -> None:
         """Process one Binance stream event."""
+        trade = parse_agg_trade(event)
+
+        if trade is not None:
+            if self._trade_handler is not None:
+                await self._trade_handler(*trade)
+
+            # No log line per print. A busy symbol prints thousands a minute,
+            # and §2.2's record is the minute bucket, not the tape.
+            return
+
         candle = parse_closed_kline(event)
 
         if candle is None:

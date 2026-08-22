@@ -19,10 +19,11 @@ from scanner.application.marketdata.contexts import (
 )
 from scanner.application.marketdata.live_ingest import LiveIngestService
 from scanner.application.marketdata.outbox_relay import OutboxRelayService
+from scanner.application.marketdata.trade_aggregator import TradeAggregator
 from scanner.application.marketdata.warmup_backfill import WarmupBackfillService
 from scanner.config import get_settings
 from scanner.config.processes import IngestSettings
-from scanner.domain.common import Candle
+from scanner.domain.common import Candle, TradePrint
 from scanner.infrastructure.clock import SystemClock
 from scanner.infrastructure.exchanges.binance import BinanceRestAdapter, RateBudget
 from scanner.infrastructure.exchanges.binance.ws.adapter import (
@@ -37,6 +38,7 @@ from scanner.infrastructure.persistence.outbox_repository import PgOutboxReposit
 from scanner.infrastructure.persistence.repositories import (
     PgCandleRepository,
     PgIncidentRepository,
+    PgTradeAggregateRepository,
 )
 from scanner.infrastructure.redis.client import build_redis
 from scanner.infrastructure.redis.event_stream import RedisEventStreamPublisher
@@ -83,6 +85,7 @@ async def _run_websocket(
     settings: IngestSettings,
     live_ingest: LiveIngestService,
     streams: tuple[str, ...],
+    trades: TradeAggregator | None,
 ) -> None:
     url = build_combined_stream_url(
         settings.binance_ws_url,
@@ -97,6 +100,12 @@ async def _run_websocket(
             candle,
             event_at,
         )
+
+        # A candle close is the one moment the stream guarantees a minute
+        # boundary has passed, and §2.2's buckets are otherwise held until
+        # the next print arrives -- which on a quiet symbol may be a while.
+        if trades is not None:
+            await trades.flush_completed(candle.symbol)
 
         log.info(
             "live_candle_ingested",
@@ -114,10 +123,15 @@ async def _run_websocket(
             ),
         )
 
+    async def handle_trade(symbol: str, print_: TradePrint) -> None:
+        if trades is not None:
+            await trades.observe(symbol, print_)
+
     adapter = BinanceWebSocketAdapter(
         url=url,
         reconnect_delay_seconds=settings.binance_ws_reconnect_delay_seconds,
         candle_handler=handle_candle,
+        trade_handler=handle_trade if trades is not None else None,
     )
 
     await adapter.run()
@@ -162,7 +176,7 @@ def main() -> None:
             symbols = parse_symbols(settings.ingest_symbols)
             timeframes = parse_timeframes(settings.ingest_timeframes)
 
-            streams = stream_names(symbols, timeframes)
+            streams = stream_names(symbols, timeframes, trades=settings.ingest_trades)
             feeds = tuple((symbol, tf) for symbol in symbols for tf in timeframes)
 
             # Before the socket opens. A context that reaches the gate only
@@ -221,6 +235,12 @@ def main() -> None:
                     settings,
                     live_ingest,
                     streams,
+                    TradeAggregator(
+                        PgTradeAggregateRepository(sessions, clock),
+                        clock,
+                    )
+                    if settings.ingest_trades
+                    else None,
                 )
             )
             app.state.websocket_task = task

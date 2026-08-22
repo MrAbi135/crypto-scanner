@@ -93,13 +93,25 @@ def parse_timeframes(raw: str) -> tuple[Timeframe, ...]:
 def stream_names(
     symbols: tuple[str, ...],
     timeframes: tuple[Timeframe, ...],
+    *,
+    trades: bool = False,
 ) -> tuple[str, ...]:
-    """Binance combined-stream names for every context."""
-    return tuple(
+    """Binance combined-stream names for every context.
+
+    `trades` adds one `@aggTrade` stream per *symbol*, not per context: the
+    tape is a property of the symbol, and subscribing per timeframe would
+    deliver every print four times over.
+    """
+    klines = tuple(
         f"{symbol}@kline_{_BINANCE_INTERVAL[timeframe]}"
         for symbol in symbols
         for timeframe in timeframes
     )
+
+    if not trades:
+        return klines
+
+    return klines + tuple(f"{symbol}@aggTrade" for symbol in symbols)
 
 
 _BINANCE_INTERVAL: dict[Timeframe, str] = {

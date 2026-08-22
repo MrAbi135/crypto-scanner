@@ -95,3 +95,25 @@ def test_every_scanned_timeframe_has_a_binance_interval() -> None:
     names = stream_names(("BTCUSDT",), tuple(Timeframe))
 
     assert len(names) == len(Timeframe)
+
+
+def test_trade_streams_are_added_per_symbol_not_per_context() -> None:
+    """The tape belongs to the symbol. Subscribing per timeframe would deliver
+    every print once for each one."""
+    streams = stream_names(
+        ("BTCUSDT", "ETHUSDT"),
+        (Timeframe.M5, Timeframe.H1),
+        trades=True,
+    )
+
+    assert streams.count("btcusdt@aggTrade") + streams.count("BTCUSDT@aggTrade") == 1
+    assert len([s for s in streams if "aggTrade" in s]) == 2
+    assert len([s for s in streams if "kline" in s]) == 4
+
+
+def test_trade_streams_are_off_unless_asked_for() -> None:
+    """The aggTrade stream is the highest-volume subscription Binance offers,
+    and §6.5 declares itself unread without it rather than breaking."""
+    streams = stream_names(("BTCUSDT",), (Timeframe.M5,))
+
+    assert not [s for s in streams if "aggTrade" in s]
