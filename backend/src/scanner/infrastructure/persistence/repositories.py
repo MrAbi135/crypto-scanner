@@ -32,6 +32,7 @@ from scanner.domain.common import (
     CandleSource,
     Symbol,
     SymbolStatus,
+    TradeAggregate,
 )
 from scanner.domain.common.universe import UniverseTier
 from scanner.infrastructure.persistence.models import (
@@ -39,6 +40,7 @@ from scanner.infrastructure.persistence.models import (
     IncidentRow,
     LiquidityHistoryRow,
     SymbolRow,
+    TradeAggregate1mRow,
 )
 from scanner.shared import EventEnvelope, Timeframe
 from scanner.shared.ids import monotonic_factory
@@ -117,7 +119,7 @@ class PgSymbolRepository:
             result = await session.execute(stmt)
             await session.commit()
 
-            return int(result.rowcount or 0)  # type: ignore[attr-defined]
+            return int(result.rowcount or 0)  # type: ignore[attr-defined]  # type: ignore[attr-defined]
 
     async def list_observable(
         self,
@@ -693,3 +695,95 @@ def _to_liquidity_history(
         spread_bps=row.spread_bps,
         depth_2pct=row.depth_2pct,
     )
+
+
+class PgTradeAggregateRepository:
+    """PostgreSQL persistence for DDD T4 minute buckets."""
+
+    def __init__(
+        self,
+        sessions: async_sessionmaker[AsyncSession],
+        clock: Clock,
+    ) -> None:
+        self._sessions = sessions
+        self._clock = clock
+
+    async def append_many(
+        self,
+        aggregates: Sequence[TradeAggregate],
+    ) -> int:
+        if not aggregates:
+            return 0
+
+        now = self._clock.now()
+
+        stmt = (
+            pg_insert(TradeAggregate1mRow)
+            .values(
+                [
+                    {
+                        "symbol": item.symbol,
+                        "minute_ts": item.minute,
+                        "taker_buy_volume": item.taker_buy_volume,
+                        "taker_sell_volume": item.taker_sell_volume,
+                        "trade_count": item.trade_count,
+                        "mean_trade_size": item.mean_trade_size,
+                        "stddev_trade_size": item.stddev_trade_size,
+                        "p90_trade_size": item.p90_trade_size,
+                        "max_trade_size": item.max_trade_size,
+                        "inserted_at": now,
+                    }
+                    for item in aggregates
+                ]
+            )
+            # Do nothing, not update: a stored minute was folded from prints
+            # that no longer exist, so a second fold of the same minute is a
+            # partial replay rather than a correction.
+            .on_conflict_do_nothing(
+                index_elements=[
+                    TradeAggregate1mRow.symbol,
+                    TradeAggregate1mRow.minute_ts,
+                ]
+            )
+        )
+
+        async with self._sessions() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+
+            return int(result.rowcount or 0)  # type: ignore[attr-defined]
+
+    async def list_between(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+    ) -> Sequence[TradeAggregate]:
+        """Minutes in `[start, end)`, oldest first."""
+        async with self._sessions() as session:
+            rows = (
+                await session.execute(
+                    select(TradeAggregate1mRow)
+                    .where(
+                        TradeAggregate1mRow.symbol == symbol,
+                        TradeAggregate1mRow.minute_ts >= start,
+                        TradeAggregate1mRow.minute_ts < end,
+                    )
+                    .order_by(TradeAggregate1mRow.minute_ts.asc())
+                )
+            ).scalars()
+
+            return [
+                TradeAggregate(
+                    symbol=row.symbol,
+                    minute=row.minute_ts,
+                    taker_buy_volume=row.taker_buy_volume,
+                    taker_sell_volume=row.taker_sell_volume,
+                    trade_count=row.trade_count,
+                    mean_trade_size=row.mean_trade_size,
+                    stddev_trade_size=row.stddev_trade_size,
+                    p90_trade_size=row.p90_trade_size,
+                    max_trade_size=row.max_trade_size,
+                )
+                for row in rows
+            ]

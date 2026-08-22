@@ -12,6 +12,7 @@ Run: pytest -m integration tests/integration
 from __future__ import annotations
 
 from datetime import timedelta
+from decimal import Decimal
 
 import pytest
 
@@ -20,13 +21,14 @@ from sqlalchemy import text
 
 from scanner.application.ports import IncidentRecord
 from scanner.application.ports.repositories import UniverseStateRecord
-from scanner.domain.common import Symbol, SymbolStatus
+from scanner.domain.common import Symbol, SymbolStatus, TradeAggregate
 from scanner.domain.common.universe import UniverseTier
 from scanner.infrastructure.persistence.database import build_session_factory
 from scanner.infrastructure.persistence.repositories import (
     PgCandleRepository,
     PgIncidentRepository,
     PgSymbolRepository,
+    PgTradeAggregateRepository,
 )
 from scanner.shared import Timeframe, new_ulid
 from tests.support.builders import BASE_TIME, make_series
@@ -197,6 +199,76 @@ async def test_list_observable_includes_quarantine_but_not_delisted(engine) -> N
     assert "OBSQUARUSDT" in observable
     assert "OBSLIVEUSDT" in observable
     assert "OBSGONEUSDT" not in observable
+
+
+def _aggregate(minute_offset: int, *, count: int = 3) -> TradeAggregate:
+    return TradeAggregate(
+        symbol="BTCUSDT",
+        minute=BASE_TIME + timedelta(minutes=minute_offset),
+        taker_buy_volume=Decimal(6),
+        taker_sell_volume=Decimal(2),
+        trade_count=count,
+        mean_trade_size=Decimal("2.6666"),
+        stddev_trade_size=Decimal("0.9428"),
+        p90_trade_size=Decimal(4),
+        max_trade_size=Decimal(4),
+    )
+
+
+async def test_trade_aggregates_round_trip_and_are_ordered(engine) -> None:
+    repo = PgTradeAggregateRepository(build_session_factory(engine), FakeClock())
+
+    assert await repo.append_many([_aggregate(2), _aggregate(0), _aggregate(1)]) == 3
+
+    stored = await repo.list_between(
+        "BTCUSDT",
+        BASE_TIME,
+        BASE_TIME + timedelta(minutes=10),
+    )
+
+    assert [item.minute for item in stored] == [
+        BASE_TIME + timedelta(minutes=offset) for offset in (0, 1, 2)
+    ]
+    assert stored[0].stddev_trade_size == Decimal("0.9428")
+
+
+async def test_a_replayed_minute_is_ignored_not_overwritten(engine) -> None:
+    """The prints it was folded from are gone, so a second fold of the same
+    minute is a partial replay rather than a correction."""
+    repo = PgTradeAggregateRepository(build_session_factory(engine), FakeClock())
+
+    await repo.append_many([_aggregate(20, count=3)])
+
+    assert await repo.append_many([_aggregate(20, count=99)]) == 0
+
+    stored = await repo.list_between(
+        "BTCUSDT",
+        BASE_TIME + timedelta(minutes=20),
+        BASE_TIME + timedelta(minutes=21),
+    )
+
+    assert [item.trade_count for item in stored] == [3]
+
+
+async def test_the_end_of_the_range_is_exclusive(engine) -> None:
+    repo = PgTradeAggregateRepository(build_session_factory(engine), FakeClock())
+
+    await repo.append_many([_aggregate(40)])
+
+    assert not await repo.list_between(
+        "BTCUSDT",
+        BASE_TIME + timedelta(minutes=41),
+        BASE_TIME + timedelta(minutes=50),
+    )
+
+
+async def test_a_bucket_with_no_prints_is_refused_by_the_database(engine) -> None:
+    """§2.2 keeps the minute bucket as the record, so a row about no trades is
+    a claim the schema should not accept."""
+    repo = PgTradeAggregateRepository(build_session_factory(engine), FakeClock())
+
+    with pytest.raises(Exception, match="ck_trade_aggregates_has_prints"):
+        await repo.append_many([_aggregate(60, count=0)])
 
 
 async def test_incident_roundtrip(engine) -> None:

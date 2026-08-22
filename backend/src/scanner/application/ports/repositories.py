@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from scanner.domain.common import Candle, Symbol
+from scanner.domain.common import Candle, Symbol, TradeAggregate
 from scanner.domain.common.universe import UniverseTier
 from scanner.shared import Timeframe
 
@@ -37,6 +37,26 @@ class UniverseStateRecord:
     candidate_tier: UniverseTier | None = None
     consecutive_passes: int = 0
     consecutive_failures: int = 0
+
+
+class TradeAggregateRepository(Protocol):
+    """DDD T4 (SLS §2.2). Append-only; the minute bucket is the record."""
+
+    async def append_many(self, aggregates: Sequence[TradeAggregate]) -> int:
+        """Insert complete minutes, ignoring any already stored.
+
+        Returns the number newly inserted. Idempotent because a replayed
+        stream must not double-count a minute -- and because the prints it was
+        folded from are gone, so a wrong row cannot be recomputed away.
+        """
+        ...
+
+    async def list_between(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+    ) -> Sequence[TradeAggregate]: ...
 
 
 class SymbolRepository(Protocol):

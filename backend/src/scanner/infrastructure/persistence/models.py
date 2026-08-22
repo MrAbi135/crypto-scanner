@@ -286,3 +286,36 @@ class LiquidityHistoryRow(Base):
         Numeric,
         nullable=False,
     )
+
+
+class TradeAggregate1mRow(Base):
+    """DDD T4: one minute of aggTrade prints, per symbol."""
+
+    __tablename__ = "trade_aggregates_1m"
+    __table_args__ = (
+        CheckConstraint(
+            "taker_buy_volume >= 0 AND taker_sell_volume >= 0 AND trade_count >= 0",
+            name="ck_trade_aggregates_nonnegative",
+        ),
+        CheckConstraint(
+            "trade_count > 0",
+            name="ck_trade_aggregates_has_prints",
+        ),
+        CheckConstraint(
+            "mean_trade_size > 0 AND stddev_trade_size >= 0 "
+            "AND p90_trade_size > 0 AND max_trade_size >= p90_trade_size",
+            name="ck_trade_aggregates_sizes",
+        ),
+        {"schema": "market"},
+    )
+
+    symbol: Mapped[str] = mapped_column(String(32), primary_key=True)
+    minute_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    taker_buy_volume: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    taker_sell_volume: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    trade_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    mean_trade_size: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    stddev_trade_size: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    p90_trade_size: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    max_trade_size: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    inserted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
