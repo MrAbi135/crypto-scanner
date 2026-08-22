@@ -102,9 +102,14 @@ async def _run_daily_universe_loop(
         # evaluated today rather than a day late.
         await _sync_symbols(sync)
 
-        active_symbols = await symbols.list_active()
+        # Observable, not active. §1.4 promotes on seven consecutive daily
+        # evaluations, so a QUARANTINE symbol has to be measured to have any
+        # chance of leaving QUARANTINE. Iterating `list_active()` meant the
+        # loop woke every midnight, synced 733 eligible symbols, found none of
+        # them ACTIVE, and did nothing -- for the life of the project.
+        observable = await symbols.list_observable()
 
-        for symbol in active_symbols:
+        for symbol in observable:
             try:
                 report = await job.run_symbol(symbol.exchange_symbol)
 

@@ -19,7 +19,9 @@ pytest.importorskip("testcontainers")
 from sqlalchemy import text
 
 from scanner.application.ports import IncidentRecord
+from scanner.application.ports.repositories import UniverseStateRecord
 from scanner.domain.common import Symbol, SymbolStatus
+from scanner.domain.common.universe import UniverseTier
 from scanner.infrastructure.persistence.database import build_session_factory
 from scanner.infrastructure.persistence.repositories import (
     PgCandleRepository,
@@ -97,6 +99,104 @@ async def test_symbol_upsert_preserves_lifecycle(engine) -> None:
     await repo.upsert_many([resync])
     stored = await repo.get("ETHUSDT")
     assert stored is not None and stored.id == sym.id  # original row kept
+
+
+async def _seed(repo, exchange_symbol: str, status: SymbolStatus) -> None:
+    # `Symbol` asserts exchange_symbol == base + quote.
+    base = exchange_symbol.removesuffix("USDT")
+
+    await repo.upsert_many(
+        [Symbol(new_ulid(), "binance", exchange_symbol, base, "USDT", status, BASE_TIME)]
+    )
+
+
+def _state(exchange_symbol: str, tier: UniverseTier) -> UniverseStateRecord:
+    return UniverseStateRecord(
+        exchange_symbol=exchange_symbol,
+        tier=tier,
+        candidate_tier=None,
+        consecutive_passes=0,
+        consecutive_failures=0,
+    )
+
+
+async def test_an_eligible_tier_promotes_a_quarantined_symbol(engine) -> None:
+    """§1.4's tier decides membership of the scanned universe.
+
+    Nothing wrote a status after `symbol_sync` set QUARANTINE at first sight,
+    so `SymbolStatus.ACTIVE` existed only inside `list_active`'s own filter and
+    no symbol could ever satisfy it.
+    """
+    repo = PgSymbolRepository(build_session_factory(engine))
+
+    await _seed(repo, "PROMOTEUSDT", SymbolStatus.QUARANTINE)
+    await repo.save_universe_state(_state("PROMOTEUSDT", UniverseTier.T2))
+
+    stored = await repo.get("PROMOTEUSDT")
+
+    assert stored is not None
+    assert stored.status is SymbolStatus.ACTIVE
+
+
+async def test_an_ineligible_tier_returns_a_symbol_to_quarantine(engine) -> None:
+    repo = PgSymbolRepository(build_session_factory(engine))
+
+    await _seed(repo, "DEMOTEUSDT", SymbolStatus.QUARANTINE)
+
+    await repo.save_universe_state(_state("DEMOTEUSDT", UniverseTier.T1))
+
+    # Asserted here as well as at the end: the symbol starts in QUARANTINE, so
+    # without this line an implementation that writes no status at all would
+    # satisfy the final assertion without ever having demoted anything.
+    promoted = await repo.get("DEMOTEUSDT")
+
+    assert promoted is not None
+    assert promoted.status is SymbolStatus.ACTIVE
+
+    await repo.save_universe_state(_state("DEMOTEUSDT", UniverseTier.INELIGIBLE))
+
+    stored = await repo.get("DEMOTEUSDT")
+
+    assert stored is not None
+    assert stored.status is SymbolStatus.QUARANTINE
+
+
+async def test_a_delisted_symbol_is_not_revived_by_a_good_tier(engine) -> None:
+    """§1.5 makes delisting the exchange's fact, not the liquidity job's.
+
+    A guard rather than a regression test: it passes on the old code too,
+    where nothing wrote a status at all. It is here to stop the new write
+    from reaching further than §1.4 allows.
+    """
+    repo = PgSymbolRepository(build_session_factory(engine))
+
+    await _seed(repo, "GONEUSDT", SymbolStatus.DELISTED)
+    await repo.save_universe_state(_state("GONEUSDT", UniverseTier.T1))
+
+    stored = await repo.get("GONEUSDT")
+
+    assert stored is not None
+    assert stored.status is SymbolStatus.DELISTED
+
+
+async def test_list_observable_includes_quarantine_but_not_delisted(engine) -> None:
+    """The evaluation loop has to see the symbols it might promote.
+
+    Iterating `list_active()` meant it woke every midnight and found nothing:
+    on the VM, 484 QUARANTINE, 249 DELISTED and zero ACTIVE.
+    """
+    repo = PgSymbolRepository(build_session_factory(engine))
+
+    await _seed(repo, "OBSQUARUSDT", SymbolStatus.QUARANTINE)
+    await _seed(repo, "OBSGONEUSDT", SymbolStatus.DELISTED)
+    await _seed(repo, "OBSLIVEUSDT", SymbolStatus.QUARANTINE)
+    await repo.save_universe_state(_state("OBSLIVEUSDT", UniverseTier.T3))
+
+    observable = {s.exchange_symbol for s in await repo.list_observable()}
+
+    assert "OBSQUARUSDT" in observable
+    assert "OBSLIVEUSDT" in observable
+    assert "OBSGONEUSDT" not in observable
 
 
 async def test_incident_roundtrip(engine) -> None:

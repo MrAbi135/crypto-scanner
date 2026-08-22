@@ -49,6 +49,15 @@ class SymbolRepository(Protocol):
 
     async def list_active(self) -> Sequence[Symbol]: ...
 
+    async def list_observable(self) -> Sequence[Symbol]:
+        """Everything the daily universe job should measure (§1.4).
+
+        Wider than `list_active`: promotion needs seven daily observations,
+        so a QUARANTINE symbol has to be measured before it can stop being
+        one.
+        """
+        ...
+
     async def get(
         self,
         exchange_symbol: str,
