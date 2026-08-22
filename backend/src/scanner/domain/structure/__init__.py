@@ -13,6 +13,7 @@ from scanner.domain.structure.model import (
     SwingKind,
     SwingPoint,
     SwingStrength,
+    unbroken_pairs,
 )
 from scanner.domain.structure.mss import (
     MssDecision,
@@ -52,4 +53,5 @@ __all__ = [
     "is_wick_only_penetration",
     "mss_is_low_quality",
     "swing_window",
+    "unbroken_pairs",
 ]

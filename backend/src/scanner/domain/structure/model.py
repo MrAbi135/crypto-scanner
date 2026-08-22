@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -49,3 +50,34 @@ class ClassifiedSwing:
 
     swing: SwingPoint
     label: StructureLabel
+
+
+# §7.4's "consecutive unbroken HH/HL or LL/LH pairs", by direction. EQH/EQL and
+# SEED are in neither set: an equal extreme asserts no direction, and §3.3 says
+# the same of SEED.
+_UPTREND_LABELS = frozenset({StructureLabel.HH, StructureLabel.HL})
+_DOWNTREND_LABELS = frozenset({StructureLabel.LL, StructureLabel.LH})
+
+
+def unbroken_pairs(labels: Sequence[StructureLabel], direction: str) -> int:
+    """§7.4: consecutive unbroken HH/HL (or LL/LH) pairs, newest-first.
+
+    Counted from the newest swing backwards, because the term is trend
+    *maturity* -- how long the current run has held, not the best run anywhere
+    in the window. A single contrary label ends the count; that is what
+    "unbroken" means.
+
+    Two swings make a pair, so an odd trailing label contributes nothing on its
+    own: one HH after a broken run is not yet a trend.
+    """
+    wanted = _UPTREND_LABELS if direction == "UP" else _DOWNTREND_LABELS
+
+    run = 0
+
+    for label in reversed(labels):
+        if label not in wanted:
+            break
+
+        run += 1
+
+    return run // 2

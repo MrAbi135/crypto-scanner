@@ -100,7 +100,14 @@ class StructureEvidence:
     external: bool = False
     mss: bool = False
     unbroken_pairs: int = 0
-    failed_breaks: int = 0
+    failed_breaks: int | None = None
+    """§3.5 records a failed break as a fact; nothing in this build does.
+
+    None means unread, and an unread record pays nothing. Zero would mean the
+    market produced no failed break, which is a claim no detector has made --
+    and it would hand every candidate the full 15 points for evidence that was
+    never gathered.
+    """
     evidence_ids: dict[str, str] = field(default_factory=dict)
 
 
@@ -170,7 +177,9 @@ def structure_factor(e: StructureEvidence) -> FactorScore:
             )
         )
 
-    if e.failed_breaks <= 0:
+    if e.failed_breaks is None:
+        pass
+    elif e.failed_breaks <= 0:
         parts.append(_contrib(e.evidence_ids, "clean_record", CLEAN_RECORD_FULL))
     elif e.failed_breaks == 1:
         parts.append(_contrib(e.evidence_ids, "clean_record", CLEAN_RECORD_ONE_FAILURE))
