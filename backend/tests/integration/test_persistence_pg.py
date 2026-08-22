@@ -23,6 +23,7 @@ from scanner.application.ports import IncidentRecord
 from scanner.application.ports.repositories import UniverseStateRecord
 from scanner.domain.common import Symbol, SymbolStatus, TradeAggregate
 from scanner.domain.common.universe import UniverseTier
+from scanner.domain.volume import WashRiskState
 from scanner.infrastructure.persistence.database import build_session_factory
 from scanner.infrastructure.persistence.repositories import (
     PgCandleRepository,
@@ -269,6 +270,38 @@ async def test_a_bucket_with_no_prints_is_refused_by_the_database(engine) -> Non
 
     with pytest.raises(Exception, match="ck_trade_aggregates_has_prints"):
         await repo.append_many([_aggregate(60, count=0)])
+
+
+async def test_the_wash_risk_tag_round_trips(engine) -> None:
+    """§6.6's tag lives beside §1.4's tier state, on the pattern §6.6 cites."""
+    repo = PgSymbolRepository(build_session_factory(engine))
+
+    await _seed(repo, "WASHUSDT", SymbolStatus.QUARANTINE)
+
+    assert await repo.get_wash_risk("WASHUSDT") == WashRiskState(False, 0)
+
+    await repo.save_wash_risk("WASHUSDT", WashRiskState(tagged=True, clean_days=2))
+
+    assert await repo.get_wash_risk("WASHUSDT") == WashRiskState(True, 2)
+
+
+async def test_an_unknown_symbol_is_untagged_rather_than_an_error(engine) -> None:
+    """§6.6 caps a score. A caller asking about a symbol the registry has not
+    seen should get "no evidence", not an exception."""
+    repo = PgSymbolRepository(build_session_factory(engine))
+
+    assert await repo.get_wash_risk("NEVERHEARDOFITUSDT") == WashRiskState()
+
+
+async def test_the_clean_day_counter_cannot_pass_the_lift_threshold(engine) -> None:
+    """§6.6 lifts at three, so a stored three would be a tag that should
+    already be gone."""
+    repo = PgSymbolRepository(build_session_factory(engine))
+
+    await _seed(repo, "CLEANUSDT", SymbolStatus.QUARANTINE)
+
+    with pytest.raises(Exception, match="ck_symbols_wash_clean_days"):
+        await repo.save_wash_risk("CLEANUSDT", WashRiskState(tagged=True, clean_days=3))
 
 
 async def test_incident_roundtrip(engine) -> None:

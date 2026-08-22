@@ -53,6 +53,7 @@ from scanner.infrastructure.persistence.liquidity_detection_repositories import 
 )
 from scanner.infrastructure.persistence.repositories import (
     PgCandleRepository,
+    PgSymbolRepository,
     PgTradeAggregateRepository,
 )
 from scanner.infrastructure.redis.engine_state import RedisEngineStateStore
@@ -79,6 +80,9 @@ def build_detection_pipeline(
 
     # §6.5's size-skew test reads the T4 minute buckets the ingest folds.
     trade_aggregates = PgTradeAggregateRepository(sessions, clock)
+
+    # §6.7 caps F4 on §6.6's symbol-level tag as well as §6.4's candle one.
+    symbols = PgSymbolRepository(sessions)
     zone_transitions = PgIctZoneTransitionRepository(sessions)
     zone_state = RedisIctZoneStateStore(redis_client)
 
@@ -146,6 +150,7 @@ def build_detection_pipeline(
             zone_interactions,
             pools,
             trade_aggregates,
+            symbols,
             clock,
             EngineStateManager(
                 RedisEngineStateStore(redis_client),
