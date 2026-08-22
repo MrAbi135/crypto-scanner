@@ -95,12 +95,14 @@ from scanner.domain.structure import (
 from scanner.domain.volume import (
     VolumeFactorEvidence,
     cross_validate_abnormal_volume,
+    detect_contraction,
+    detect_expansion,
     detect_volume_spike,
     volume_factor_score,
 )
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v12"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v13"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -117,15 +119,12 @@ G4_ADJACENCY_ATR = Decimal("0.5")
 # silently defaulted -- see the module docstring.
 UNREACHABLE_INPUTS: tuple[str, ...] = (
     "wash_risk",  # §6.6 needs aggTrade aggregates (roadmap S2 T4, never built)
-    # §6.7's four remaining terms. §6.5 has no detector at all, and §6.3's
-    # expansion and contraction are directionless -- §6.7 asks whether each
-    # is "aligned" or "against the claim", and deciding that here would be
-    # inventing a direction the detector never published. The contraction
-    # term is a penalty, so guessing it would punish on no evidence.
+    # §6.5's two terms, and only these two. Its size-skew test needs the
+    # aggTrade per-trade distribution (roadmap S2 T4, never built), and
+    # `stealth_flow` is defined as *failing* that same test, so neither can
+    # be decided without it.
     "institutional_volume",
     "stealth_flow",
-    "expansion_aligned",
-    "contraction_against_claim",
 )
 
 # Not in the constant above, because unlike those it is only *sometimes*
@@ -156,6 +155,8 @@ class _Reading:
     decelerating: bool
     exhausted: bool
     spike_direction: str | None
+    expansion_direction: str | None
+    contracting: bool
     suspect: bool
 
 
@@ -1133,6 +1134,14 @@ def _volume_score(reading: _Reading, direction: str) -> Decimal:
             VolumeFactorEvidence(
                 spike_aligned=reading.spike_direction == direction,
                 opposing_spike=reading.spike_direction == ("DOWN" if direction == "UP" else "UP"),
+                # §6.3's progress test already fixes the direction; #71 read
+                # the detector's discarded sign as an absence of one.
+                expansion_aligned=reading.expansion_direction == direction,
+                # No direction needed. §6.3 calls contraction a warning of
+                # exhaustion, and §6.7 charges it "against an active-move
+                # claim" -- every directional candidate is such a claim, so
+                # the contraction alone is the contrary evidence.
+                contraction_against_claim=reading.contracting,
                 # §6.4's tag, which §6.7 turns into its own INTEGRITY_CAP of 50.
                 integrity_suspect=reading.suspect,
             )
@@ -1211,6 +1220,7 @@ def _read_participation(series: list[Candle]) -> _Reading:
     score = momentum_score(series, last)
     phase = momentum_phase(series, last)
     spike = detect_volume_spike(series, last)
+    expansion = detect_expansion(series, last)
     check = cross_validate_abnormal_volume(series, last)
 
     return _Reading(
@@ -1227,6 +1237,8 @@ def _read_participation(series: list[Candle]) -> _Reading:
         # beside them: both are pure functions of closed candles, so a
         # recomputation cannot disagree with the engine that owns them.
         spike_direction=spike.direction if spike else None,
+        expansion_direction=expansion.direction if expansion else None,
+        contracting=detect_contraction(series, last),
         # The depth half of §6.4 is unread here for the same reason it is
         # unread in the engine -- `market.liquidity_history` is empty -- so
         # both reach the same verdict from the same evidence.

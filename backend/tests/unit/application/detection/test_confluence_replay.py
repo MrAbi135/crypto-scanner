@@ -1826,3 +1826,50 @@ def test_a_fading_series_reads_as_decelerating() -> None:
     """
     assert _read_participation(make_series(trend="fading")).decelerating
     assert not _read_participation(make_series()).decelerating
+
+
+def _expanding(final_close: str) -> list:
+    """Twenty flat candles, then three of rising volume with real progress."""
+    series = [
+        make_candle(
+            timeframe=TF,
+            open_time=BASE + TF.duration * i,
+            open_=Decimal(100),
+            close=Decimal(100),
+            volume=Decimal(10),
+        )
+        for i in range(20)
+    ]
+
+    for offset, volume in enumerate(("14", "16", "18")):
+        index = 20 + offset
+
+        series.append(
+            make_candle(
+                timeframe=TF,
+                open_time=BASE + TF.duration * index,
+                open_=Decimal(100),
+                close=Decimal(final_close) if offset == 2 else Decimal(100),
+                volume=Decimal(volume),
+            )
+        )
+
+    return series
+
+
+def test_the_reading_carries_the_expansion_direction() -> None:
+    """§6.7's "expansion regime aligned" needs a side to be aligned with.
+
+    §6.3's own progress test is `|Cl[i] - O[i+2]|`, and the sign inside that
+    absolute value is the direction. #71 read the discarded sign as an absence
+    of one and declared the term unreachable.
+    """
+    assert _read_participation(_expanding("140")).expansion_direction == "UP"
+    assert _read_participation(_expanding("60")).expansion_direction == "DOWN"
+
+
+def test_a_quiet_market_carries_neither_flag() -> None:
+    reading = _read_participation(make_series())
+
+    assert reading.expansion_direction is None
+    assert not reading.contracting

@@ -103,42 +103,64 @@ def detect_volume_spike(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class VolumeExpansion:
+    """§6.3 expansion, with the direction its own progress test establishes."""
+
+    index: int
+    direction: str
+
+
 def detect_expansion(
     candles: Sequence[Candle],
     index: int,
-) -> bool:
+) -> VolumeExpansion | None:
     """§6.3 expansion: three rising volumes, mean RVOL >= 1.2, real progress.
 
     All three conditions, because volume rising through a sideways grind is not
     expansion -- it is churn, and scoring it as participation validating a move
     would credit a move that is not happening.
+
+    **Returns the direction, not just a fact.** §6.3's own progress test is
+    `|Cl[i] - O[i+2]| >= 0.75 x ATR`, and the sign inside that absolute value
+    is the direction of the expansion -- which §6.3 then relies on: "expansion
+    in *opposing* direction to an active setup is contrary evidence". This
+    function computed the sign and discarded it, so §6.7's "expansion regime
+    aligned" had no source, and I declared it unreachable in #71 on the
+    strength of that.
+
+    None rather than False, so `if detect_expansion(...)` reads the same at
+    every existing call site.
     """
     if index < 2:
-        return False
+        return None
 
     third, second, first = candles[index], candles[index - 1], candles[index - 2]
 
     if not (third.volume > second.volume > first.volume):
-        return False
+        return None
 
     rvols = [relative_volume(candles, i) for i in (index - 2, index - 1, index)]
 
     if any(value is None for value in rvols):
-        return False
+        return None
 
     mean_rvol = sum((value for value in rvols if value is not None), Decimal(0)) / 3
 
     if mean_rvol < EXPANSION_MEAN_RVOL:
-        return False
+        return None
 
     atr = wilder_atr(candles, index)
 
     if atr is None or atr <= 0:
-        return False
+        return None
 
-    progress = abs(third.close - first.open)
+    net = third.close - first.open
 
-    return progress >= EXPANSION_PROGRESS_ATR * atr
+    if abs(net) < EXPANSION_PROGRESS_ATR * atr:
+        return None
+
+    return VolumeExpansion(index=index, direction="UP" if net > 0 else "DOWN")
 
 
 def detect_contraction(
