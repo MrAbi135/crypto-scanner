@@ -51,7 +51,10 @@ from scanner.infrastructure.persistence.liquidity_detection_repositories import 
     PgLiquidityPoolRepository,
     PgLiquidityTransitionRepository,
 )
-from scanner.infrastructure.persistence.repositories import PgCandleRepository
+from scanner.infrastructure.persistence.repositories import (
+    PgCandleRepository,
+    PgTradeAggregateRepository,
+)
 from scanner.infrastructure.redis.engine_state import RedisEngineStateStore
 from scanner.infrastructure.redis.ict_zone_state import RedisIctZoneStateStore
 from scanner.infrastructure.redis.liquidity_state import RedisLiquidityStateStore
@@ -73,6 +76,9 @@ def build_detection_pipeline(
     # Shared: the liquidity engine writes the pool map, confluence reads
     # it back for 4.5 target selection.
     pools = PgLiquidityPoolRepository(sessions)
+
+    # §6.5's size-skew test reads the T4 minute buckets the ingest folds.
+    trade_aggregates = PgTradeAggregateRepository(sessions, clock)
     zone_transitions = PgIctZoneTransitionRepository(sessions)
     zone_state = RedisIctZoneStateStore(redis_client)
 
@@ -139,6 +145,7 @@ def build_detection_pipeline(
             evidence,
             zone_interactions,
             pools,
+            trade_aggregates,
             clock,
             EngineStateManager(
                 RedisEngineStateStore(redis_client),

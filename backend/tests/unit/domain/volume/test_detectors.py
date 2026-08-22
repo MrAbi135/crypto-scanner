@@ -8,8 +8,12 @@ from decimal import Decimal
 import pytest
 from tests.support.builders import make_candle
 
+from scanner.domain.common import TradeAggregate
 from scanner.domain.volume import (
     SPIKE_FLOOR_QUOTE,
+    ParticipationClass,
+    candle_p90,
+    classify_participation,
     cross_validate_abnormal_volume,
     delta_pct,
     detect_contraction,
@@ -311,3 +315,83 @@ class TestAbnormalVolumeCrossValidation:
 
         if check is not None:
             assert check.participants_ok is None
+
+
+class TestInstitutionalSignature:
+    """SLS §6.5."""
+
+    def _aggregate(self, p90: str, count: int = 10) -> TradeAggregate:
+        return TradeAggregate(
+            symbol="BTCUSDT",
+            minute=BASE,
+            taker_buy_volume=Decimal(5),
+            taker_sell_volume=Decimal(5),
+            trade_count=count,
+            mean_trade_size=Decimal(1),
+            stddev_trade_size=Decimal("0.5"),
+            p90_trade_size=Decimal(p90),
+            max_trade_size=Decimal(p90),
+        )
+
+    def _classify(self, **overrides):
+        kwargs = {
+            "rvol": Decimal(2),
+            "delta": Decimal("0.4"),
+            "p90": Decimal(10),
+            "median_p90": Decimal(4),
+            "structural": True,
+            "suspect": False,
+        }
+        kwargs.update(overrides)
+
+        return classify_participation(**kwargs)
+
+    def test_all_four_conditions_make_it_institutional(self) -> None:
+        assert self._classify() is ParticipationClass.INSTITUTIONAL
+
+    def test_quiet_volume_is_retail(self) -> None:
+        assert self._classify(rvol=Decimal(1)) is ParticipationClass.RETAIL
+
+    def test_two_sided_tape_is_retail(self) -> None:
+        """§6.5(3) wants one-sided intent."""
+        assert self._classify(delta=Decimal("0.1")) is ParticipationClass.RETAIL
+
+    def test_size_at_a_random_location_is_retail(self) -> None:
+        """§6.5: "institutional volume *at random locations* is not evidence in
+        this doctrine"."""
+        assert self._classify(structural=False) is ParticipationClass.RETAIL
+
+    def test_many_small_prints_with_strong_delta_is_stealth(self) -> None:
+        """§6.5's iceberg edge case: passes (1)+(3)+(4), fails (2)."""
+        assert self._classify(p90=Decimal(4)) is ParticipationClass.STEALTH
+
+    def test_the_boundary_of_the_size_test_is_institutional(self) -> None:
+        """§6.5 says ">= 2x", so exactly twice qualifies."""
+        assert self._classify(p90=Decimal(8)) is ParticipationClass.INSTITUTIONAL
+
+    def test_an_unmeasured_tape_is_not_retail(self) -> None:
+        """A symbol nobody measured has not been found to be retail flow.
+
+        Reading missing aggTrade coverage as a failed size test would tag every
+        uncovered candle `stealth_flow` and pay it §6.7's five points.
+        """
+        assert self._classify(p90=None, median_p90=None) is None
+
+    def test_a_disqualified_tape_is_retail_not_unmeasured(self) -> None:
+        """§6.5's validation excludes a `suspect_volume` candle, and that
+        exclusion is an answer -- measured and disqualified."""
+        assert self._classify(suspect=True) is ParticipationClass.RETAIL
+
+    def test_an_unwarmed_reading_asks_nothing(self) -> None:
+        assert self._classify(rvol=None) is None
+        assert self._classify(delta=None) is None
+
+    def test_the_candle_percentile_weights_minutes_by_their_prints(self) -> None:
+        """A quiet minute holding one large print must not speak for the candle."""
+        loud = self._aggregate("2", count=99)
+        quiet = self._aggregate("100", count=1)
+
+        assert candle_p90([loud, quiet]) < Decimal(4)
+
+    def test_no_minutes_is_no_percentile(self) -> None:
+        assert candle_p90([]) is None

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -16,6 +16,7 @@ from scanner.application.detection.confluence_replay import (
     HTF_STATE_UNREACHABLE,
     ConfluenceReplayService,
     _read_participation,
+    _size_skew,
 )
 from scanner.application.detection.state import (
     SHIFT_NAMESPACE,
@@ -27,6 +28,7 @@ from scanner.application.ports.ict_evidence import LiquidityEvidenceRecord
 from scanner.application.ports.ict_zone_interactions import IctZoneInteractionRecord
 from scanner.application.ports.ict_zones import IctZoneRecord
 from scanner.application.ports.liquidity_detection import LiquidityPoolRecord
+from scanner.domain.common import TradeAggregate
 from scanner.shared import Timeframe
 
 BASE = datetime(2026, 1, 1, tzinfo=UTC)
@@ -152,6 +154,19 @@ class FakeZoneRepository:
 
     async def list_live(self, symbol, timeframe):
         return tuple(self.zones)
+
+
+class FakeTradeAggregates:
+    """§6.5's T4 minute buckets. Empty unless a test supplies them."""
+
+    def __init__(self, items: list | None = None) -> None:
+        self.items = items or []
+
+    async def append_many(self, aggregates) -> int:
+        return 0
+
+    async def list_between(self, symbol: str, start, end) -> tuple:
+        return tuple(item for item in self.items if start <= item.minute < end)
 
 
 class FakePools:
@@ -357,6 +372,7 @@ def service(
     htf_trend: str | None = None,
     interactions: dict[str, list] | None = None,
     pools: list | None = None,
+    minutes: list | None = None,
 ):
     repo = FakeEventRepository(events)
 
@@ -385,6 +401,7 @@ def service(
         FakeEvidenceRepository(liquidity),
         FakeInteractions(interactions),
         FakePools(pools),
+        FakeTradeAggregates(minutes),
         FakeClock(),
         shift_state,
         shift_algo_version=SHIFT_ALGO,
@@ -1873,3 +1890,51 @@ def test_a_quiet_market_carries_neither_flag() -> None:
 
     assert reading.expansion_direction is None
     assert not reading.contracting
+
+
+def _minute(offset: int, p90: str, *, count: int = 10) -> TradeAggregate:
+    """One T4 bucket, `offset` minutes before the newest candle's open."""
+    return TradeAggregate(
+        symbol="BTCUSDT",
+        minute=BASE + TF.duration * (CANDLES - 1) - timedelta(minutes=offset),
+        taker_buy_volume=Decimal(5),
+        taker_sell_volume=Decimal(5),
+        trade_count=count,
+        mean_trade_size=Decimal(1),
+        stddev_trade_size=Decimal("0.5"),
+        p90_trade_size=Decimal(p90),
+        max_trade_size=Decimal(p90),
+    )
+
+
+def test_minutes_are_attributed_to_the_candle_they_fell_in() -> None:
+    """§6.5 compares this candle's p90 against the trailing twenty candles'.
+
+    The newest candle's own minutes must not leak into the median it is
+    measured against, or a big print raises the bar it has to clear.
+    """
+    series = make_series()
+
+    # H4 candles: minute 0 is inside the newest one, minute 300 is five hours
+    # back and so belongs to an earlier candle.
+    current, trailing = _size_skew(
+        series,
+        [_minute(0, "20"), _minute(300, "3"), _minute(600, "5")],
+        TF,
+    )
+
+    assert current == Decimal(20)
+    assert trailing == Decimal(4)
+
+
+def test_no_coverage_is_no_reading_rather_than_a_zero_one() -> None:
+    """§6.5 validates on "aggTrade data fresh"; an uncovered candle has not
+    been found to lack big prints, it has not been looked at."""
+    assert _size_skew(make_series(), [], TF) == (None, None)
+
+
+def test_the_reading_carries_the_taker_imbalance() -> None:
+    """§6.5(3) is `|delta_pct| >= 0.30`, and nothing was reading it for F4."""
+    reading = _read_participation(make_series())
+
+    assert reading.delta is not None
