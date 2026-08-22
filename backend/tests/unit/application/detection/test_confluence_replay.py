@@ -14,6 +14,7 @@ from tests.support.builders import make_candle
 from scanner.application.detection.confluence_replay import (
     CONFLUENCE_ALGO_VERSION,
     HTF_STATE_UNREACHABLE,
+    UNREACHABLE_INPUTS,
     ConfluenceReplayService,
     _read_participation,
     _size_skew,
@@ -29,6 +30,7 @@ from scanner.application.ports.ict_zone_interactions import IctZoneInteractionRe
 from scanner.application.ports.ict_zones import IctZoneRecord
 from scanner.application.ports.liquidity_detection import LiquidityPoolRecord
 from scanner.domain.common import TradeAggregate
+from scanner.domain.volume import WashRiskState
 from scanner.shared import Timeframe
 
 BASE = datetime(2026, 1, 1, tzinfo=UTC)
@@ -154,6 +156,16 @@ class FakeZoneRepository:
 
     async def list_live(self, symbol, timeframe):
         return tuple(self.zones)
+
+
+class FakeSymbols:
+    """§6.6's symbol-level tag, which §6.7 caps F4 on."""
+
+    def __init__(self, wash_risk: bool = False) -> None:
+        self.state = WashRiskState(tagged=wash_risk)
+
+    async def get_wash_risk(self, exchange_symbol: str) -> WashRiskState:
+        return self.state
 
 
 class FakeTradeAggregates:
@@ -373,6 +385,7 @@ def service(
     interactions: dict[str, list] | None = None,
     pools: list | None = None,
     minutes: list | None = None,
+    wash_risk: bool = False,
 ):
     repo = FakeEventRepository(events)
 
@@ -402,6 +415,7 @@ def service(
         FakeInteractions(interactions),
         FakePools(pools),
         FakeTradeAggregates(minutes),
+        FakeSymbols(wash_risk),
         FakeClock(),
         shift_state,
         shift_algo_version=SHIFT_ALGO,
@@ -742,14 +756,19 @@ async def test_the_best_zone_in_the_stack_is_scored_not_the_newest() -> None:
 @pytest.mark.asyncio
 async def test_unreachable_inputs_are_named_in_the_stored_record() -> None:
     """A stored confidence whose missing inputs are not stated cannot be read
-    honestly a month later."""
+    honestly a month later.
+
+    Nothing is structurally unreadable any more, so what a record names now is
+    conditional: this fixture writes no state for the rung above, and the
+    series sits outside a dealing range.
+    """
     svc, repo = service(**bullish_setup())
 
     await run(svc)
 
     payload = json.loads(next(iter(repo.appended.values())).payload)
 
-    assert "wash_risk" in payload["unreachable_inputs"]
+    assert HTF_STATE_UNREACHABLE in payload["unreachable_inputs"]
 
     # §4.5 selects the target pool now, so naming it here would understate a
     # score that did read it.
@@ -1938,3 +1957,47 @@ def test_the_reading_carries_the_taker_imbalance() -> None:
     reading = _read_participation(make_series())
 
     assert reading.delta is not None
+
+
+@pytest.mark.asyncio
+async def test_a_wash_risk_symbol_has_f4_capped_like_a_suspect_candle() -> None:
+    """§6.7: "hard cap 50 if `wash_risk` or `suspect_volume`".
+
+    §6.4's tag is about one candle; §6.6's is about the symbol's whole tape,
+    and until now nothing produced it.
+    """
+    setup = bullish_setup()
+
+    clean, _ = service(**setup, candles=make_series(last_volume="250", last_trades=40))
+
+    tagged_svc, _ = service(
+        **setup,
+        candles=make_series(last_volume="250", last_trades=40),
+        wash_risk=True,
+    )
+
+    a = next(c for c in (await run(tagged_svc, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(clean, "BULLISH")).candidates if c.direction == "UP")
+
+    assert b.factors["F4"] == Decimal(65)
+    assert a.factors["F4"] == Decimal(50)
+
+
+@pytest.mark.asyncio
+async def test_no_scoring_input_is_structurally_unreadable() -> None:
+    """`UNREACHABLE_INPUTS` is the list of terms no engine can supply at all.
+
+    It is empty for the first time. A record can still name `htf_state` or
+    `pd_context` -- those are *conditional*: the rung above had no state on
+    this pass, or price sat outside a dealing range. That is a fact about the
+    market, not about the build, and `_unreachable` adds them per candidate.
+    """
+    assert UNREACHABLE_INPUTS == ()
+
+    svc, repo = service(**bullish_setup())
+
+    await run(svc, "BULLISH")
+
+    payload = json.loads(next(iter(repo.appended.values())).payload)
+
+    assert "wash_risk" not in payload["unreachable_inputs"]

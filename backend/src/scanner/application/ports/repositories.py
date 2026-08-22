@@ -9,6 +9,7 @@ from typing import Protocol
 
 from scanner.domain.common import Candle, Symbol, TradeAggregate
 from scanner.domain.common.universe import UniverseTier
+from scanner.domain.volume import WashRiskState
 from scanner.shared import Timeframe
 
 
@@ -68,6 +69,12 @@ class SymbolRepository(Protocol):
         ...
 
     async def list_active(self) -> Sequence[Symbol]: ...
+
+    async def get_wash_risk(self, exchange_symbol: str) -> WashRiskState: ...
+
+    async def save_wash_risk(self, exchange_symbol: str, state: WashRiskState) -> None:
+        """§6.6's daily tag, with the clean-day counter it lifts on."""
+        ...
 
     async def list_observable(self) -> Sequence[Symbol]:
         """Everything the daily universe job should measure (§1.4).

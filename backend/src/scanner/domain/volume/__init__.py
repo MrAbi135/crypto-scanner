@@ -52,6 +52,16 @@ from scanner.domain.volume.factor import (
     VolumeFactorEvidence,
     volume_factor_score,
 )
+from scanner.domain.volume.fake_volume import (
+    FakeVolumeTests,
+    WashRiskState,
+    evaluate_wash_risk,
+    excess_suspect_candles,
+    fake_volume_score,
+    round_trip_symmetry,
+    tags_wash_risk,
+    trade_size_uniformity,
+)
 
 __all__ = [
     "BASELINE_CANDLES",
@@ -61,6 +71,7 @@ __all__ = [
     "INSTITUTIONAL_MEDIAN_WINDOW",
     "SPIKE_FLOOR_QUOTE",
     "AbnormalVolumeCheck",
+    "FakeVolumeTests",
     "ParticipationClass",
     "RvolClass",
     "VolumeContribution",
@@ -68,6 +79,7 @@ __all__ = [
     "VolumeFactor",
     "VolumeFactorEvidence",
     "VolumeSpike",
+    "WashRiskState",
     "baseline_sample",
     "candle_p90",
     "classify",
@@ -77,8 +89,14 @@ __all__ = [
     "detect_contraction",
     "detect_expansion",
     "detect_volume_spike",
+    "evaluate_wash_risk",
+    "excess_suspect_candles",
+    "fake_volume_score",
     "median",
     "relative_volume",
+    "round_trip_symmetry",
+    "tags_wash_risk",
+    "trade_size_uniformity",
     "uses_seasonal_baseline",
     "volume_factor_score",
 ]

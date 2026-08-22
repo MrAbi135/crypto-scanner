@@ -35,6 +35,7 @@ from scanner.domain.common import (
     TradeAggregate,
 )
 from scanner.domain.common.universe import UniverseTier
+from scanner.domain.volume import WashRiskState
 from scanner.infrastructure.persistence.models import (
     CandleRow,
     IncidentRow,
@@ -120,6 +121,45 @@ class PgSymbolRepository:
             await session.commit()
 
             return int(result.rowcount or 0)  # type: ignore[attr-defined]  # type: ignore[attr-defined]
+
+    async def get_wash_risk(
+        self,
+        exchange_symbol: str,
+    ) -> WashRiskState:
+        async with self._sessions() as session:
+            row = (
+                await session.execute(
+                    select(SymbolRow).where(SymbolRow.exchange_symbol == exchange_symbol)
+                )
+            ).scalar_one_or_none()
+
+            if row is None:
+                # An unknown symbol is untagged rather than an error: §6.6 caps
+                # a score, and a caller asking about a symbol the registry has
+                # not seen should get "no evidence", not an exception.
+                return WashRiskState()
+
+            return WashRiskState(tagged=row.wash_risk, clean_days=row.wash_clean_days)
+
+    async def save_wash_risk(
+        self,
+        exchange_symbol: str,
+        state: WashRiskState,
+    ) -> None:
+        async with self._sessions() as session:
+            row = (
+                await session.execute(
+                    select(SymbolRow).where(SymbolRow.exchange_symbol == exchange_symbol)
+                )
+            ).scalar_one_or_none()
+
+            if row is None:
+                raise LookupError(f"Unknown symbol: {exchange_symbol}")
+
+            row.wash_risk = state.tagged
+            row.wash_clean_days = state.clean_days
+
+            await session.commit()
 
     async def list_observable(
         self,
