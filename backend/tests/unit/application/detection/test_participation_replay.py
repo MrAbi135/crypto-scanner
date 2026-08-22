@@ -44,7 +44,14 @@ class FakeEventRepository:
         return [r.event_type for r in self.events.values()]  # type: ignore[attr-defined]
 
 
-def candle(index: int, *, volume: str = "10", quote: Decimal = BIG_QUOTE, close: str = "101"):
+def candle(
+    index: int,
+    *,
+    volume: str = "10",
+    quote: Decimal = BIG_QUOTE,
+    close: str = "101",
+    trades: int = 10,
+):
     return make_candle(
         timeframe=Timeframe.H4,
         open_time=BASE + Timeframe.H4.duration * index,
@@ -52,6 +59,7 @@ def candle(index: int, *, volume: str = "10", quote: Decimal = BIG_QUOTE, close:
         close=Decimal(close),
         volume=Decimal(volume),
         quote_volume=quote,
+        trade_count=trades,
     )
 
 
@@ -145,3 +153,52 @@ async def test_an_inverted_window_is_refused() -> None:
 
     with pytest.raises(ValueError, match="end must be greater"):
         await svc.run("BTCUSDT", Timeframe.H4, BASE, BASE)
+
+
+@pytest.mark.asyncio
+async def test_an_abnormal_candle_on_the_same_trade_count_is_tagged_suspect() -> None:
+    """§6.4: "many participants, not one wash loop".
+
+    Five times the baseline volume with the trade count unmoved is one account
+    cycling size, and §6.4 makes the cross-validation mandatory before that
+    candle may contribute a positive score.
+    """
+    series = [candle(i) for i in range(20)] + [candle(20, volume="60")]
+
+    svc, repo = service(series)
+
+    report = await run(svc)
+
+    assert report.suspect_volume == 1
+
+    tagged = next(r for r in repo.events.values() if r.event_type == "VOLUME_SUSPECT")  # type: ignore[attr-defined]
+
+    payload = json.loads(tagged.payload)  # type: ignore[attr-defined]
+
+    assert payload["participants_ok"] is False
+    # `market.liquidity_history` is empty, so the book half has no verdict --
+    # and the record says so rather than implying a clean bill.
+    assert payload["depth_ok"] is None
+    assert payload["validated"] is False
+
+
+@pytest.mark.asyncio
+async def test_an_abnormal_candle_with_real_participation_is_not_tagged() -> None:
+    series = [candle(i) for i in range(20)] + [candle(20, volume="60", trades=40)]
+
+    svc, repo = service(series)
+
+    report = await run(svc)
+
+    assert report.suspect_volume == 0
+    assert not [r for r in repo.events.values() if r.event_type == "VOLUME_SUSPECT"]  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_a_merely_elevated_candle_is_not_cross_examined() -> None:
+    """§6.4 keys on the ABNORMAL class, not on any candle that stands out."""
+    series = [candle(i) for i in range(20)] + [candle(20, volume="30")]
+
+    svc, _ = service(series)
+
+    assert (await run(svc)).suspect_volume == 0

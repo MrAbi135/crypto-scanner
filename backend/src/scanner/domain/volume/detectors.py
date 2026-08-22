@@ -14,7 +14,7 @@ from decimal import Decimal
 
 from scanner.domain.common import Candle
 from scanner.domain.common.atr import wilder_atr
-from scanner.domain.common.rvol import RvolClass, classify, relative_volume
+from scanner.domain.common.rvol import RvolClass, classify, median, relative_volume
 
 # P.volume.spike_floor -- an absolute quote-volume floor so a micro-cap's $8k
 # "spike" cannot score merely by being 5x its own tiny baseline (§6.2).
@@ -178,3 +178,93 @@ def detect_contraction(
     )
 
     return mean_range <= CONTRACTION_MEAN_RANGE_ATR * atr
+
+
+# §6.4: "trade-count on candle >= 3x its 20-candle median".
+TRADE_COUNT_MULTIPLE = Decimal(3)
+TRADE_COUNT_WINDOW = 20
+
+# §6.4: "depth >= 50% of its 7-day median".
+DEPTH_FLOOR_FRACTION = Decimal("0.5")
+
+
+@dataclass(frozen=True, slots=True)
+class AbnormalVolumeCheck:
+    """§6.4's cross-validation of one ABNORMAL candle.
+
+    Three outcomes, not two. A test that could not be run is neither a pass
+    nor a failure, and collapsing it into either is the mistake this whole
+    codebase keeps making: treating it as a pass awards integrity nobody
+    measured, treating it as a failure accuses a symbol on no evidence.
+    """
+
+    participants_ok: bool | None
+    depth_ok: bool | None
+
+    @property
+    def suspect(self) -> bool:
+        """§6.4: "failing either => tag `suspect_volume`"."""
+        return self.participants_ok is False or self.depth_ok is False
+
+    @property
+    def validated(self) -> bool:
+        """Whether §6.4's "mandatory cross-validation" actually completed.
+
+        §6.4 gates the *positive* contribution on it -- "before it may
+        contribute positive score" -- so an incomplete check must not pay,
+        even though it also must not tag.
+        """
+        return self.participants_ok is not None and self.depth_ok is not None
+
+
+def cross_validate_abnormal_volume(
+    candles: Sequence[Candle],
+    index: int,
+    *,
+    depth: Decimal | None = None,
+    median_depth_7d: Decimal | None = None,
+) -> AbnormalVolumeCheck | None:
+    """§6.4, for a candle whose RVOL class is ABNORMAL. None if it is not.
+
+    Test 1 is "many participants, not one wash loop": a candle can only be
+    five times its baseline volume on real flow if the count of trades rose
+    with it. Test 2 is the book: volume that the depth cannot support is
+    tape, not liquidity.
+
+    `depth` and `median_depth_7d` are optional because
+    `market.liquidity_history` is empty until the daily universe job has run;
+    absent either, the depth half reports None rather than a verdict.
+    """
+    if index < 0 or index >= len(candles):
+        return None
+
+    if classify(relative_volume(candles, index)) is not RvolClass.ABNORMAL:
+        return None
+
+    return AbnormalVolumeCheck(
+        participants_ok=_participants_ok(candles, index),
+        depth_ok=_depth_ok(depth, median_depth_7d),
+    )
+
+
+def _participants_ok(candles: Sequence[Candle], index: int) -> bool | None:
+    window = candles[max(0, index - TRADE_COUNT_WINDOW) : index]
+
+    if len(window) < TRADE_COUNT_WINDOW:
+        # A short window is not a low median, it is no median. §1.9's warm-up
+        # gate keeps production clear of this.
+        return None
+
+    baseline = median([Decimal(candle.trade_count) for candle in window])
+
+    if baseline is None or baseline <= 0:
+        return None
+
+    return Decimal(candles[index].trade_count) >= TRADE_COUNT_MULTIPLE * baseline
+
+
+def _depth_ok(depth: Decimal | None, median_depth_7d: Decimal | None) -> bool | None:
+    if depth is None or median_depth_7d is None or median_depth_7d <= 0:
+        return None
+
+    return depth >= DEPTH_FLOOR_FRACTION * median_depth_7d

@@ -55,6 +55,7 @@ def make_series(
     *,
     trend: str = "up",
     last_volume: str = "50",
+    last_trades: int = 10,
 ) -> list:
     """A steadily trending context, with the newest candle's volume settable."""
     out = []
@@ -73,6 +74,10 @@ def make_series(
                 open_=base,
                 close=base + (1 if trend == "up" else -1),
                 volume=Decimal(last_volume) if i == count - 1 else Decimal(50),
+                # §6.4 asks whether the participant count rose with the
+                # volume, so a fixture that spikes one without the other is
+                # a wash signature by construction.
+                trade_count=last_trades if i == count - 1 else 10,
             )
         )
 
@@ -859,22 +864,68 @@ async def test_an_internal_pool_is_not_the_target_and_nearest_wins() -> None:
 
 
 @pytest.mark.asyncio
-async def test_volume_reads_rvol_at_the_newest_candle() -> None:
-    """§6.2's RVOL is a per-candle measurement, so F4 reads it at the close.
+async def test_f4_is_the_published_volume_factor_not_the_rvol_ratio() -> None:
+    """§8.3.1: "Volume Factor Score as published" (§6.7), whose base is 50.
 
-    Scanning the event log for the last VOLUME_SPIKE answers a different
-    question -- "did one ever happen in this window" -- and over a long replay
-    the answer is always yes.
+    `volume_factor` passes a 0-100 score through unmodified and the call site
+    handed it `reading.rvol` — between 0 and about 6 on real data. F4 was
+    contributing roughly one point in a hundred where the design allots
+    fifteen percent of the confidence.
+    """
+    svc, _ = service(**bullish_setup())
+
+    candidate = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
+
+    assert candidate.factors["F4"] == Decimal(50)
+
+
+@pytest.mark.asyncio
+async def test_a_spike_with_real_participation_pays_its_fifteen() -> None:
+    setup = bullish_setup()
+
+    svc, _ = service(**setup, candles=make_series(last_volume="250", last_trades=40))
+
+    candidate = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
+
+    assert candidate.factors["F4"] == Decimal(65)
+
+
+@pytest.mark.asyncio
+async def test_a_spike_on_the_same_trade_count_is_capped_at_neutral() -> None:
+    """§6.4 tags it and §6.7 caps it: "hard cap 50 if ... `suspect_volume`".
+
+    Five times the volume on an unchanged trade count is one account cycling
+    size. The assertion was meaningless while F4 carried the RVOL ratio — the
+    score could not reach 50, so the cap could not bind.
     """
     setup = bullish_setup()
 
-    spiking, _ = service(**setup, candles=make_series(last_volume="250"))
-    quiet, _ = service(**setup)
+    svc, _ = service(**setup, candles=make_series(last_volume="250"))
 
-    a = next(c for c in (await run(spiking, "BULLISH")).candidates if c.direction == "UP")
-    b = next(c for c in (await run(quiet, "BULLISH")).candidates if c.direction == "UP")
+    candidate = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
 
-    assert a.factors["F4"] > b.factors["F4"]
+    # 50 base + 15 aligned spike = 65, capped back to 50.
+    assert candidate.factors["F4"] == Decimal(50)
+
+
+@pytest.mark.asyncio
+async def test_a_spike_the_other_way_costs_twenty() -> None:
+    """Below the cap, so the integrity tag does not lift it either."""
+    setup = bullish_setup()
+
+    svc, _ = service(
+        **{
+            **setup,
+            "zones": [zone("z1", band_low=DOWN_LAST_CLOSE - 1, band_high=DOWN_LAST_CLOSE + 1)],
+        },
+        # 350, not 250: the down series prices lower, and 250 x ~941 falls
+        # under §6.2's absolute $250k quote floor, so no spike confirms.
+        candles=make_series(trend="down", last_volume="350"),
+    )
+
+    candidate = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
+
+    assert candidate.factors["F4"] == Decimal(30)
 
 
 @pytest.mark.asyncio

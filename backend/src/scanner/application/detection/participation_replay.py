@@ -34,13 +34,14 @@ from scanner.domain.momentum import (
     momentum_score,
 )
 from scanner.domain.volume import (
+    cross_validate_abnormal_volume,
     detect_contraction,
     detect_expansion,
     detect_volume_spike,
 )
 from scanner.shared import Timeframe
 
-PARTICIPATION_ALGO_VERSION = "s7-participation-v1"
+PARTICIPATION_ALGO_VERSION = "s7-participation-v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +50,7 @@ class ParticipationReplayReport:
     timeframe: Timeframe
     candles: int
     volume_spikes: int
+    suspect_volume: int
     expansions: int
     contractions: int
     range_expansions: int
@@ -106,6 +108,42 @@ class ParticipationReplayService:
         candle: Candle,
         report: _Counters,
     ) -> None:
+        # §6.4 keys on the ABNORMAL *class*, not on a spike. `detect_volume_spike`
+        # additionally requires §6.2's absolute quote floor, so an abnormal candle
+        # on a thin symbol produces no spike -- and that is exactly the candle
+        # §6.4 exists to cross-examine.
+        check = cross_validate_abnormal_volume(
+            series,
+            index,
+            # `market.liquidity_history` is empty until the daily universe job
+            # has run, so the depth half reports None rather than a verdict.
+            # Passing the repository today would read the same empty history;
+            # it arrives with §6.6, which needs it for its own depth test.
+            depth=None,
+            median_depth_7d=None,
+        )
+
+        if check is not None and check.suspect:
+            report.suspect_volume += 1
+
+            await self._emit(
+                symbol,
+                timeframe,
+                "VOLUME_SUSPECT",
+                candle,
+                {
+                    "rvol": str(relative_volume(series, index)),
+                    "participants_ok": check.participants_ok,
+                    "depth_ok": check.depth_ok,
+                    # False whenever a test could not be run. §6.4 gates the
+                    # positive contribution on the check completing, so a
+                    # reader must be able to tell a clean bill from a partial
+                    # one.
+                    "validated": check.validated,
+                },
+                report,
+            )
+
         spike = detect_volume_spike(series, index)
 
         if spike is not None:
@@ -245,6 +283,7 @@ class ParticipationReplayService:
 @dataclass
 class _Counters:
     volume_spikes: int = 0
+    suspect_volume: int = 0
     expansions: int = 0
     contractions: int = 0
     range_expansions: int = 0
@@ -264,6 +303,7 @@ class _Counters:
             timeframe=timeframe,
             candles=candles,
             volume_spikes=self.volume_spikes,
+            suspect_volume=self.suspect_volume,
             expansions=self.expansions,
             contractions=self.contractions,
             range_expansions=self.range_expansions,

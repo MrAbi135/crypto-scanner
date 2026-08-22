@@ -10,6 +10,7 @@ from tests.support.builders import make_candle
 
 from scanner.domain.volume import (
     SPIKE_FLOOR_QUOTE,
+    cross_validate_abnormal_volume,
     delta_pct,
     detect_contraction,
     detect_expansion,
@@ -31,6 +32,7 @@ def candle(
     high: str | None = None,
     low: str | None = None,
     taker_buy: str | None = None,
+    trades: int = 10,
 ):
     vol = Decimal(volume)
 
@@ -46,12 +48,13 @@ def candle(
         # Balanced tape unless a test says otherwise, so delta is exactly zero
         # and cannot accidentally satisfy the conviction threshold.
         taker_buy_volume=Decimal(taker_buy) if taker_buy is not None else vol / 2,
+        trade_count=trades,
     )
 
 
-def flat_then(final, *, count: int = 20, volume: str = "10"):
+def flat_then(final, *, count: int = 20, volume: str = "10", trades: int = 10):
     """`count` identical candles so the baseline is complete, then `final`."""
-    return [candle(index=i, volume=volume) for i in range(count)] + [final]
+    return [candle(index=i, volume=volume, trades=trades) for i in range(count)] + [final]
 
 
 class TestDeltaPct:
@@ -206,3 +209,91 @@ class TestContraction:
 
     def test_too_early_in_the_series_cannot_contract(self) -> None:
         assert detect_contraction([candle(index=0, volume="1")], 0) is False
+
+
+class TestAbnormalVolumeCrossValidation:
+    """SLS §6.4."""
+
+    def test_a_candle_that_is_not_abnormal_is_not_examined(self) -> None:
+        """§6.4 keys on the ABNORMAL class, not on any large candle."""
+        series = flat_then(candle(index=20, volume="20"))
+
+        assert cross_validate_abnormal_volume(series, 20) is None
+
+    def test_a_wash_loop_fails_the_participant_test(self) -> None:
+        """§6.4: "many participants, not one wash loop".
+
+        Five times the volume on the same trade count is one account cycling
+        size, which is the signature the test exists to catch.
+        """
+        series = flat_then(candle(index=20, volume="60", trades=10))
+
+        check = cross_validate_abnormal_volume(series, 20)
+
+        assert check is not None
+        assert check.participants_ok is False
+        assert check.suspect
+
+    def test_real_flow_brings_its_own_participants(self) -> None:
+        series = flat_then(candle(index=20, volume="60", trades=40))
+
+        check = cross_validate_abnormal_volume(series, 20)
+
+        assert check is not None
+        assert check.participants_ok is True
+        assert not check.suspect
+
+    def test_thin_depth_fails_the_book_test(self) -> None:
+        """Volume the book cannot support is tape, not liquidity."""
+        series = flat_then(candle(index=20, volume="60", trades=40))
+
+        check = cross_validate_abnormal_volume(
+            series,
+            20,
+            depth=Decimal("400"),
+            median_depth_7d=Decimal("1000"),
+        )
+
+        assert check is not None
+        assert check.depth_ok is False
+        assert check.suspect
+
+    def test_depth_at_exactly_half_the_median_still_passes(self) -> None:
+        """§6.4 says "depth >= 50%", so the boundary is inside."""
+        series = flat_then(candle(index=20, volume="60", trades=40))
+
+        check = cross_validate_abnormal_volume(
+            series,
+            20,
+            depth=Decimal("500"),
+            median_depth_7d=Decimal("1000"),
+        )
+
+        assert check is not None
+        assert check.depth_ok is True
+        assert check.validated
+        assert not check.suspect
+
+    def test_an_unread_depth_is_neither_a_pass_nor_a_failure(self) -> None:
+        """`market.liquidity_history` is empty until the daily job has run.
+
+        Reading that as a pass would award integrity nobody measured; reading
+        it as a failure would accuse a symbol on no evidence. §6.4 gates the
+        positive contribution on the check *completing*, which it has not.
+        """
+        series = flat_then(candle(index=20, volume="60", trades=40))
+
+        check = cross_validate_abnormal_volume(series, 20)
+
+        assert check is not None
+        assert check.depth_ok is None
+        assert not check.suspect
+        assert not check.validated
+
+    def test_a_short_window_has_no_median_to_compare_against(self) -> None:
+        series = flat_then(candle(index=5, volume="60", trades=40), count=5)
+
+        check = cross_validate_abnormal_volume(series, 5)
+
+        if check is not None:
+            assert check.participants_ok is None
