@@ -11,8 +11,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import Enum
 
-from scanner.domain.common import Candle
+from scanner.domain.common import Candle, TradeAggregate
 from scanner.domain.common.atr import wilder_atr
 from scanner.domain.common.rvol import RvolClass, classify, median, relative_volume
 
@@ -290,3 +291,100 @@ def _depth_ok(depth: Decimal | None, median_depth_7d: Decimal | None) -> bool | 
         return None
 
     return depth >= DEPTH_FLOOR_FRACTION * median_depth_7d
+
+
+# §6.5's four thresholds, none of them tunable.
+INSTITUTIONAL_MIN_RVOL = Decimal("1.5")
+INSTITUTIONAL_SIZE_SKEW = Decimal(2)
+INSTITUTIONAL_MIN_DELTA = Decimal("0.30")
+INSTITUTIONAL_MEDIAN_WINDOW = 20
+
+
+class ParticipationClass(str, Enum):
+    """§6.5's reading of who was on the tape."""
+
+    INSTITUTIONAL = "INSTITUTIONAL"
+    STEALTH = "STEALTH"
+    RETAIL = "RETAIL"
+
+
+def candle_p90(minutes: Sequence[TradeAggregate]) -> Decimal | None:
+    """The candle's 90th-percentile print size, from its minute buckets.
+
+    **An estimate, and unavoidably so.** A percentile does not compose: the
+    true p90 over a candle needs every print, and SLS §2 discards them once
+    the minute is folded. What survives is one p90 per minute.
+
+    Count-weighted mean of those, rather than the maximum. §6.5 compares this
+    against a median of the same statistic over twenty candles, so the number
+    only has to mean the same thing on both sides -- and the maximum would let
+    one quiet minute holding a single large print speak for the whole candle,
+    which is what `max_trade_size` is for.
+    """
+    if not minutes:
+        return None
+
+    prints = sum(item.trade_count for item in minutes)
+
+    if prints <= 0:
+        return None
+
+    weighted = sum(
+        (item.p90_trade_size * Decimal(item.trade_count) for item in minutes),
+        Decimal(0),
+    )
+
+    return weighted / Decimal(prints)
+
+
+def classify_participation(
+    *,
+    rvol: Decimal | None,
+    delta: Decimal | None,
+    p90: Decimal | None,
+    median_p90: Decimal | None,
+    structural: bool,
+    suspect: bool,
+) -> ParticipationClass | None:
+    """§6.5's institutional signature, and the stealth case beside it.
+
+    All four conditions, and the fourth is the one that makes this doctrine
+    rather than statistics: "institutional volume *at random locations* is not
+    evidence in this doctrine".
+
+    None means the question could not be asked -- no aggTrade coverage, or a
+    reading §1.9's warm-up has not produced yet. It is not RETAIL: a symbol
+    nobody measured has not been found to be retail flow.
+
+    `suspect` returns RETAIL rather than None. §6.5's validation excludes a
+    `suspect_volume` candle outright, and that exclusion *is* an answer -- the
+    tape was measured and disqualified, which is different from unmeasured.
+    """
+    if rvol is None or delta is None:
+        return None
+
+    if suspect:
+        return ParticipationClass.RETAIL
+
+    if rvol < INSTITUTIONAL_MIN_RVOL:
+        return ParticipationClass.RETAIL
+
+    if abs(delta) < INSTITUTIONAL_MIN_DELTA:
+        return ParticipationClass.RETAIL
+
+    if not structural:
+        return ParticipationClass.RETAIL
+
+    if p90 is None or median_p90 is None or median_p90 <= 0:
+        # (1), (3) and (4) hold and the size test cannot be run. That is not
+        # the iceberg case -- §6.5's edge case is a candle that *fails* (2),
+        # which needs the test to have produced an answer.
+        return None
+
+    if p90 >= INSTITUTIONAL_SIZE_SKEW * median_p90:
+        return ParticipationClass.INSTITUTIONAL
+
+    # §6.5: "iceberg-style execution (many small prints, strong delta): passes
+    # (1)+(3)+(4) but fails (2) => tagged `stealth_flow` -- the size test is
+    # sufficient, not necessary, for smart flow".
+    return ParticipationClass.STEALTH

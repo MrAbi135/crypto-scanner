@@ -22,6 +22,7 @@ confidence is readable as the partial figure it is.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -47,8 +48,9 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRecord,
     LiquidityPoolRepository,
 )
-from scanner.domain.common import Candle, wilder_atr, wilder_atr_series
-from scanner.domain.common.rvol import relative_volume
+from scanner.application.ports.repositories import TradeAggregateRepository
+from scanner.domain.common import Candle, TradeAggregate, wilder_atr, wilder_atr_series
+from scanner.domain.common.rvol import median, relative_volume
 from scanner.domain.confluence import (
     Adjustment,
     ArchetypeEvidence,
@@ -93,8 +95,13 @@ from scanner.domain.structure import (
     unbroken_pairs,
 )
 from scanner.domain.volume import (
+    INSTITUTIONAL_MEDIAN_WINDOW,
+    ParticipationClass,
     VolumeFactorEvidence,
+    candle_p90,
+    classify_participation,
     cross_validate_abnormal_volume,
+    delta_pct,
     detect_contraction,
     detect_expansion,
     detect_volume_spike,
@@ -102,7 +109,7 @@ from scanner.domain.volume import (
 )
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v13"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v14"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -118,13 +125,11 @@ G4_ADJACENCY_ATR = Decimal("0.5")
 # Inputs §8 asks for that no engine currently produces. Listed rather than
 # silently defaulted -- see the module docstring.
 UNREACHABLE_INPUTS: tuple[str, ...] = (
-    "wash_risk",  # §6.6 needs aggTrade aggregates (roadmap S2 T4, never built)
-    # §6.5's two terms, and only these two. Its size-skew test needs the
-    # aggTrade per-trade distribution (roadmap S2 T4, never built), and
-    # `stealth_flow` is defined as *failing* that same test, so neither can
-    # be decided without it.
-    "institutional_volume",
-    "stealth_flow",
+    # §6.6 is a symbol-level daily composite and has no detector yet. Its
+    # inputs no longer block it: T4's minute buckets carry the trade-size
+    # dispersion its third test needs, and its depth test waits on the
+    # universe job that #70 unblocked. The detector is the gap now.
+    "wash_risk",
 )
 
 # Not in the constant above, because unlike those it is only *sometimes*
@@ -158,6 +163,9 @@ class _Reading:
     expansion_direction: str | None
     contracting: bool
     suspect: bool
+    delta: Decimal | None
+    p90: Decimal | None
+    median_p90: Decimal | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +238,7 @@ class ConfluenceReplayService:
         evidence: IctEvidenceRepository,
         interactions: IctZoneInteractionRepository,
         pools: LiquidityPoolRepository,
+        trades: TradeAggregateRepository,
         clock: Clock,
         shift_state: EngineStateManager,
         *,
@@ -242,6 +251,7 @@ class ConfluenceReplayService:
         self._evidence = evidence
         self._interactions = interactions
         self._pools = pools
+        self._trades = trades
         self._clock = clock
         self._shift_state = shift_state
         self._shift_algo_version = shift_algo_version
@@ -282,7 +292,20 @@ class ConfluenceReplayService:
 
         event_types = {record.event_type for record in events}
 
-        reading = _read_participation(series)
+        # §6.5 compares this candle's p90 print size against the median of
+        # the same statistic over the trailing twenty, so twenty-one candles of
+        # minute buckets is the whole read -- not the five hundred the rest of
+        # the pass works over, which on H4 would be a hundred thousand rows to
+        # answer a question about one.
+        newest = series[-1]
+
+        minutes = await self._trades.list_between(
+            symbol,
+            newest.open_time - timeframe.duration * INSTITUTIONAL_MEDIAN_WINDOW,
+            newest.open_time + timeframe.duration,
+        )
+
+        reading = _read_participation(series, minutes, timeframe)
 
         labels = _read_labels(events)
 
@@ -394,6 +417,22 @@ class ConfluenceReplayService:
         # internal and deep -- 28 points no single sweep had earned.
         # Ordered by what the section pays for: external (16) outranks
         # depth (12), and recency breaks ties, as it does for the zone.
+        # §6.5(4): the candle has to *be* a structural event candle --
+        # "institutional volume at random locations is not evidence in this
+        # doctrine". At this candle, not within a window: §6.5 says
+        # "coincides".
+        #
+        # Three of the four disjuncts. §5.9's zone Respect is left out because
+        # it belongs to a particular zone, and the zone this setup is scored
+        # against is not chosen until the gates below have passed. Omitting a
+        # disjunct makes the test stricter, so it can only withhold the
+        # institutional tag, never invent one.
+        structural = (
+            last_index in legs.displacement
+            or last_index in bos_breaks.get(direction, frozenset())
+            or any(s.confirmed_index == last_index for s in sweeps)
+        )
+
         best_sweep = max(
             supporting,
             key=lambda s: (s.external, s.depth_atr, s.confirmed_index),
@@ -526,7 +565,7 @@ class ConfluenceReplayService:
                 len(matching_zones),
                 entry_confirmation=history.confirmed,
             ),
-            Factor.VOLUME: _volume_score(reading, direction),
+            Factor.VOLUME: _volume_score(reading, direction, structural),
             Factor.MOMENTUM: momentum_factor(
                 MomentumEvidence(
                     score=reading.score,
@@ -1111,7 +1150,7 @@ def _count_failed_breaks(
     return failed
 
 
-def _volume_score(reading: _Reading, direction: str) -> Decimal:
+def _volume_score(reading: _Reading, direction: str, structural: bool) -> Decimal:
     """F4 — §8.3.1: "Volume Factor Score as published" (§6.7).
 
     It was published as the RVOL *ratio*. `volume_factor` takes a 0-100 score
@@ -1129,6 +1168,17 @@ def _volume_score(reading: _Reading, direction: str) -> Decimal:
     whose answer is nearly always yes — in both directions at once, which
     would award +15 and -20 to every candidate alike.
     """
+    participation = classify_participation(
+        rvol=reading.rvol,
+        delta=reading.delta,
+        p90=reading.p90,
+        median_p90=reading.median_p90,
+        # §6.5(4): "institutional volume *at random locations* is not evidence
+        # in this doctrine".
+        structural=structural,
+        suspect=reading.suspect,
+    )
+
     return volume_factor(
         volume_factor_score(
             VolumeFactorEvidence(
@@ -1142,6 +1192,8 @@ def _volume_score(reading: _Reading, direction: str) -> Decimal:
                 # claim" -- every directional candidate is such a claim, so
                 # the contraction alone is the contrary evidence.
                 contraction_against_claim=reading.contracting,
+                institutional_volume=participation is ParticipationClass.INSTITUTIONAL,
+                stealth_flow=participation is ParticipationClass.STEALTH,
                 # §6.4's tag, which §6.7 turns into its own INTEGRITY_CAP of 50.
                 integrity_suspect=reading.suspect,
             )
@@ -1196,7 +1248,50 @@ def _read_labels(events: tuple[EngineEventRecord, ...]) -> tuple[StructureLabel,
     return tuple(label for _, label in labelled)
 
 
-def _read_participation(series: list[Candle]) -> _Reading:
+def _size_skew(
+    series: Sequence[Candle],
+    minutes: Sequence[TradeAggregate],
+    timeframe: Timeframe | None,
+) -> tuple[Decimal | None, Decimal | None]:
+    """§6.5's two size numbers: this candle's p90, and the trailing median.
+
+    Both from the same estimator, which is the only property the comparison
+    needs -- `candle_p90` explains why an estimator is all there can be.
+
+    `(None, None)` whenever the tape is not covered. §6.5's validation asks for
+    "aggTrade data fresh", and a candle whose minutes are missing has not been
+    found to lack big prints; it has not been looked at.
+    """
+    if timeframe is None or not minutes or not series:
+        return None, None
+
+    buckets: dict[datetime, list[TradeAggregate]] = {}
+
+    step = timeframe.duration
+    origin = series[-1].open_time
+
+    for item in minutes:
+        # Which candle this minute fell in, counted back from the newest so a
+        # partial leading candle cannot shift every bucket by one.
+        offset = (origin - item.minute) // step
+        buckets.setdefault(origin - step * offset, []).append(item)
+
+    current = candle_p90(buckets.get(origin, []))
+
+    trailing = [
+        value
+        for index in range(1, INSTITUTIONAL_MEDIAN_WINDOW + 1)
+        if (value := candle_p90(buckets.get(origin - step * index, []))) is not None
+    ]
+
+    return current, median(trailing) if trailing else None
+
+
+def _read_participation(
+    series: list[Candle],
+    minutes: Sequence[TradeAggregate] = (),
+    timeframe: Timeframe | None = None,
+) -> _Reading:
     """§6 and §7 at the newest candle, recomputed rather than read back.
 
     Scanning the event log for the last VOLUME_SPIKE or MOMENTUM_ACCELERATING
@@ -1219,6 +1314,8 @@ def _read_participation(series: list[Candle]) -> _Reading:
 
     score = momentum_score(series, last)
     phase = momentum_phase(series, last)
+    p90, median_p90 = _size_skew(series, minutes, timeframe)
+
     spike = detect_volume_spike(series, last)
     expansion = detect_expansion(series, last)
     check = cross_validate_abnormal_volume(series, last)
@@ -1243,6 +1340,9 @@ def _read_participation(series: list[Candle]) -> _Reading:
         # unread in the engine -- `market.liquidity_history` is empty -- so
         # both reach the same verdict from the same evidence.
         suspect=check.suspect if check else False,
+        delta=delta_pct(series[last]),
+        p90=p90,
+        median_p90=median_p90,
     )
 
 
