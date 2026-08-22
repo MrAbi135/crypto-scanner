@@ -155,7 +155,21 @@ class TestExpansion:
         return series
 
     def test_rising_volume_with_real_progress_expands(self) -> None:
-        assert detect_expansion(self._rising("140"), 22) is True
+        expansion = detect_expansion(self._rising("140"), 22)
+
+        assert expansion is not None
+        # §6.3's progress test is `|Cl[i] - O[i+2]|`; the sign inside it is
+        # the direction, and §6.7 needs it to decide "expansion regime
+        # aligned". The detector used to discard it.
+        assert expansion.direction == "UP"
+
+    def test_expansion_downward_reports_down(self) -> None:
+        """§6.3: "expansion in *opposing* direction to an active setup is
+        contrary evidence" -- so the direction has to survive the detector."""
+        expansion = detect_expansion(self._rising("60"), 22)
+
+        assert expansion is not None
+        assert expansion.direction == "DOWN"
 
     def test_rising_volume_without_progress_is_churn(self) -> None:
         """§6.3 requires |Cl[i] - O[i+2]| >= 0.75 x ATR.
@@ -163,16 +177,16 @@ class TestExpansion:
         Volume climbing through a sideways grind is participation without a
         move; scoring it as validation would credit a move not happening.
         """
-        assert detect_expansion(self._rising("100"), 22) is False
+        assert detect_expansion(self._rising("100"), 22) is None
 
     def test_volume_must_rise_on_all_three(self) -> None:
         series = self._rising("140")
         series[21] = candle(index=21, volume="9", open_="100", close="100")
 
-        assert detect_expansion(series, 22) is False
+        assert detect_expansion(series, 22) is None
 
     def test_too_early_in_the_series_cannot_expand(self) -> None:
-        assert detect_expansion([candle(index=0, volume="10")], 0) is False
+        assert detect_expansion([candle(index=0, volume="10")], 0) is None
 
 
 class TestContraction:
