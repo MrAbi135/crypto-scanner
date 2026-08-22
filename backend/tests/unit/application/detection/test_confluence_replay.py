@@ -15,6 +15,7 @@ from scanner.application.detection.confluence_replay import (
     CONFLUENCE_ALGO_VERSION,
     HTF_STATE_UNREACHABLE,
     ConfluenceReplayService,
+    _read_participation,
 )
 from scanner.application.detection.state import (
     SHIFT_NAMESPACE,
@@ -58,6 +59,9 @@ def make_series(
     """A steadily trending context, with the newest candle's volume settable."""
     out = []
 
+    if trend == "fading":
+        return _fading_series(count, last_volume)
+
     for i in range(count):
         step = i if trend == "up" else -i
         base = Decimal(1000) + step
@@ -71,6 +75,39 @@ def make_series(
                 volume=Decimal(last_volume) if i == count - 1 else Decimal(50),
             )
         )
+
+    return out
+
+
+# Every candle still closes up, so §7.1 keeps calling the direction UP -- the
+# trend has not turned, it has run out of energy, which is the state §7.2 calls
+# decelerating and §8.3.1 pays nothing for.
+FADE_CANDLES = 10
+FADE_BIG = Decimal(20)
+FADE_SMALL = Decimal(1)
+
+FADING_LAST_CLOSE = Decimal(1000) + FADE_BIG * (CANDLES - FADE_CANDLES) + FADE_SMALL * FADE_CANDLES
+
+
+def _fading_series(count: int, last_volume: str) -> list:
+    out = []
+    price = Decimal(1000)
+
+    for i in range(count):
+        step = FADE_BIG if i < count - FADE_CANDLES else FADE_SMALL
+        close = price + step
+
+        out.append(
+            make_candle(
+                timeframe=TF,
+                open_time=BASE + TF.duration * i,
+                open_=price,
+                close=close,
+                volume=Decimal(last_volume) if i == count - 1 else Decimal(50),
+            )
+        )
+
+        price = close
 
     return out
 
@@ -180,6 +217,31 @@ def event(event_type: str, index: int = 1, **payload) -> EngineEventRecord:
         event_at=at,
         algo_version="test",
         payload=json.dumps(payload),
+        created_at=at,
+    )
+
+
+def swing_event(index: int, label: str, kind: str = "HIGH") -> EngineEventRecord:
+    """A §3.3-labelled swing, as `structure_replay` writes it.
+
+    STRUCTURE_EXTERNAL_*, because that is the event carrying the label --
+    `_persist_swing`'s SWING_* payload has none. Writing this helper against
+    SWING_* is what let the first version of `_read_labels` pass its tests
+    while reading nothing at all in production.
+
+    `event()` cannot be used: its own second parameter is named `index`, and
+    §7.4 needs the candle index inside the payload as well.
+    """
+    at = BASE + TF.duration * index
+
+    return EngineEventRecord(
+        event_key=f"STRUCTURE_EXTERNAL_{label}-{index}",
+        symbol="BTCUSDT",
+        timeframe=TF,
+        event_type=f"STRUCTURE_EXTERNAL_{label}",
+        event_at=at,
+        algo_version="test",
+        payload=json.dumps({"index": index, "label": label}),
         created_at=at,
     )
 
@@ -1504,3 +1566,125 @@ async def test_a_zone_with_no_mss_origin_is_not_the_a1_retest() -> None:
     report = await run(svc, "BULLISH")
 
     assert next(c for c in report.candidates if c.direction == "UP").archetype != "A1"
+
+
+@pytest.mark.asyncio
+async def test_an_unread_break_record_pays_nothing() -> None:
+    """§3.5 records a failed break as a fact and no detector in this build does.
+
+    Passing 0 said the market produced none, which is a claim nobody made, and
+    handed all 15 of F1's clean-record points to every candidate.
+    """
+    svc, repo = service(**bullish_setup())
+
+    candidate = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
+
+    # A confirmed, displaced MSS with no external break and no trend history:
+    # 15 confirmed + 18 displaced + 10 mss, and nothing for the record.
+    assert candidate.factors["F1"] == Decimal(43)
+
+    payload = json.loads(next(iter(repo.appended.values())).payload)
+
+    assert "failed_breaks" in payload["unreachable_inputs"]
+
+
+@pytest.mark.asyncio
+async def test_trend_maturity_is_read_from_the_swing_labels() -> None:
+    """§7.4's pairs, from the labels §3.3 already writes into each payload.
+
+    Left at zero, these 30 points could not be earned by any candidate.
+    """
+    setup = bullish_setup()
+
+    with_trend, _ = service(
+        **{
+            **setup,
+            "events": [
+                *setup["events"],
+                swing_event(10, "HH"),
+                swing_event(11, "HL", kind="LOW"),
+                swing_event(12, "HH"),
+                swing_event(13, "HL", kind="LOW"),
+            ],
+        }
+    )
+    # One labelled swing, so the baseline carries F1's external-break term
+    # too and the only thing left between them is trend maturity.
+    without, _ = service(**{**setup, "events": [*setup["events"], swing_event(10, "HH")]})
+
+    a = next(c for c in (await run(with_trend, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(without, "BULLISH")).candidates if c.direction == "UP")
+
+    # Two pairs of the four §8.3.1 pays in full: 2 / 4 x 30.
+    assert a.factors["F1"] - b.factors["F1"] == Decimal(15)
+
+
+@pytest.mark.asyncio
+async def test_a_broken_run_stops_paying_trend_maturity() -> None:
+    """One contrary label ends the count -- that is what "unbroken" means."""
+    setup = bullish_setup()
+
+    svc, _ = service(
+        **{
+            **setup,
+            "events": [
+                *setup["events"],
+                swing_event(10, "HH"),
+                swing_event(11, "HL", kind="LOW"),
+                swing_event(12, "LH"),
+            ],
+        }
+    )
+    without, _ = service(**{**setup, "events": [*setup["events"], swing_event(10, "HH")]})
+
+    a = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(without, "BULLISH")).candidates if c.direction == "UP")
+
+    # HH, HL, LH: the pair is there but the run is not, so nothing is paid.
+    assert a.factors["F1"] == b.factors["F1"]
+
+
+@pytest.mark.asyncio
+async def test_a_decelerating_market_is_not_paid_as_a_steady_one() -> None:
+    """§8.3.1: "accelerating 25 · neither 12 · decelerating 0".
+
+    `momentum_factor` has always read `decelerating`; nothing ever set it, so
+    a fading trend collected the 12 points that belong to a steady one.
+    """
+    setup = bullish_setup()
+
+    fading, _ = service(
+        **{
+            **setup,
+            "zones": [zone("z1", band_low=FADING_LAST_CLOSE - 1, band_high=FADING_LAST_CLOSE + 1)],
+        },
+        candles=make_series(trend="fading"),
+    )
+    steady, _ = service(**setup)
+
+    a = next(c for c in (await run(fading, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(steady, "BULLISH")).candidates if c.direction == "UP")
+
+    # Aligned momentum is the only component left standing: no 25 or 12 for
+    # acceleration, and no 20 for absent exhaustion -- §7.2 derives
+    # `exhaustion_watch` *from* deceleration, so a trend that fades while
+    # still grinding out new highs loses both. Asserting the whole factor
+    # equals its aligned term says that more exactly than a difference would,
+    # since the momentum score moves between the two series as well.
+    fading_score = _read_participation(make_series(trend="fading")).score
+
+    assert a.factors["F5"] == fading_score * Decimal("0.55")
+
+    # The steady series keeps the 12 and the 20 that the fading one loses.
+    assert b.factors["F5"] - _read_participation(make_series()).score * Decimal("0.55") == 32
+
+
+def test_a_fading_series_reads_as_decelerating() -> None:
+    """The wiring, isolated from what the score then does with it.
+
+    `momentum_factor` has always branched on `decelerating`; `_Reading` never
+    carried it, so the branch was dead and every fading market was paid as a
+    steady one.
+    """
+    assert _read_participation(make_series(trend="fading")).decelerating
+    assert not _read_participation(make_series()).decelerating

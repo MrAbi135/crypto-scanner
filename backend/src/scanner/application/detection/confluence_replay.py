@@ -85,10 +85,16 @@ from scanner.domain.momentum import (
     momentum_score,
     segment_legs,
 )
-from scanner.domain.structure import SwingPoint, TrendState, detect_external_swings
+from scanner.domain.structure import (
+    StructureLabel,
+    SwingPoint,
+    TrendState,
+    detect_external_swings,
+    unbroken_pairs,
+)
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v9"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v10"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -105,6 +111,7 @@ G4_ADJACENCY_ATR = Decimal("0.5")
 # silently defaulted -- see the module docstring.
 UNREACHABLE_INPUTS: tuple[str, ...] = (
     "wash_risk",  # §6.6 needs aggTrade aggregates (roadmap S2 T4, never built)
+    "failed_breaks",  # §3.5 specifies the fact; no detector records it
 )
 
 # Not in the constant above, because unlike those it is only *sometimes*
@@ -132,6 +139,7 @@ class _Reading:
     score: Decimal
     direction: str | None
     accelerating: bool
+    decelerating: bool
     exhausted: bool
 
 
@@ -259,6 +267,8 @@ class ConfluenceReplayService:
 
         reading = _read_participation(series)
 
+        labels = _read_labels(events)
+
         price = series[-1].close
         atr = wilder_atr(series, len(series) - 1)
 
@@ -282,6 +292,7 @@ class ConfluenceReplayService:
                 trend_state=trend_state,
                 event_types=event_types,
                 liquidity=liquidity,
+                labels=labels,
                 resting=resting,
                 live_zones=live_zones,
                 reading=reading,
@@ -322,6 +333,7 @@ class ConfluenceReplayService:
         trend_state: str,
         event_types: set[str],
         liquidity: tuple[LiquidityEvidenceRecord, ...],
+        labels: tuple[StructureLabel, ...],
         resting: tuple[LiquidityPoolRecord, ...],
         live_zones: tuple[IctZoneRecord, ...],
         reading: _Reading,
@@ -463,8 +475,15 @@ class ConfluenceReplayService:
                     displaced=f"MSS_{direction}" in event_types,
                     external=any(t.startswith("STRUCTURE_EXTERNAL") for t in event_types),
                     mss=f"MSS_{direction}" in event_types,
-                    unbroken_pairs=0,
-                    failed_breaks=0,
+                    # §7.4, from the labels §3.3 already writes into each
+                    # SWING_* payload. Left at zero, the 30 points of trend
+                    # maturity could never be earned by any candidate.
+                    unbroken_pairs=unbroken_pairs(labels, direction),
+                    # §3.5 records a failed break as a fact and no detector
+                    # in this build does. None rather than 0: zero is a claim
+                    # about the market, and passing it awarded the full 15 to
+                    # every candidate for evidence nobody gathered.
+                    failed_breaks=None,
                 )
             ).score,
             Factor.LIQUIDITY: liquidity_factor(
@@ -498,6 +517,7 @@ class ConfluenceReplayService:
                     score=reading.score,
                     aligned=reading.direction == direction,
                     accelerating=reading.accelerating,
+                    decelerating=reading.decelerating,
                     exhaustion_against=reading.exhausted,
                 )
             ).score,
@@ -1041,6 +1061,53 @@ def _state_direction(trend_state: str) -> str | None:
     return None
 
 
+def _read_labels(events: tuple[EngineEventRecord, ...]) -> tuple[StructureLabel, ...]:
+    """§3.3's swing labels in candle order, for §7.4's pair count.
+
+    Read rather than recomputed, unlike the momentum and PD readings beside
+    it: a label is assigned against the *previous same-kind swing*, so it is a
+    fact about a series the structure engine walked, not a pure function of
+    the newest candle.
+
+    **STRUCTURE_EXTERNAL_*, not SWING_*.** The first version of this read
+    SWING_* and would have returned nothing on every real context, leaving
+    trend maturity pinned at zero exactly as the hardcoded value had --
+    `_persist_swing` writes index/price/kind/strength and no label; the label
+    only exists on the STRUCTURE_ event `_persist_classified_swing` writes.
+    A fixture that supplies a label on a SWING_ event passes either way, which
+    is why this was caught by reading a payload off the VM rather than by a
+    test.
+
+    External only. §7.4 counts the trend's pairs, and §3.4's trend state
+    machine is driven by external swings; interleaving the internal series
+    would let a k=2 LH inside an intact external uptrend read as the trend
+    breaking.
+    """
+    labelled: list[tuple[int, StructureLabel]] = []
+
+    for record in events:
+        if not record.event_type.startswith("STRUCTURE_EXTERNAL_"):
+            continue
+
+        payload = json.loads(record.payload)
+        raw = payload.get("label")
+        index = payload.get("index")
+
+        if raw is None or index is None:
+            continue
+
+        try:
+            labelled.append((int(index), StructureLabel(raw)))
+        except ValueError:
+            # An unknown label is a version skew, not a reason to stop
+            # scoring; §7.4 counts what it recognises.
+            continue
+
+    labelled.sort()
+
+    return tuple(label for _, label in labelled)
+
+
 def _read_participation(series: list[Candle]) -> _Reading:
     """§6 and §7 at the newest candle, recomputed rather than read back.
 
@@ -1070,6 +1137,10 @@ def _read_participation(series: list[Candle]) -> _Reading:
         score=score.score if score else Decimal(0),
         direction=score.direction.value if score else None,
         accelerating=phase.accelerating if phase else False,
+        # §8.3.1 pays "accelerating 25 - neither 12 - decelerating 0".
+        # `momentum_factor` reads this and nothing set it, so a fading
+        # trend was paid the 12 that belongs to a steady one.
+        decelerating=phase.decelerating if phase else False,
         exhausted=phase.exhaustion_watch if phase else False,
     )
 
