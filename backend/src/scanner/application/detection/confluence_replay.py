@@ -92,9 +92,15 @@ from scanner.domain.structure import (
     detect_external_swings,
     unbroken_pairs,
 )
+from scanner.domain.volume import (
+    VolumeFactorEvidence,
+    cross_validate_abnormal_volume,
+    detect_volume_spike,
+    volume_factor_score,
+)
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v11"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v12"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -111,6 +117,15 @@ G4_ADJACENCY_ATR = Decimal("0.5")
 # silently defaulted -- see the module docstring.
 UNREACHABLE_INPUTS: tuple[str, ...] = (
     "wash_risk",  # §6.6 needs aggTrade aggregates (roadmap S2 T4, never built)
+    # §6.7's four remaining terms. §6.5 has no detector at all, and §6.3's
+    # expansion and contraction are directionless -- §6.7 asks whether each
+    # is "aligned" or "against the claim", and deciding that here would be
+    # inventing a direction the detector never published. The contraction
+    # term is a penalty, so guessing it would punish on no evidence.
+    "institutional_volume",
+    "stealth_flow",
+    "expansion_aligned",
+    "contraction_against_claim",
 )
 
 # Not in the constant above, because unlike those it is only *sometimes*
@@ -140,6 +155,8 @@ class _Reading:
     accelerating: bool
     decelerating: bool
     exhausted: bool
+    spike_direction: str | None
+    suspect: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -508,7 +525,7 @@ class ConfluenceReplayService:
                 len(matching_zones),
                 entry_confirmation=history.confirmed,
             ),
-            Factor.VOLUME: volume_factor(reading.rvol or Decimal(0)).score,
+            Factor.VOLUME: _volume_score(reading, direction),
             Factor.MOMENTUM: momentum_factor(
                 MomentumEvidence(
                     score=reading.score,
@@ -1093,6 +1110,36 @@ def _count_failed_breaks(
     return failed
 
 
+def _volume_score(reading: _Reading, direction: str) -> Decimal:
+    """F4 — §8.3.1: "Volume Factor Score as published" (§6.7).
+
+    It was published as the RVOL *ratio*. `volume_factor` takes a 0-100 score
+    and passes it through unmodified, and the call site handed it
+    `reading.rvol` — a number between 0 and about 6 on real data, reaching 5
+    only on the abnormal candles §6.4 exists to distrust. F4 was contributing
+    about one point in a hundred where the design allots fifteen percent of the
+    confidence, and §6.4's "capped at neutral (50)" could never bind because
+    the score could not reach 50 to begin with. §6.7's own function was written
+    and never called; this calls it.
+
+    Read at the newest candle, not scanned across the window. §6.7 emits the
+    score "per symbol-TF-candle", and asking the event log whether a spike
+    happened anywhere in five hundred candles answers a different question
+    whose answer is nearly always yes — in both directions at once, which
+    would award +15 and -20 to every candidate alike.
+    """
+    return volume_factor(
+        volume_factor_score(
+            VolumeFactorEvidence(
+                spike_aligned=reading.spike_direction == direction,
+                opposing_spike=reading.spike_direction == ("DOWN" if direction == "UP" else "UP"),
+                # §6.4's tag, which §6.7 turns into its own INTEGRITY_CAP of 50.
+                integrity_suspect=reading.suspect,
+            )
+        ).score
+    ).score
+
+
 def _read_labels(events: tuple[EngineEventRecord, ...]) -> tuple[StructureLabel, ...]:
     """§3.3's swing labels in candle order, for §7.4's pair count.
 
@@ -1163,6 +1210,8 @@ def _read_participation(series: list[Candle]) -> _Reading:
 
     score = momentum_score(series, last)
     phase = momentum_phase(series, last)
+    spike = detect_volume_spike(series, last)
+    check = cross_validate_abnormal_volume(series, last)
 
     return _Reading(
         rvol=relative_volume(series, last),
@@ -1174,6 +1223,14 @@ def _read_participation(series: list[Candle]) -> _Reading:
         # trend was paid the 12 that belongs to a steady one.
         decelerating=phase.decelerating if phase else False,
         exhausted=phase.exhaustion_watch if phase else False,
+        # §6.2 and §6.4 at this candle, recomputed like the momentum reading
+        # beside them: both are pure functions of closed candles, so a
+        # recomputation cannot disagree with the engine that owns them.
+        spike_direction=spike.direction if spike else None,
+        # The depth half of §6.4 is unread here for the same reason it is
+        # unread in the engine -- `market.liquidity_history` is empty -- so
+        # both reach the same verdict from the same evidence.
+        suspect=check.suspect if check else False,
     )
 
 
