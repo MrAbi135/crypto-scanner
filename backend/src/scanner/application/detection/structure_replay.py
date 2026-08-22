@@ -28,6 +28,7 @@ from scanner.domain.structure import (
     detect_bos,
     detect_external_swings,
     detect_internal_swings,
+    failed_break_index,
     swing_window,
 )
 from scanner.shared import Timeframe
@@ -35,7 +36,7 @@ from scanner.shared import Timeframe
 # s4-v2 (2026-08-17): first swing of each kind now emits an explicit SEED
 # classification event. Output-changing, hence the increment — Constitution
 # §44.5. Ratified as SLS v1.0.2 §3.3.
-STRUCTURE_ALGO_VERSION = "s4-v2"
+STRUCTURE_ALGO_VERSION = "s4-v3"
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,7 +276,85 @@ class StructureReplayService:
             ):
                 inserted += 1
 
+            # §3.5: "a failed break is recorded (fact, not deletion) if within
+            # `failed_break_candles = 3` closed candles price closes back
+            # beyond the broken level in the opposite direction". The BOS
+            # stands either way -- this is a second fact about it, which is
+            # why it is appended rather than used to withdraw the first.
+            failed_at = failed_break_index(
+                candles,
+                break_index=candle_index,
+                level=swing.price,
+                direction=direction,
+            )
+
+            if failed_at is not None and await self._persist_failed_break(
+                symbol=symbol,
+                timeframe=timeframe,
+                candle=candles[failed_at],
+                candle_index=failed_at,
+                break_index=candle_index,
+                swing=swing,
+                direction=direction,
+            ):
+                inserted += 1
+
         return inserted
+
+    async def _persist_failed_break(
+        self,
+        *,
+        symbol: str,
+        timeframe: Timeframe,
+        candle: Candle,
+        candle_index: int,
+        break_index: int,
+        swing: SwingPoint,
+        direction: BreakDirection,
+    ) -> bool:
+        """§3.5's failed break, as its own fact.
+
+        Not `BOS_FAILED_*`: two call sites already match on the `BOS_` prefix
+        -- confluence's `_bos_break_indices` and the BOS replay tests -- and a
+        failure is not a break.
+        """
+        event_type = f"STRUCTURE_FAILED_BREAK_{direction.value}"
+
+        payload = json.dumps(
+            {
+                "direction": direction.value,
+                "swing_index": swing.index,
+                "broken_level": str(swing.price),
+                "break_index": break_index,
+                "failed_index": candle_index,
+                "elapsed_candles": candle_index - break_index,
+                "candle_close": str(candle.close),
+                # §3.5: "downstream consumers (confluence, lifecycle) treat
+                # `failed: true` as strong contrary evidence".
+                "failed": True,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+        return await self._events.append(
+            EngineEventRecord(
+                event_key=build_event_key(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    event_type=event_type,
+                    event_at=candle.open_time,
+                    algo_version=self._algo_version,
+                ),
+                symbol=symbol,
+                timeframe=timeframe,
+                event_type=event_type,
+                event_at=candle.open_time,
+                algo_version=self._algo_version,
+                payload=payload,
+                created_at=self._clock.now(),
+            )
+        )
 
     async def _persist_bos(
         self,
