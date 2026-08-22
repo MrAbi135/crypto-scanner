@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -249,7 +250,7 @@ async def test_replay_persists_structure_events_and_state() -> None:
     state = await states.load(
         "BTCUSDT",
         Timeframe.H1.value,
-        "s4-v2",
+        "s4-v3",
     )
 
     assert state is not None
@@ -306,9 +307,9 @@ async def test_rebuild_state_replaces_old_snapshot() -> None:
     states = EngineStateManager(store)
 
     await store.save(
-        (f"structure:s4-v2:BTCUSDT:{Timeframe.H1.value}"),
+        (f"structure:s4-v3:BTCUSDT:{Timeframe.H1.value}"),
         (
-            '{"algo_version":"s4-v2",'
+            '{"algo_version":"s4-v3",'
             '"last_processed_open_time":null,'
             '"symbol":"BTCUSDT",'
             f'"timeframe":"{Timeframe.H1.value}",'
@@ -344,7 +345,7 @@ async def test_rebuild_state_replaces_old_snapshot() -> None:
     state = await states.load(
         "BTCUSDT",
         Timeframe.H1.value,
-        "s4-v2",
+        "s4-v3",
     )
 
     assert state is not None
@@ -472,6 +473,22 @@ async def test_bos_replay_waits_for_confirmed_external_swings() -> None:
 
     bos_events = [event for event in events.events.values() if event.event_type == "BOS_UP"]
 
-    assert inserted == 1
+    failed = [
+        event for event in events.events.values() if event.event_type == "STRUCTURE_FAILED_BREAK_UP"
+    ]
+
+    # This fixture is the textbook failed break and always was: one candle
+    # closes at 125 through the 120 level and every candle after it closes
+    # back at 105. §3.5 records that as a fact, so the pass now inserts two.
+    assert inserted == 2
     assert len(bos_events) == 1
     assert bos_events[0].event_at == candles[36].open_time
+
+    assert len(failed) == 1
+    assert failed[0].event_at == candles[37].open_time
+
+    payload = json.loads(failed[0].payload)
+
+    assert payload["failed"] is True
+    assert payload["broken_level"] == "120"
+    assert payload["elapsed_candles"] == 1

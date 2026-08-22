@@ -94,7 +94,7 @@ from scanner.domain.structure import (
 )
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v10"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v11"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -111,7 +111,6 @@ G4_ADJACENCY_ATR = Decimal("0.5")
 # silently defaulted -- see the module docstring.
 UNREACHABLE_INPUTS: tuple[str, ...] = (
     "wash_risk",  # §6.6 needs aggTrade aggregates (roadmap S2 T4, never built)
-    "failed_breaks",  # §3.5 specifies the fact; no detector records it
 )
 
 # Not in the constant above, because unlike those it is only *sometimes*
@@ -291,6 +290,7 @@ class ConfluenceReplayService:
                 direction=direction,
                 trend_state=trend_state,
                 event_types=event_types,
+                events=events,
                 liquidity=liquidity,
                 labels=labels,
                 resting=resting,
@@ -332,6 +332,7 @@ class ConfluenceReplayService:
         direction: str,
         trend_state: str,
         event_types: set[str],
+        events: tuple[EngineEventRecord, ...],
         liquidity: tuple[LiquidityEvidenceRecord, ...],
         labels: tuple[StructureLabel, ...],
         resting: tuple[LiquidityPoolRecord, ...],
@@ -479,11 +480,7 @@ class ConfluenceReplayService:
                     # SWING_* payload. Left at zero, the 30 points of trend
                     # maturity could never be earned by any candidate.
                     unbroken_pairs=unbroken_pairs(labels, direction),
-                    # §3.5 records a failed break as a fact and no detector
-                    # in this build does. None rather than 0: zero is a claim
-                    # about the market, and passing it awarded the full 15 to
-                    # every candidate for evidence nobody gathered.
-                    failed_breaks=None,
+                    failed_breaks=_count_failed_breaks(events, direction, last_index),
                 )
             ).score,
             Factor.LIQUIDITY: liquidity_factor(
@@ -1059,6 +1056,41 @@ def _state_direction(trend_state: str) -> str | None:
         return "DOWN"
 
     return None
+
+
+# §8.3.1's clean-break window: "no failed break against D in 20 candles".
+CLEAN_RECORD_WINDOW = 20
+
+
+def _count_failed_breaks(
+    events: tuple[EngineEventRecord, ...],
+    direction: str,
+    last_index: int,
+) -> int:
+    """§8.3.1: failed breaks against D inside the clean-record window.
+
+    Against D means a break *in* D that failed -- an UP setup is undermined by
+    the market rejecting an upward break, not by a downward one failing.
+
+    Counted from the payload's `failed_index`, the candle that closed back
+    through the level, rather than from the break it belongs to: the window
+    asks how recently the market last refused this direction.
+    """
+    failed = 0
+
+    for record in events:
+        if record.event_type != f"STRUCTURE_FAILED_BREAK_{direction}":
+            continue
+
+        index = json.loads(record.payload).get("failed_index")
+
+        if index is None:
+            continue
+
+        if last_index - int(index) < CLEAN_RECORD_WINDOW:
+            failed += 1
+
+    return failed
 
 
 def _read_labels(events: tuple[EngineEventRecord, ...]) -> tuple[StructureLabel, ...]:

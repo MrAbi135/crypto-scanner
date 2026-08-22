@@ -14,6 +14,7 @@ from scanner.domain.structure import (
     SwingPoint,
     SwingStrength,
     detect_bos,
+    failed_break_index,
     is_wick_only_penetration,
 )
 from scanner.shared import Timeframe
@@ -211,3 +212,98 @@ def test_negative_epsilon_is_rejected() -> None:
             direction=BreakDirection.UP,
             epsilon=Decimal("-1"),
         )
+
+
+def _series(closes: list[str]) -> list[Candle]:
+    """`candle()` fixes open at 100, so the wicks have to bracket it."""
+    return [
+        candle(
+            high=str(max(Decimal(c), Decimal("100"))),
+            low=str(min(Decimal(c), Decimal("100"))),
+            close=c,
+        )
+        for c in closes
+    ]
+
+
+def test_a_close_back_through_the_level_is_a_failed_break() -> None:
+    """§3.5: "price closes back beyond the broken level in the opposite
+    direction" within `failed_break_candles = 3`."""
+    candles = _series(["125", "105", "105", "105"])
+
+    assert (
+        failed_break_index(
+            candles, break_index=0, level=Decimal("120"), direction=BreakDirection.UP
+        )
+        == 1
+    )
+
+
+def test_a_break_that_holds_is_not_a_failure() -> None:
+    candles = _series(["125", "124", "126", "130"])
+
+    assert (
+        failed_break_index(
+            candles, break_index=0, level=Decimal("120"), direction=BreakDirection.UP
+        )
+        is None
+    )
+
+
+def test_the_window_closes_after_three_candles() -> None:
+    """A reclaim on the fourth candle is a later move, not a failed break."""
+    candles = _series(["125", "124", "123", "122", "105"])
+
+    assert (
+        failed_break_index(
+            candles, break_index=0, level=Decimal("120"), direction=BreakDirection.UP
+        )
+        is None
+    )
+
+
+def test_the_first_reclaim_is_the_one_recorded() -> None:
+    """The break has already failed by then; a deeper close is the same fact."""
+    candles = _series(["125", "110", "90"])
+
+    assert (
+        failed_break_index(
+            candles, break_index=0, level=Decimal("120"), direction=BreakDirection.UP
+        )
+        == 1
+    )
+
+
+def test_a_close_exactly_on_the_level_has_not_come_back_through() -> None:
+    """ "Beyond" is strict: sitting on the level is neither side of it."""
+    candles = _series(["125", "120"])
+
+    assert (
+        failed_break_index(
+            candles, break_index=0, level=Decimal("120"), direction=BreakDirection.UP
+        )
+        is None
+    )
+
+
+def test_the_bearish_mirror() -> None:
+    candles = _series(["75", "95", "95"])
+
+    assert (
+        failed_break_index(
+            candles, break_index=0, level=Decimal("80"), direction=BreakDirection.DOWN
+        )
+        == 1
+    )
+
+
+def test_a_break_on_the_last_candle_cannot_fail_yet() -> None:
+    """Nothing has closed after it, so there is no evidence either way."""
+    candles = _series(["125"])
+
+    assert (
+        failed_break_index(
+            candles, break_index=0, level=Decimal("120"), direction=BreakDirection.UP
+        )
+        is None
+    )

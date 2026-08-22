@@ -221,6 +221,22 @@ def event(event_type: str, index: int = 1, **payload) -> EngineEventRecord:
     )
 
 
+def failed_break_event(index: int, direction: str) -> EngineEventRecord:
+    """§3.5's failed break, as `structure_replay` writes it."""
+    at = BASE + TF.duration * index
+
+    return EngineEventRecord(
+        event_key=f"STRUCTURE_FAILED_BREAK_{direction}-{index}",
+        symbol="BTCUSDT",
+        timeframe=TF,
+        event_type=f"STRUCTURE_FAILED_BREAK_{direction}",
+        event_at=at,
+        algo_version="test",
+        payload=json.dumps({"failed": True, "failed_index": index, "direction": direction}),
+        created_at=at,
+    )
+
+
 def swing_event(index: int, label: str, kind: str = "HIGH") -> EngineEventRecord:
     """A §3.3-labelled swing, as `structure_replay` writes it.
 
@@ -1569,23 +1585,94 @@ async def test_a_zone_with_no_mss_origin_is_not_the_a1_retest() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_unread_break_record_pays_nothing() -> None:
-    """§3.5 records a failed break as a fact and no detector in this build does.
+async def test_a_clean_record_pays_because_it_is_now_measured() -> None:
+    """§3.5's failed break is recorded, so §8.3.1's 15 points can be earned.
 
-    Passing 0 said the market produced none, which is a claim nobody made, and
-    handed all 15 of F1's clean-record points to every candidate.
+    Until the detector existed this term was passed a hardcoded zero, which
+    said the market produced no failed break -- a claim nobody had made.
     """
     svc, repo = service(**bullish_setup())
 
     candidate = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
 
-    # A confirmed, displaced MSS with no external break and no trend history:
-    # 15 confirmed + 18 displaced + 10 mss, and nothing for the record.
-    assert candidate.factors["F1"] == Decimal(43)
+    # 15 confirmed + 18 displaced + 10 mss + 15 for a record with no failure
+    # in it, and no trend history behind them.
+    assert candidate.factors["F1"] == Decimal(58)
 
     payload = json.loads(next(iter(repo.appended.values())).payload)
 
-    assert "failed_breaks" in payload["unreachable_inputs"]
+    assert "failed_breaks" not in payload["unreachable_inputs"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_break_against_the_direction_costs_the_clean_record() -> None:
+    """§8.3.1: "15 with no failed break against D in 20 candles · 7 with one"."""
+    setup = bullish_setup()
+
+    one, _ = service(
+        **{**setup, "events": [*setup["events"], failed_break_event(CANDLES - 5, "UP")]}
+    )
+    clean, _ = service(**setup)
+
+    a = next(c for c in (await run(one, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(clean, "BULLISH")).candidates if c.direction == "UP")
+
+    assert b.factors["F1"] - a.factors["F1"] == Decimal(8)
+
+
+@pytest.mark.asyncio
+async def test_two_failures_cost_the_whole_clean_record() -> None:
+    setup = bullish_setup()
+
+    two, _ = service(
+        **{
+            **setup,
+            "events": [
+                *setup["events"],
+                failed_break_event(CANDLES - 5, "UP"),
+                failed_break_event(CANDLES - 8, "UP"),
+            ],
+        }
+    )
+    clean, _ = service(**setup)
+
+    a = next(c for c in (await run(two, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(clean, "BULLISH")).candidates if c.direction == "UP")
+
+    assert b.factors["F1"] - a.factors["F1"] == Decimal(15)
+
+
+@pytest.mark.asyncio
+async def test_an_old_failure_is_outside_the_window() -> None:
+    """The window is 20 candles; a failure older than that is not held against D."""
+    setup = bullish_setup()
+
+    old, _ = service(
+        **{**setup, "events": [*setup["events"], failed_break_event(CANDLES - 25, "UP")]}
+    )
+    clean, _ = service(**setup)
+
+    a = next(c for c in (await run(old, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(clean, "BULLISH")).candidates if c.direction == "UP")
+
+    assert a.factors["F1"] == b.factors["F1"]
+
+
+@pytest.mark.asyncio
+async def test_a_failure_the_other_way_is_not_against_this_direction() -> None:
+    """A downward break failing does not undermine a long -- if anything it
+    supports one, and §8.3.1 asks only about failures against D."""
+    setup = bullish_setup()
+
+    other, _ = service(
+        **{**setup, "events": [*setup["events"], failed_break_event(CANDLES - 5, "DOWN")]}
+    )
+    clean, _ = service(**setup)
+
+    a = next(c for c in (await run(other, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(clean, "BULLISH")).candidates if c.direction == "UP")
+
+    assert a.factors["F1"] == b.factors["F1"]
 
 
 @pytest.mark.asyncio
