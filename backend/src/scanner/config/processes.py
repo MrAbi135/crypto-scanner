@@ -35,6 +35,11 @@ class IngestSettings(BaseProcessSettings):
         le=300,
     )
 
+    # Sprint S2 — T4 trade aggregates. Off by default: the aggTrade stream is
+    # by far the highest-volume subscription Binance offers, and §6.5 (its only
+    # consumer today) declares itself unread without it rather than breaking.
+    ingest_trades: bool = False
+
     # Sprint S3b — the ingested context set, externalised.
     #
     # These lived as module-level tuples in `runtime/ingest.py` until S3b, which
