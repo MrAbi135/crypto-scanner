@@ -18,12 +18,13 @@ from tests.golden.harness.canonical import (
     canonicalise,
     output_hash,
 )
+from tests.golden.harness.coverage import check_coverage, load_manifest
 from tests.golden.harness.dataset import GoldenDataset, discover_datasets
 from tests.golden.harness.runner import run_dataset
 
 DATASETS = discover_datasets()
 
-# Guard against the suite silently emptying itself — a passing run over zero
+# Guard against the suite silently emptying itself -- a passing run over zero
 # datasets is the failure mode this whole gate exists to prevent.
 MINIMUM_DATASETS = 3
 
@@ -35,7 +36,7 @@ def dataset_id(dataset: GoldenDataset) -> str:
 def test_datasets_are_discovered() -> None:
     assert len(DATASETS) >= MINIMUM_DATASETS, (
         f"expected at least {MINIMUM_DATASETS} golden datasets, found {len(DATASETS)}. "
-        "Datasets grow monotonically (Constitution §32.4) — they are never removed."
+        "Datasets grow monotonically (Constitution §32.4) -- they are never removed."
     )
 
 
@@ -140,3 +141,56 @@ async def test_harness_detects_a_wrong_expectation() -> None:
     corrupted = {**actual, "report": {**actual["report"], "internal_swings": 999}}
 
     assert canonical_bytes(actual) != canonical_bytes(corrupted)
+
+
+def test_the_clause_to_dataset_map_is_honest() -> None:
+    """Roadmap §8.1: "the mapping from SLS clause -> dataset is machine-checked
+    in CI. A clause with no case fails the build."
+
+    Both directions. A rule marked covered with no dataset behind it is a claim
+    nobody is making; a rule marked pending that a dataset *does* cover is a map
+    going stale, which is exactly how the README's coverage table came to
+    describe EQH/EQL clustering as unwired months after it was wired.
+    """
+    claims = {dataset.dataset_id: dataset.sls_rules for dataset in DATASETS}
+
+    report = check_coverage(claims)
+
+    assert not report.problems, "\n".join(("", *report.problems))
+
+
+def test_every_declared_section_exists_in_the_spec() -> None:
+    """A dataset citing a section the SLS does not have is citing nothing."""
+    known = {section.id for section in load_manifest()}
+
+    for dataset in DATASETS:
+        unknown = set(dataset.sls_sections) - known
+
+        assert not unknown, f"{dataset.dataset_id} cites unknown SLS sections: {sorted(unknown)}"
+
+
+def test_the_coverage_gap_is_reported_not_hidden() -> None:
+    """§8.1's first consequence: "it makes the gap *visible* -- today nobody can
+    say which of SLS §3's rules are covered by the four structure datasets, and
+    after this anybody can."
+
+    Printed rather than asserted against a number: a threshold here would have
+    to be raised by hand to let coverage grow, and lowered by hand to let it
+    shrink, which is the count-as-proxy failure §8.1 removed.
+    """
+    report = check_coverage({dataset.dataset_id: dataset.sls_rules for dataset in DATASETS})
+
+    lines = [report.summary(), ""]
+
+    for section in report.sections:
+        covered = sum(1 for rule in section.rules if rule.status == "covered")
+
+        if not section.enumerated:
+            lines.append(f"  {section.id:<5} {section.title[:44]:<46} not enumerated")
+            continue
+
+        lines.append(f"  {section.id:<5} {section.title[:44]:<46} {covered}/{len(section.rules)}")
+
+    print("\n".join(lines))
+
+    assert report.covered > 0

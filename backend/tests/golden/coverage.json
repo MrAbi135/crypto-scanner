@@ -1,0 +1,854 @@
+{
+  "sections": [
+    {
+      "id": "3.1",
+      "title": "Detector: Swing High / Swing Low",
+      "enumerated": true,
+      "rules": [
+        {
+          "id": "3.1-swing-high",
+          "rule": "swing high of strength k: strict inequality against k candles each side",
+          "status": "covered"
+        },
+        {
+          "id": "3.1-swing-low",
+          "rule": "swing low is the mirror definition on lows",
+          "status": "covered"
+        },
+        {
+          "id": "3.1-confirmation-timing",
+          "rule": "confirmed at the close of the k-th subsequent candle; never consumed earlier",
+          "status": "covered"
+        },
+        {
+          "id": "3.1-strength-classes",
+          "rule": "k_int = 2 and k_ext = 5; an external swing is stored once as external",
+          "status": "covered"
+        },
+        {
+          "id": "3.1-equal-extreme-tie",
+          "rule": "ties within epsilon confirm the LAST member; all members go to 4.3 as a cluster",
+          "status": "covered"
+        },
+        {
+          "id": "3.1-no-confirm-across-gap",
+          "rule": "no swing confirms across a DEGRADED span (2.15.4)",
+          "status": "pending",
+          "blocked_on": "needs a dataset with a declared data gap; the loader rejects non-contiguous series"
+        },
+        {
+          "id": "3.1-consecutive-same-type",
+          "rule": "two swing highs with no intervening low are permitted",
+          "status": "pending",
+          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+        },
+        {
+          "id": "3.1-never-invalidated",
+          "rule": "swings are historical facts and are never deleted",
+          "status": "pending",
+          "blocked_on": "no dataset drives a swing past its structural relevance"
+        },
+        {
+          "id": "3.1-outside-bar",
+          "rule": "a candle that is both swing high and low emits both, ordered by candle direction",
+          "status": "pending",
+          "blocked_on": "no dataset contains a wide outside bar at a pivot"
+        },
+        {
+          "id": "3.1-doji-pivot",
+          "rule": "a doji at the pivot is a valid swing",
+          "status": "pending",
+          "blocked_on": "no dataset places a doji at a pivot"
+        },
+        {
+          "id": "3.1-honest-absence",
+          "rule": "a flat market emits no swings rather than manufacturing one",
+          "status": "covered"
+        },
+        {
+          "id": "3.1-structure-idle",
+          "rule": "no k-strength swing for over 200 candles gives STRUCTURE_IDLE",
+          "status": "pending",
+          "blocked_on": "needs a 200-candle flat run beyond the warm-up filler"
+        }
+      ]
+    },
+    {
+      "id": "3.2",
+      "title": "Internal vs. External Structure",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "3.2",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+        }
+      ]
+    },
+    {
+      "id": "3.3",
+      "title": "HH / HL / LH / LL Classification",
+      "enumerated": true,
+      "rules": [
+        {
+          "id": "3.3-hh-lh-eqh",
+          "rule": "high labelled HH / LH / EQH against the previous same-kind high, by epsilon",
+          "status": "covered"
+        },
+        {
+          "id": "3.3-hl-ll-eql",
+          "rule": "the mirror on lows",
+          "status": "covered"
+        },
+        {
+          "id": "3.3-seed",
+          "rule": "the first swing of each kind is SEED, emitted as an event, excluded from every directional set",
+          "status": "covered"
+        },
+        {
+          "id": "3.3-labels-immutable",
+          "rule": "labels are immutable once assigned",
+          "status": "pending",
+          "blocked_on": "no dataset re-runs a series to prove a label did not move"
+        },
+        {
+          "id": "3.3-seed-after-gap",
+          "rule": "the first post-gap swing of each kind is SEED again",
+          "status": "pending",
+          "blocked_on": "needs a dataset with a declared data gap"
+        }
+      ]
+    },
+    {
+      "id": "3.4",
+      "title": "Trend State Machine",
+      "enumerated": true,
+      "rules": [
+        {
+          "id": "3.4-flat-is-ranging",
+          "rule": "absent qualifying pairs the state stays RANGING",
+          "status": "covered"
+        },
+        {
+          "id": "3.4-two-pairs-bullish",
+          "rule": "BULLISH needs two consecutive completed HH/HL pairs on external structure",
+          "status": "pending",
+          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+        },
+        {
+          "id": "3.4-two-pairs-bearish",
+          "rule": "the bearish mirror",
+          "status": "pending",
+          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+        },
+        {
+          "id": "3.4-one-pair-insufficient",
+          "rule": "a single pair does not make a trend",
+          "status": "pending",
+          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+        },
+        {
+          "id": "3.4-idle-ranging",
+          "rule": "closed inside the range without external BOS for 100 candles gives RANGING",
+          "status": "pending",
+          "blocked_on": "needs a 100-candle run after a confirmed range"
+        },
+        {
+          "id": "3.4-shift-is-mss-only",
+          "rule": "only MSS flips the trend; CHoCH never does",
+          "status": "pending",
+          "blocked_on": "no dataset produces a CHoCH or an MSS"
+        }
+      ]
+    },
+    {
+      "id": "3.5",
+      "title": "Detector: Break of Structure (BOS)",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "3.5",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+        }
+      ]
+    },
+    {
+      "id": "3.6",
+      "title": "Detectors: Change of Character (CHoCH) & Market Structure Shift (MSS)",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "3.6",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+        }
+      ]
+    },
+    {
+      "id": "3.7",
+      "title": "Multi-Timeframe Structure Rules",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "3.7",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+        }
+      ]
+    },
+    {
+      "id": "3.8",
+      "title": "Structure Confirmation & Invalidation Summary",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "3.8",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+        }
+      ]
+    },
+    {
+      "id": "4.1",
+      "title": "Buy-Side & Sell-Side Liquidity (BSL / SSL)",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "4.1",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "not yet enumerated; the liquidity runner is wired, so these are writable today"
+        }
+      ]
+    },
+    {
+      "id": "4.2",
+      "title": "Detector: Liquidity Pools",
+      "enumerated": true,
+      "rules": [
+        {
+          "id": "4.2-pool-from-swing",
+          "rule": "a pool is created for each unconsumed external swing extreme",
+          "status": "covered"
+        },
+        {
+          "id": "4.2-strength-formula",
+          "rule": "strength = 25*touches/3 + 25*tf_weight + 25*age + 25*cluster",
+          "status": "covered"
+        },
+        {
+          "id": "4.2-state-swept",
+          "rule": "ACTIVE to SWEPT on a 4.6 sweep",
+          "status": "covered"
+        },
+        {
+          "id": "4.2-state-broken",
+          "rule": "ACTIVE to BROKEN when a close-through consumes the level",
+          "status": "covered"
+        },
+        {
+          "id": "4.2-pool-from-cluster",
+          "rule": "a pool is created for each equal-extreme cluster and ranks above a single swing",
+          "status": "pending",
+          "blocked_on": "no dataset produces an EQH/EQL cluster"
+        },
+        {
+          "id": "4.2-pool-from-range",
+          "rule": "a pool is created for each dealing-range extreme",
+          "status": "pending",
+          "blocked_on": "clause under governance review: on live data it can only duplicate (a) or resurrect a consumed level"
+        },
+        {
+          "id": "4.2-state-expired",
+          "rule": "ACTIVE to EXPIRED past pool_max_age = 500 candles",
+          "status": "pending",
+          "blocked_on": "needs a series longer than 500 candles past a pool's creation"
+        },
+        {
+          "id": "4.2-terminal-permanent",
+          "rule": "terminal states are permanent; no resurrection",
+          "status": "pending",
+          "blocked_on": "no dataset re-detects a level after its pool went terminal"
+        },
+        {
+          "id": "4.2-epsilon-merge",
+          "rule": "overlapping pools within epsilon merge: one price zone, one pool per side per TF",
+          "status": "pending",
+          "blocked_on": "no dataset places two distinct swings within epsilon"
+        },
+        {
+          "id": "4.2-max-pools",
+          "rule": "the published map is bounded at max_pools = 40, lowest strength evicted first",
+          "status": "pending",
+          "blocked_on": "no dataset produces more than 40 pools"
+        }
+      ]
+    },
+    {
+      "id": "4.3",
+      "title": "Detectors: Equal Highs (EQH) / Equal Lows (EQL)",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "4.3",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "not yet enumerated; the liquidity runner is wired, so these are writable today"
+        }
+      ]
+    },
+    {
+      "id": "4.4",
+      "title": "Internal vs. External Liquidity",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "4.4",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "not yet enumerated; the liquidity runner is wired, so these are writable today"
+        }
+      ]
+    },
+    {
+      "id": "4.5",
+      "title": "Resting Liquidity",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "4.5",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "not yet enumerated; the liquidity runner is wired, so these are writable today"
+        }
+      ]
+    },
+    {
+      "id": "4.6",
+      "title": "Detector: Liquidity Sweep",
+      "enumerated": true,
+      "rules": [
+        {
+          "id": "4.6-single-candle-sweep",
+          "rule": "one candle wicks beyond the level and closes back inside",
+          "status": "covered"
+        },
+        {
+          "id": "4.6-two-candle-sweep",
+          "rule": "penetration then a confirming close back inside",
+          "status": "covered"
+        },
+        {
+          "id": "4.6-close-through-not-sweep",
+          "rule": "a close beyond the level is a break, not a sweep",
+          "status": "covered"
+        },
+        {
+          "id": "4.6-sweep-depth",
+          "rule": "sweep depth is recorded in ATR terms",
+          "status": "covered"
+        },
+        {
+          "id": "4.6-reclaim",
+          "rule": "a reclaimed sweep is contrary evidence",
+          "status": "pending",
+          "blocked_on": "no dataset drives price back through a swept level"
+        },
+        {
+          "id": "4.6-setup-expiry",
+          "rule": "sweep relevance expires 15 closed candles after confirmation",
+          "status": "pending",
+          "blocked_on": "no dataset runs 15 candles past a sweep"
+        }
+      ]
+    },
+    {
+      "id": "4.7",
+      "title": "Detector: Stop Hunt",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "4.7",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "not yet enumerated; the liquidity runner is wired, so these are writable today"
+        }
+      ]
+    },
+    {
+      "id": "4.8",
+      "title": "Liquidity Validation & Invalidation Summary",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "4.8",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "not yet enumerated; the liquidity runner is wired, so these are writable today"
+        }
+      ]
+    },
+    {
+      "id": "5.1",
+      "title": "Detector: Order Blocks (OB)",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "5.1",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- ict_ob_replay, ict_ote_replay and ict_interaction_replay are not wired"
+        }
+      ]
+    },
+    {
+      "id": "5.2",
+      "title": "Detector: Breaker Blocks",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "5.2",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- ict_ob_replay, ict_ote_replay and ict_interaction_replay are not wired"
+        }
+      ]
+    },
+    {
+      "id": "5.3",
+      "title": "Detector: Mitigation Blocks",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "5.3",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- ict_ob_replay, ict_ote_replay and ict_interaction_replay are not wired"
+        }
+      ]
+    },
+    {
+      "id": "5.4",
+      "title": "Detector: Fair Value Gaps (FVG)",
+      "enumerated": true,
+      "rules": [
+        {
+          "id": "5.4-bullish-gap",
+          "rule": "L[c3] above H[c1]; zone [H[c1], L[c3]]; confirms at the close of c3",
+          "status": "covered"
+        },
+        {
+          "id": "5.4-bearish-mirror",
+          "rule": "the bearish mirror registers the same way",
+          "status": "covered"
+        },
+        {
+          "id": "5.4-registration-filter",
+          "rule": "gap height at least 0.25 x ATR, or c2 satisfies displacement",
+          "status": "covered"
+        },
+        {
+          "id": "5.4-sub-filter-not-stored",
+          "rule": "a sub-filter gap is not stored at all",
+          "status": "covered"
+        },
+        {
+          "id": "5.4-consequent-encroachment",
+          "rule": "CE is the zone midpoint and is stored",
+          "status": "covered"
+        },
+        {
+          "id": "5.4-wick-fill-progression",
+          "rule": "OPEN to TOUCHED to CE_FILLED to FILLED on wick fills",
+          "status": "covered"
+        },
+        {
+          "id": "5.4-close-through-inverts",
+          "rule": "a close beyond the distal edge is INVERTED, not FILLED",
+          "status": "covered"
+        },
+        {
+          "id": "5.4-age-expiry",
+          "rule": "fvg_max_age = 200 candles",
+          "status": "pending",
+          "blocked_on": "needs a series running 200 candles past a registration"
+        },
+        {
+          "id": "5.4-nested-gaps",
+          "rule": "nested FVGs in one displacement leg all register",
+          "status": "pending",
+          "blocked_on": "no dataset builds a displacement leg with nested gaps"
+        }
+      ]
+    },
+    {
+      "id": "5.5",
+      "title": "Detector: Inverse FVG (IFVG)",
+      "enumerated": true,
+      "rules": [
+        {
+          "id": "5.5-born-unproven",
+          "rule": "an inverted FVG registers as IFVG with flipped polarity, state UNPROVEN",
+          "status": "covered"
+        },
+        {
+          "id": "5.5-activation-retest",
+          "rule": "UNPROVEN to FRESH only on a first successful retest with a 0.3 x ATR rejection wick",
+          "status": "pending",
+          "blocked_on": "no dataset drives a retest of an IFVG band"
+        },
+        {
+          "id": "5.5-dead-on-reclaim",
+          "rule": "a close back through against flip polarity is DEAD, terminal",
+          "status": "pending",
+          "blocked_on": "no dataset closes back through an IFVG"
+        }
+      ]
+    },
+    {
+      "id": "5.6",
+      "title": "Detector: Balanced Price Range (BPR)",
+      "enumerated": true,
+      "rules": [
+        {
+          "id": "5.6-intersection",
+          "rule": "opposing FVGs intersecting at least 50% of the smaller band register a BPR",
+          "status": "covered"
+        },
+        {
+          "id": "5.6-polarity-of-later",
+          "rule": "polarity is that of the later FVG",
+          "status": "covered"
+        },
+        {
+          "id": "5.6-pair-age",
+          "rule": "both parents within bpr_pair_age = 30 candles",
+          "status": "covered"
+        },
+        {
+          "id": "5.6-parents-live",
+          "rule": "both parents must still be OPEN/TOUCHED at registration",
+          "status": "pending",
+          "blocked_on": "the rule is not enforced -- see the xfail repro in test_bpr_parent_state_defect.py"
+        },
+        {
+          "id": "5.6-independent-object",
+          "rule": "a parent's later state change does not modify the BPR",
+          "status": "pending",
+          "blocked_on": "no dataset changes a parent state after a BPR is born"
+        },
+        {
+          "id": "5.6-maximal-pair",
+          "rule": "on multiple overlaps keep the maximal-intersection pair",
+          "status": "pending",
+          "blocked_on": "no dataset produces competing overlaps"
+        }
+      ]
+    },
+    {
+      "id": "5.7",
+      "title": "Premium / Discount / Equilibrium (PD Arrays Context)",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "5.7",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- ict_ob_replay, ict_ote_replay and ict_interaction_replay are not wired"
+        }
+      ]
+    },
+    {
+      "id": "5.8",
+      "title": "Detector: Optimal Trade Entry (OTE)",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "5.8",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- ict_ob_replay, ict_ote_replay and ict_interaction_replay are not wired"
+        }
+      ]
+    },
+    {
+      "id": "5.9",
+      "title": "Rejection, Mitigation, Confirmation (Zone Interaction Grammar)",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "5.9",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- ict_ob_replay, ict_ote_replay and ict_interaction_replay are not wired"
+        }
+      ]
+    },
+    {
+      "id": "5.10",
+      "title": "Primitive: Displacement",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "5.10",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- ict_ob_replay, ict_ote_replay and ict_interaction_replay are not wired"
+        }
+      ]
+    },
+    {
+      "id": "6.1",
+      "title": "Detector: Relative Volume (RVOL) Classification",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "6.1",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "6.2",
+      "title": "Detector: Volume Spike",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "6.2",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "6.3",
+      "title": "Detectors: Volume Expansion / Contraction",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "6.3",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "6.4",
+      "title": "Abnormal Volume",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "6.4",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "6.5",
+      "title": "Detector: Institutional Volume Signature",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "6.5",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "6.6",
+      "title": "Detector: Fake Volume Defense",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "6.6",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "6.7",
+      "title": "Volume Ranking Output",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "6.7",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "7.1",
+      "title": "Detector: Momentum Score",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "7.1",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "7.2",
+      "title": "Acceleration / Deceleration",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "7.2",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "7.3",
+      "title": "Expansion / Compression",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "7.3",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "7.4",
+      "title": "Trend Strength",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "7.4",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "7.5",
+      "title": "Impulse / Retracement Legs",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "7.5",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "8.1",
+      "title": "Combination Model - Compared and Chosen",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "8.1",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- confluence_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "8.2",
+      "title": "Stage 1 - Hard Gates (Binary, No Score Can Compensate)",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "8.2",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- confluence_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "8.3",
+      "title": "Stage 2 - Evidence Factors (Each 0-100, Fully Attributed)",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "8.3",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- confluence_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "8.4",
+      "title": "Stage 3 - Weighted Base Confidence",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "8.4",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- confluence_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "8.5",
+      "title": "Stage 4 - Bounded Adjustments",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "8.5",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- confluence_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "8.6",
+      "title": "Stage 5 - Setup Archetypes",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "8.6",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- confluence_replay is not wired"
+        }
+      ]
+    },
+    {
+      "id": "8.7",
+      "title": "Worked Example (Normative Illustration)",
+      "enumerated": false,
+      "rules": [
+        {
+          "id": "8.7",
+          "rule": "section not yet enumerated into rules",
+          "status": "pending",
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- confluence_replay is not wired"
+        }
+      ]
+    }
+  ]
+}
