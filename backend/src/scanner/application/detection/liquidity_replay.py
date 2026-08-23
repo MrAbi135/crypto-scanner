@@ -192,8 +192,18 @@ class LiquidityReplayService:
 
         extremes = _extremes_of(external_swings)
 
-        internal_count = 0
-        external_count = 0
+        # §4.4's two classes, counted by the class each pool was actually
+        # given. They used to count which loop the swing arrived in --
+        # internal-strength swings here, external-strength swings there --
+        # which is the static answer §4.4 replaced: how the pivot was
+        # detected, not where the level sits. The stored class was corrected
+        # and the report was not, so on a series with three INTERNAL pools out
+        # of seven it still announced `internal_pools=0`, and the CLI printed
+        # that.
+        by_class: dict[LiquidityClass, int] = {
+            LiquidityClass.INTERNAL: 0,
+            LiquidityClass.EXTERNAL: 0,
+        }
         upserted = 0
 
         for swing in internal_swings:
@@ -203,50 +213,61 @@ class LiquidityReplayService:
             if (swing.index, _side_of(swing)) in clustered:
                 continue
 
+            liquidity_class = extremes.classify(swing.price, LiquidityClass.INTERNAL)
+
             persisted = await self._persist_swing_pool(
                 symbol,
                 timeframe,
                 swing,
                 candles,
-                liquidity_class=extremes.classify(swing.price, LiquidityClass.INTERNAL),
+                liquidity_class=liquidity_class,
                 levels=levels,
                 epsilon=epsilon,
             )
 
             if persisted:
-                internal_count += 1
+                by_class[liquidity_class] += 1
                 upserted += 1
 
         for swing in external_swings:
             if (swing.index, _side_of(swing)) in clustered:
                 continue
 
+            liquidity_class = extremes.classify(swing.price, LiquidityClass.EXTERNAL)
+
             persisted = await self._persist_swing_pool(
                 symbol,
                 timeframe,
                 swing,
                 candles,
-                liquidity_class=extremes.classify(swing.price, LiquidityClass.EXTERNAL),
+                liquidity_class=liquidity_class,
                 levels=levels,
                 epsilon=epsilon,
             )
 
             if persisted:
-                external_count += 1
+                by_class[liquidity_class] += 1
                 upserted += 1
 
         cluster_count = 0
 
         for cluster in clusters:
+            # Classified at the call site like the swing pools, so a cluster
+            # pool lands in the §4.4 counts too. `clusters` stays a breakdown
+            # by source, which makes internal + external the whole map rather
+            # than most of it.
+            liquidity_class = extremes.classify(cluster.extreme, LiquidityClass.EXTERNAL)
+
             if await self._persist_cluster_pool(
                 symbol,
                 timeframe,
                 cluster,
                 candles,
-                extremes=extremes,
+                liquidity_class=liquidity_class,
                 levels=levels,
                 epsilon=epsilon,
             ):
+                by_class[liquidity_class] += 1
                 cluster_count += 1
                 upserted += 1
 
@@ -304,8 +325,8 @@ class LiquidityReplayService:
             symbol=symbol,
             timeframe=timeframe,
             candles=len(candles),
-            internal_pools=internal_count,
-            external_pools=external_count,
+            internal_pools=by_class[LiquidityClass.INTERNAL],
+            external_pools=by_class[LiquidityClass.EXTERNAL],
             clusters=cluster_count,
             clustered_swings=len(clustered),
             pools_upserted=upserted,
@@ -420,7 +441,7 @@ class LiquidityReplayService:
         cluster: EqualLevelCluster,
         candles: Sequence[Candle],
         *,
-        extremes: _Extremes,
+        liquidity_class: LiquidityClass,
         levels: _LevelMap,
         epsilon: Decimal,
     ) -> bool:
@@ -452,8 +473,9 @@ class LiquidityReplayService:
             # range". Engineered stops inside the bracket are still internal
             # liquidity. EXTERNAL stays the fallback for a market with no
             # bracket yet, which is what the old static answer assumed
-            # everywhere.
-            liquidity_class=extremes.classify(cluster.extreme, LiquidityClass.EXTERNAL),
+            # everywhere. Decided by the caller now, so the report can count
+            # it.
+            liquidity_class=liquidity_class,
             created_at=confirmation_candle.close_time,
             touches=0,
             timeframe_rank=timeframe_rank,

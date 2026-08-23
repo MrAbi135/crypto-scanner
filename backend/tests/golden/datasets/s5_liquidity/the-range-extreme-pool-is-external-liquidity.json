@@ -1,0 +1,510 @@
+{
+  "dataset_id": "s5-the-range-extreme-pool-is-external-liquidity",
+  "engine": "liquidity",
+  "sls_sections": [
+    "4.2",
+    "4.4"
+  ],
+  "sls_rules": [
+    "4.2-pool-from-range"
+  ],
+  "description": "The zigzag's seven external swings, seen by the Liquidity Engine. The pools at the current range extremes are EXTERNAL; the older ones inside the range are INTERNAL.",
+  "labelling_rationale": "The candles of s4-external-zigzag-turns-the-trend-bullish, run through the Liquidity Engine instead of the Structure Engine. Its seven external swings are what this case needs and no liquidity series had.\n\n4.2's detection logic lists three sources: '(a) each unconsumed external swing extreme; (b) each equal-extreme cluster; (c) each dealing-range extreme (range high = BSL pool, range low = SSL pool)'.\n\n(c) reads as a fourth kind of pool and is not one. 5.7 defines the dealing range as the most recent confirmed external swing low and high, and re-anchors it 'whenever a new external swing confirms or a range extreme is consumed by BOS/sweep-with-MSS'. So a range extreme is always an *unconsumed* external swing -- the moment it is consumed it stops being the range extreme -- and (a) has therefore already made its pool. There is no level (c) can reach that (a) has not.\n\nThe resurrection reading is closed by 4.2's own invalidation rules: 'terminal states are permanent; no resurrection'. And building a separate range pool would break 4.2's dedup rule in the same breath -- 'one price zone = one pool per side per TF' -- by putting two pools on every range extreme.\n\nWhat (c) actually fixes is *class*, not existence. 4.4: 'external liquidity: pools at/beyond the current external dealing range extremes (5.7). internal liquidity: pools and inefficiencies inside the dealing range.' Naming the range extremes in 4.2 is how 4.4 knows which pools are external. Settled by the developer 2026-08-23.\n\nSo this case asserts the reading rather than the phrasing: no pool carries a range source, each level carries exactly one pool, and the class follows position. The range here is [19, 67] -- the most recent external low and high. The pools at 11, 17, 19 and 67 are at or beyond an extreme and are EXTERNAL; those at 31, 35 and 49 sit inside the bracket and are INTERNAL.\n\nThe zigzag's own tail was not usable. Run unchanged it drifts down to 54 and back up, which leaves the range at [53, 67] with every older level below it -- all seven pools came out EXTERNAL, and a classifier that answered EXTERNAL to everything would have passed. The last eleven candles are replaced by a decline to 20 so the bracket opens wide enough for the middle levels to fall inside it, and the case can tell the two classes apart.\n\nWriting it also turned up a defect in the report it asserts. `internal_pools` and `external_pools` counted which loop a swing arrived in -- internal-strength swings against external-strength swings -- which is the static answer 4.4 replaced. On this series that reported internal_pools=0 while three of the seven pools were INTERNAL. They count the assigned class now, cluster pools included, so the two of them add up to the whole map.",
+  "labelled_by": "drafted by Claude Opus 5 2026-08-23 from SLS 4.2/4.4/5.7, on the developer's ruling of the same date; PENDING DEVELOPER VERIFICATION -- the candles are those of a series already signed off on 2026-08-23",
+  "labelled_at": "2026-08-23",
+  "algo_version": "s5-v3",
+  "symbol": "GOLDENRNG",
+  "timeframe": "H4",
+  "filler": {
+    "count": 253,
+    "open": "22",
+    "high": "23",
+    "low": "21",
+    "close": "22"
+  },
+  "candles": [
+    {
+      "open_time": "2026-02-16T04:00:00+00:00",
+      "open": "22",
+      "high": "23",
+      "low": "21",
+      "close": "22"
+    },
+    {
+      "open_time": "2026-02-16T08:00:00+00:00",
+      "open": "20",
+      "high": "21",
+      "low": "19",
+      "close": "20"
+    },
+    {
+      "open_time": "2026-02-16T12:00:00+00:00",
+      "open": "18",
+      "high": "19",
+      "low": "17",
+      "close": "18"
+    },
+    {
+      "open_time": "2026-02-16T16:00:00+00:00",
+      "open": "16",
+      "high": "17",
+      "low": "15",
+      "close": "16"
+    },
+    {
+      "open_time": "2026-02-16T20:00:00+00:00",
+      "open": "14",
+      "high": "15",
+      "low": "13",
+      "close": "14"
+    },
+    {
+      "open_time": "2026-02-17T00:00:00+00:00",
+      "open": "12",
+      "high": "13",
+      "low": "11",
+      "close": "12"
+    },
+    {
+      "open_time": "2026-02-17T04:00:00+00:00",
+      "open": "15",
+      "high": "16",
+      "low": "14",
+      "close": "15"
+    },
+    {
+      "open_time": "2026-02-17T08:00:00+00:00",
+      "open": "18",
+      "high": "19",
+      "low": "17",
+      "close": "18"
+    },
+    {
+      "open_time": "2026-02-17T12:00:00+00:00",
+      "open": "21",
+      "high": "22",
+      "low": "20",
+      "close": "21"
+    },
+    {
+      "open_time": "2026-02-17T16:00:00+00:00",
+      "open": "24",
+      "high": "25",
+      "low": "23",
+      "close": "24"
+    },
+    {
+      "open_time": "2026-02-17T20:00:00+00:00",
+      "open": "27",
+      "high": "28",
+      "low": "26",
+      "close": "27"
+    },
+    {
+      "open_time": "2026-02-18T00:00:00+00:00",
+      "open": "30",
+      "high": "31",
+      "low": "29",
+      "close": "30"
+    },
+    {
+      "open_time": "2026-02-18T04:00:00+00:00",
+      "open": "28",
+      "high": "29",
+      "low": "27",
+      "close": "28"
+    },
+    {
+      "open_time": "2026-02-18T08:00:00+00:00",
+      "open": "26",
+      "high": "27",
+      "low": "25",
+      "close": "26"
+    },
+    {
+      "open_time": "2026-02-18T12:00:00+00:00",
+      "open": "24",
+      "high": "25",
+      "low": "23",
+      "close": "24"
+    },
+    {
+      "open_time": "2026-02-18T16:00:00+00:00",
+      "open": "22",
+      "high": "23",
+      "low": "21",
+      "close": "22"
+    },
+    {
+      "open_time": "2026-02-18T20:00:00+00:00",
+      "open": "20",
+      "high": "21",
+      "low": "19",
+      "close": "20"
+    },
+    {
+      "open_time": "2026-02-19T00:00:00+00:00",
+      "open": "18",
+      "high": "19",
+      "low": "17",
+      "close": "18"
+    },
+    {
+      "open_time": "2026-02-19T04:00:00+00:00",
+      "open": "23",
+      "high": "24",
+      "low": "22",
+      "close": "23"
+    },
+    {
+      "open_time": "2026-02-19T08:00:00+00:00",
+      "open": "28",
+      "high": "29",
+      "low": "27",
+      "close": "28"
+    },
+    {
+      "open_time": "2026-02-19T12:00:00+00:00",
+      "open": "33",
+      "high": "34",
+      "low": "32",
+      "close": "33"
+    },
+    {
+      "open_time": "2026-02-19T16:00:00+00:00",
+      "open": "38",
+      "high": "39",
+      "low": "37",
+      "close": "38"
+    },
+    {
+      "open_time": "2026-02-19T20:00:00+00:00",
+      "open": "43",
+      "high": "44",
+      "low": "42",
+      "close": "43"
+    },
+    {
+      "open_time": "2026-02-20T00:00:00+00:00",
+      "open": "48",
+      "high": "49",
+      "low": "47",
+      "close": "48"
+    },
+    {
+      "open_time": "2026-02-20T04:00:00+00:00",
+      "open": "46",
+      "high": "47",
+      "low": "45",
+      "close": "46"
+    },
+    {
+      "open_time": "2026-02-20T08:00:00+00:00",
+      "open": "44",
+      "high": "45",
+      "low": "43",
+      "close": "44"
+    },
+    {
+      "open_time": "2026-02-20T12:00:00+00:00",
+      "open": "42",
+      "high": "43",
+      "low": "41",
+      "close": "42"
+    },
+    {
+      "open_time": "2026-02-20T16:00:00+00:00",
+      "open": "40",
+      "high": "41",
+      "low": "39",
+      "close": "40"
+    },
+    {
+      "open_time": "2026-02-20T20:00:00+00:00",
+      "open": "38",
+      "high": "39",
+      "low": "37",
+      "close": "38"
+    },
+    {
+      "open_time": "2026-02-21T00:00:00+00:00",
+      "open": "36",
+      "high": "37",
+      "low": "35",
+      "close": "36"
+    },
+    {
+      "open_time": "2026-02-21T04:00:00+00:00",
+      "open": "41",
+      "high": "42",
+      "low": "40",
+      "close": "41"
+    },
+    {
+      "open_time": "2026-02-21T08:00:00+00:00",
+      "open": "46",
+      "high": "47",
+      "low": "45",
+      "close": "46"
+    },
+    {
+      "open_time": "2026-02-21T12:00:00+00:00",
+      "open": "51",
+      "high": "52",
+      "low": "50",
+      "close": "51"
+    },
+    {
+      "open_time": "2026-02-21T16:00:00+00:00",
+      "open": "56",
+      "high": "57",
+      "low": "55",
+      "close": "56"
+    },
+    {
+      "open_time": "2026-02-21T20:00:00+00:00",
+      "open": "61",
+      "high": "62",
+      "low": "60",
+      "close": "61"
+    },
+    {
+      "open_time": "2026-02-22T00:00:00+00:00",
+      "open": "66",
+      "high": "67",
+      "low": "65",
+      "close": "66"
+    },
+    {
+      "open_time": "2026-02-22T04:00:00+00:00",
+      "open": "58",
+      "high": "59",
+      "low": "57",
+      "close": "58"
+    },
+    {
+      "open_time": "2026-02-22T08:00:00+00:00",
+      "open": "50",
+      "high": "51",
+      "low": "49",
+      "close": "50"
+    },
+    {
+      "open_time": "2026-02-22T12:00:00+00:00",
+      "open": "42",
+      "high": "43",
+      "low": "41",
+      "close": "42"
+    },
+    {
+      "open_time": "2026-02-22T16:00:00+00:00",
+      "open": "34",
+      "high": "35",
+      "low": "33",
+      "close": "34"
+    },
+    {
+      "open_time": "2026-02-22T20:00:00+00:00",
+      "open": "26",
+      "high": "27",
+      "low": "25",
+      "close": "26"
+    },
+    {
+      "open_time": "2026-02-23T00:00:00+00:00",
+      "open": "20",
+      "high": "21",
+      "low": "19",
+      "close": "20"
+    },
+    {
+      "open_time": "2026-02-23T04:00:00+00:00",
+      "open": "24",
+      "high": "25",
+      "low": "23",
+      "close": "24"
+    },
+    {
+      "open_time": "2026-02-23T08:00:00+00:00",
+      "open": "28",
+      "high": "29",
+      "low": "27",
+      "close": "28"
+    },
+    {
+      "open_time": "2026-02-23T12:00:00+00:00",
+      "open": "32",
+      "high": "33",
+      "low": "31",
+      "close": "32"
+    },
+    {
+      "open_time": "2026-02-23T16:00:00+00:00",
+      "open": "36",
+      "high": "37",
+      "low": "35",
+      "close": "36"
+    },
+    {
+      "open_time": "2026-02-23T20:00:00+00:00",
+      "open": "40",
+      "high": "41",
+      "low": "39",
+      "close": "40"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "internal_pools": 3,
+      "external_pools": 4,
+      "pools_upserted": 7,
+      "active_pools": 4,
+      "sweeps": 0,
+      "broken_pools": 3,
+      "expired_pools": 0
+    },
+    "pools": [
+      {
+        "pool": "pool:SSL:263",
+        "side": "SSL",
+        "liquidity_class": "EXTERNAL",
+        "source": "SWING",
+        "state": "ACTIVE",
+        "price": "11",
+        "band_low": "11",
+        "band_high": "11",
+        "strength": "27.41666666666666666666666667",
+        "member_count": 1,
+        "created_index": 263,
+        "created_at": "2026-02-18T00:00:00+00:00"
+      },
+      {
+        "pool": "pool:BSL:269",
+        "side": "BSL",
+        "liquidity_class": "INTERNAL",
+        "source": "SWING",
+        "state": "BROKEN",
+        "price": "31",
+        "band_low": "31",
+        "band_high": "31",
+        "strength": "26.66666666666666666666666667",
+        "member_count": 1,
+        "created_index": 269,
+        "created_at": "2026-02-19T00:00:00+00:00"
+      },
+      {
+        "pool": "pool:SSL:275",
+        "side": "SSL",
+        "liquidity_class": "EXTERNAL",
+        "source": "SWING",
+        "state": "ACTIVE",
+        "price": "17",
+        "band_low": "17",
+        "band_high": "17",
+        "strength": "25.91666666666666666666666667",
+        "member_count": 1,
+        "created_index": 275,
+        "created_at": "2026-02-20T00:00:00+00:00"
+      },
+      {
+        "pool": "pool:BSL:281",
+        "side": "BSL",
+        "liquidity_class": "INTERNAL",
+        "source": "SWING",
+        "state": "BROKEN",
+        "price": "49",
+        "band_low": "49",
+        "band_high": "49",
+        "strength": "25.16666666666666666666666667",
+        "member_count": 1,
+        "created_index": 281,
+        "created_at": "2026-02-21T00:00:00+00:00"
+      },
+      {
+        "pool": "pool:SSL:287",
+        "side": "SSL",
+        "liquidity_class": "INTERNAL",
+        "source": "SWING",
+        "state": "BROKEN",
+        "price": "35",
+        "band_low": "35",
+        "band_high": "35",
+        "strength": "24.41666666666666666666666667",
+        "member_count": 1,
+        "created_index": 287,
+        "created_at": "2026-02-22T00:00:00+00:00"
+      },
+      {
+        "pool": "pool:BSL:293",
+        "side": "BSL",
+        "liquidity_class": "EXTERNAL",
+        "source": "SWING",
+        "state": "ACTIVE",
+        "price": "67",
+        "band_low": "67",
+        "band_high": "67",
+        "strength": "23.66666666666666666666666667",
+        "member_count": 1,
+        "created_index": 293,
+        "created_at": "2026-02-23T00:00:00+00:00"
+      },
+      {
+        "pool": "pool:SSL:299",
+        "side": "SSL",
+        "liquidity_class": "EXTERNAL",
+        "source": "SWING",
+        "state": "ACTIVE",
+        "price": "19",
+        "band_low": "19",
+        "band_high": "19",
+        "strength": "22.91666666666666666666666667",
+        "member_count": 1,
+        "created_index": 299,
+        "created_at": "2026-02-24T00:00:00+00:00"
+      }
+    ],
+    "transitions": [
+      {
+        "pool": "pool:BSL:269",
+        "from_state": "ACTIVE",
+        "to_state": "BROKEN",
+        "reason": "close_through",
+        "candle_index": 273,
+        "transitioned_at": "2026-02-19T16:00:00+00:00",
+        "evidence": {
+          "close": "33",
+          "epsilon": "0.1778",
+          "level": "31"
+        }
+      },
+      {
+        "pool": "pool:BSL:281",
+        "from_state": "ACTIVE",
+        "to_state": "BROKEN",
+        "reason": "close_through",
+        "candle_index": 285,
+        "transitioned_at": "2026-02-21T16:00:00+00:00",
+        "evidence": {
+          "close": "51",
+          "epsilon": "0.2067",
+          "level": "49"
+        }
+      },
+      {
+        "pool": "pool:SSL:287",
+        "from_state": "ACTIVE",
+        "to_state": "BROKEN",
+        "reason": "close_through",
+        "candle_index": 292,
+        "transitioned_at": "2026-02-22T20:00:00+00:00",
+        "evidence": {
+          "close": "34",
+          "epsilon": "0.2829",
+          "level": "35"
+        }
+      }
+    ],
+    "events": []
+  }
+}
