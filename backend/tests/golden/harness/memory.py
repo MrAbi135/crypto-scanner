@@ -34,6 +34,7 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRecord,
     LiquidityTransitionRecord,
 )
+from scanner.application.ports.setups import SetupRecord
 from scanner.domain.common import Candle, TradeAggregate
 from scanner.domain.volume import WashRiskState
 from scanner.shared import Timeframe
@@ -672,4 +673,37 @@ class InMemoryIctZoneInteractionRepository:
                 (item for item in self.interactions if item.zone_id == zone_id),
                 key=lambda item: (item.candle_index, item.interaction_id),
             )
+        )
+
+
+class InMemorySetupRepository:
+    """T16 in memory: append-only, keyed on the setup id.
+
+    Mirrors `ON CONFLICT DO NOTHING` rather than an upsert, because that is
+    what the table does and what a re-evaluated candle must not undo.
+    """
+
+    def __init__(self) -> None:
+        self.rows: dict[str, SetupRecord] = {}
+
+    async def append(self, setup: SetupRecord) -> bool:
+        if setup.setup_id in self.rows:
+            return False
+
+        self.rows[setup.setup_id] = setup
+
+        return True
+
+    async def list_at(
+        self,
+        symbols: tuple[str, ...],
+        timeframe: Timeframe,
+        evaluated_at: datetime,
+    ) -> tuple[SetupRecord, ...]:
+        return tuple(
+            row
+            for row in self.rows.values()
+            if row.symbol in symbols
+            and row.timeframe is timeframe
+            and row.evaluated_at == evaluated_at
         )

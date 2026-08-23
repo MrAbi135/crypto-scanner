@@ -964,7 +964,12 @@
           "id": "8.3",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- confluence_replay is not wired"
+          "blocked_on": "partially enumerated: the rules this section's datasets actually pin are listed beside this entry; the rest of the section is not broken out yet"
+        },
+        {
+          "id": "8.3-every-factor-scored",
+          "rule": "each of F1-F6 is a sum of enumerated evidence contributions; a missing factor is not a zero and base confidence refuses to be computed without it",
+          "status": "covered"
         }
       ]
     },
@@ -990,7 +995,12 @@
           "id": "8.5",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- confluence_replay is not wired"
+          "blocked_on": "partially enumerated: the rules this section's datasets actually pin are listed beside this entry; the rest of the section is not broken out yet"
+        },
+        {
+          "id": "8.5-base-plus-adjustments-floored",
+          "rule": "final = clamp(base + bonuses - penalties, 0, 100), floored to an integer; 8.7 carries 95.25 to a published 95",
+          "status": "covered"
         }
       ]
     },
@@ -1003,7 +1013,12 @@
           "id": "8.6",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- confluence_replay is not wired"
+          "blocked_on": "partially enumerated: the rules this section's datasets actually pin are listed beside this entry; the rest of the section is not broken out yet"
+        },
+        {
+          "id": "8.6-no-archetype-no-publication",
+          "rule": "every publishable setup must match exactly one archetype, so a candidate matching none is recorded and withheld whatever its confidence",
+          "status": "covered"
         }
       ]
     },
