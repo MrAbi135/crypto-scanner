@@ -143,8 +143,7 @@
         {
           "id": "3.4-two-pairs-bearish",
           "rule": "the bearish mirror",
-          "status": "pending",
-          "blocked_on": "the rising zigzag covers the bullish side; its mirror is the obvious next case"
+          "status": "covered"
         },
         {
           "id": "3.4-one-pair-insufficient",
