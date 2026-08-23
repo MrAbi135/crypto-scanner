@@ -82,6 +82,26 @@ UPTREND = [
 ]
 
 
+def body_candle(index: int, open_: str, close: str, *, low: str | None = None) -> Candle:
+    """A candle with a body, for the one rule that reads which way it closed."""
+    o, c = Decimal(open_), Decimal(close)
+
+    return Candle(
+        symbol=SYMBOL,
+        timeframe=Timeframe.H1,
+        open_time=T0 + timedelta(hours=index),
+        open=o,
+        high=max(o, c) + Decimal("1"),
+        low=Decimal(low) if low is not None else min(o, c) - Decimal("1"),
+        close=c,
+        volume=Decimal("100"),
+        quote_volume=Decimal("10000"),
+        taker_buy_volume=Decimal("50"),
+        trade_count=10,
+        source=CandleSource.BACKFILL,
+    )
+
+
 def build_service(events: FakeEventRepository, candles: list[Candle]):
     return StructureReplayService(
         FakeCandleRepository(candles),
@@ -112,6 +132,100 @@ async def test_a_close_through_a_swing_high_is_a_bos_once_trend_is_bullish() -> 
     assert len(bos) == 1
     assert bos[0].event_type == "BOS_UP"
     assert bos[0].event_at == candles[21].open_time
+
+
+@pytest.mark.asyncio
+async def test_an_outside_bar_closing_bearish_does_not_break_upward() -> None:
+    """§3.5 edge case (1), which the engine did not implement.
+
+    "One candle closes beyond both an external high and low (extreme outside
+    bar): resolve by close direction -- bullish close => bullish BOS only; the
+    opposite penetration becomes a sweep candidate."
+
+    `_replay_bos` took its direction and its candidate swing kind from the
+    trend state alone and never read the close's own direction, so a candle
+    could only ever break the way the trend was already pointing.
+
+    Candle 21 engulfs the structure: its high of 151 clears the 130 and its
+    low of 95 undercuts the 110, so both extremes are taken and only one of
+    them can be the break. It closes at 132 -- above the level -- but it
+    opened at 150, so the body is bearish. Under edge case (1) that is not a
+    bullish break.
+
+    The break is withheld rather than replaced by a bearish one. §3.5's main
+    rule requires "the trend agreeing" and the trend here is BULLISH, so a
+    bearish BOS cannot satisfy both clauses; the doctrine contradicts itself
+    in this corner, and this is the reading both halves survive. The downward
+    penetration is a sweep candidate, which is the Liquidity Engine's to
+    record and is exactly where edge case (1) sends it.
+    """
+    candles = [candle(i, "125") for i in range(21)] + [body_candle(21, "150", "132", low="95")]
+    events = FakeEventRepository()
+
+    inserted = await build_service(events, candles)._replay_bos(
+        symbol=SYMBOL,
+        timeframe=Timeframe.H1,
+        candles=candles,
+        external_swings=tuple(UPTREND),
+    )
+
+    assert inserted == 0
+    assert not [e for e in events.events.values() if e.event_type.startswith("BOS_")]
+
+
+@pytest.mark.asyncio
+async def test_an_outside_bar_closing_bullish_still_breaks_upward() -> None:
+    """The other half, so the rule withholds a break rather than all of them.
+
+    The same engulfing range -- high 136 over the 130, low 95 under the 110 --
+    and the same close of 132. Only the body differs: this one opened at 125,
+    so it closed bullish, and "bullish close => bullish BOS" is the rule's own
+    affirmative case.
+    """
+    candles = [candle(i, "125") for i in range(21)] + [body_candle(21, "125", "132", low="95")]
+    events = FakeEventRepository()
+
+    inserted = await build_service(events, candles)._replay_bos(
+        symbol=SYMBOL,
+        timeframe=Timeframe.H1,
+        candles=candles,
+        external_swings=tuple(UPTREND),
+    )
+
+    assert inserted == 1
+
+    bos = [e for e in events.events.values() if e.event_type.startswith("BOS_")]
+
+    assert len(bos) == 1
+    assert bos[0].event_type == "BOS_UP"
+    assert json.loads(bos[0].payload)["swing_price"] == "130"
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_bearish_candle_through_the_level_still_breaks() -> None:
+    """The precondition has to bind, or edge case (1) swallows §3.5's main rule.
+
+    This close is bearish too -- opened at 140, closed at 132 -- but its low of
+    131 leaves the 110 untouched, so nothing about it is an outside bar. Only
+    one extreme was taken, there is nothing to resolve between, and the break
+    stands.
+
+    Read as "the close is beyond both extremes" rather than "the range takes
+    both", the rule would need a low priced above a high and would fire on
+    almost nothing; read without any precondition it would gate every break in
+    the engine on candle colour. This is the case that pins the middle.
+    """
+    candles = [candle(i, "125") for i in range(21)] + [body_candle(21, "140", "132", low="131")]
+    events = FakeEventRepository()
+
+    inserted = await build_service(events, candles)._replay_bos(
+        symbol=SYMBOL,
+        timeframe=Timeframe.H1,
+        candles=candles,
+        external_swings=tuple(UPTREND),
+    )
+
+    assert inserted == 1
 
 
 @pytest.mark.asyncio

@@ -42,7 +42,7 @@ from scanner.shared import Timeframe
 # s4-v2 (2026-08-17): first swing of each kind now emits an explicit SEED
 # classification event. Output-changing, hence the increment — Constitution
 # §44.5. Ratified as SLS v1.0.2 §3.3.
-STRUCTURE_ALGO_VERSION = "s4-v6"
+STRUCTURE_ALGO_VERSION = "s4-v7"
 
 
 @dataclass(frozen=True, slots=True)
@@ -290,6 +290,15 @@ class StructureReplayService:
                 candidates,
                 key=lambda item: item.index,
             )
+
+            if _is_outside_bar(
+                candle,
+                confirmed_swings,
+                consumed,
+            ) and not _close_agrees(candle, direction):
+                # §3.5 edge case (1). See `_close_agrees` for why this only
+                # withholds the break and does not record the opposite one.
+                continue
 
             atr = atrs[candle_index] if candle_index < len(atrs) else None
 
@@ -561,6 +570,70 @@ class StructureReplayService:
                 created_at=self._clock.now(),
             )
         )
+
+
+def _is_outside_bar(
+    candle: Candle,
+    confirmed_swings: tuple[SwingPoint, ...],
+    consumed: set[tuple[int, SwingKind]],
+) -> bool:
+    """§3.5 edge case (1)'s precondition: one candle takes out both extremes.
+
+    "One candle closes beyond both an external high and low (extreme outside
+    bar)" -- the candle's range engulfs an unconsumed external high and an
+    unconsumed external low at once, so both are penetrated and only one of
+    them can be the break.
+
+    The candle's *range* is what has to reach both, not its close: a close is
+    a single price and cannot sit above a high and below a lower low. Reading
+    it as the close instead would need a low priced above a high, which is an
+    inverted and near-unreachable structure, and would have made this rule
+    fire on almost nothing.
+
+    Only the trend's own kind is ever consumed -- a BULLISH pass consumes
+    highs and never touches lows -- so the opposite side is read as it stands.
+    """
+    took_high = any(
+        candle.high > swing.price
+        for swing in confirmed_swings
+        if swing.kind is SwingKind.HIGH and (swing.index, swing.kind) not in consumed
+    )
+
+    took_low = any(
+        candle.low < swing.price
+        for swing in confirmed_swings
+        if swing.kind is SwingKind.LOW and (swing.index, swing.kind) not in consumed
+    )
+
+    return took_high and took_low
+
+
+def _close_agrees(candle: Candle, direction: BreakDirection) -> bool:
+    """§3.5 edge case (1)'s resolution: "bullish close => bullish BOS only".
+
+    The candle's own body, not which side of the level it finished on -- an
+    outside bar is beyond both levels by construction, so "which side" cannot
+    resolve anything and only the body can.
+
+    This withholds a break; it never records one. Edge case (1) would have the
+    opposite penetration decide the direction, but §3.5's main rule requires
+    "the trend agreeing", and a bearish BOS during a BULLISH trend cannot
+    satisfy both clauses at once. The reading taken here is the one both can
+    live with: the contrapositive of "bullish close => bullish BOS only" is
+    that a bearish close yields no bullish BOS, and edge case (1) sends the
+    other penetration to the Liquidity Engine as a sweep candidate anyway,
+    which is where it is already handled. Settled by the developer
+    2026-08-23; the alternative reading, which manufactures a
+    counter-trend BOS, remains available if the doctrine is amended.
+
+    A doji closes in neither direction and so agrees with neither. That is
+    only reachable inside an outside bar, where the whole question is which
+    way the candle resolved and a doji has not answered.
+    """
+    if direction is BreakDirection.UP:
+        return candle.close > candle.open
+
+    return candle.close < candle.open
 
 
 def _infer_external_trend(
