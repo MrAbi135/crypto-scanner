@@ -82,6 +82,7 @@ from scanner.domain.ict import (
     detect_displacement,
     evaluate_pd_context,
 )
+from scanner.domain.liquidity import SWEEP_SETUP_EXPIRY_CANDLES
 from scanner.domain.momentum import (
     Leg,
     LegKind,
@@ -112,7 +113,7 @@ from scanner.domain.volume import (
 )
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v16"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v17"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -345,6 +346,7 @@ class ConfluenceReplayService:
                 symbol=symbol,
                 timeframe=timeframe,
                 last_index=len(series) - 1,
+                at=newest.close_time,
                 direction=direction,
                 trend_state=trend_state,
                 event_types=event_types,
@@ -389,6 +391,7 @@ class ConfluenceReplayService:
         symbol: str,
         timeframe: Timeframe,
         last_index: int,
+        at: datetime,
         direction: str,
         trend_state: str,
         event_types: set[str],
@@ -427,7 +430,7 @@ class ConfluenceReplayService:
         # closed candles after confirmation -- beyond that window it may no
         # longer seed MSS or Sweep-Reversal archetypes". The liquidity engine
         # already stamped the expiry index; nothing was reading it.
-        live_sweeps = [s for s in sweeps if s.live(last_index)]
+        live_sweeps = [s for s in sweeps if s.live(at, timeframe)]
 
         supporting = [s for s in live_sweeps if s.supports(direction) and not s.reclaimed]
 
@@ -453,12 +456,12 @@ class ConfluenceReplayService:
             respected
             or last_index in legs.displacement
             or last_index in bos_breaks.get(direction, frozenset())
-            or any(s.confirmed_index == last_index for s in sweeps)
+            or any(s.confirmed_at == at for s in sweeps)
         )
 
         best_sweep = max(
             supporting,
-            key=lambda s: (s.external, s.depth_atr, s.confirmed_index),
+            key=lambda s: (s.external, s.depth_atr, s.confirmed_at),
             default=None,
         )
 
@@ -540,7 +543,7 @@ class ConfluenceReplayService:
         # defensible reading. Recency breaks ties.
         best_zone = max(
             matching_zones,
-            key=lambda z: (_zone_score(z, len(matching_zones)), z.confirmed_index),
+            key=lambda z: (_zone_score(z, len(matching_zones)), z.created_at),
         )
 
         # Only for the zone actually being scored. §5.9 records interactions
@@ -578,7 +581,7 @@ class ConfluenceReplayService:
                     # the answer is known, but a filter that stops doing so
                     # must stop paying for it.
                     unclaimed=not best_sweep.reclaimed if best_sweep else False,
-                    fresh=best_sweep.live(last_index) if best_sweep else False,
+                    fresh=best_sweep.live(at, timeframe) if best_sweep else False,
                     stop_hunt="LIQUIDITY_STOP_HUNT" in event_types,
                     target_pool_strength=(target_pool.strength if target_pool else Decimal(0)),
                 )
@@ -647,7 +650,7 @@ class ConfluenceReplayService:
                 counter_displacement=counter_displacement,
                 displacement_fvg=_is_displacement_fvg(best_zone, legs.displacement),
                 fvg_first_touch=_is_first_touch(best_zone, price),
-                fvg_age_candles=max(0, last_index - best_zone.confirmed_index),
+                fvg_age_candles=_age_in_candles(best_zone.created_at, at, timeframe),
                 ranging=trend_state == TrendState.RANGING.value,
                 range_extreme_swept=_swept_a_range_extreme(supporting, pd, atr),
                 rejection_confirmed=history.rejected,
@@ -763,11 +766,15 @@ class ConfluenceReplayService:
 class _Sweep:
     """A §4.6 sweep transition, read through the questions §8 asks of it."""
 
-    __slots__ = ("_e", "confirmed_index")
+    __slots__ = ("_e", "confirmed_at")
 
     def __init__(self, record: LiquidityEvidenceRecord) -> None:
         self._e = json.loads(record.evidence)
-        self.confirmed_index = record.candle_index
+
+        # The transition's real time, not its `candle_index`. That index is
+        # the offset inside whichever window recorded the sweep, and it is
+        # frozen there while the window keeps sliding -- see `live` below.
+        self.confirmed_at = record.transitioned_at
 
     @property
     def reclaimed(self) -> bool:
@@ -789,10 +796,22 @@ class _Sweep:
 
         return Decimal(str(raw)) if raw is not None else Decimal(0)
 
-    def live(self, last_index: int) -> bool:
-        expiry = self._e.get("setup_expiry_index")
+    def live(self, at: datetime, timeframe: Timeframe) -> bool:
+        """§4.6's 15 closed candles, counted in time rather than in offsets.
 
-        return expiry is None or last_index <= int(expiry)
+        This read `setup_expiry_index` out of the evidence -- `confirmed_index
+        + 15`, both offsets inside the window that recorded the sweep -- and
+        compared it against the current window's `last_index`. Neither number
+        moves with the other: `last_index` is always the right edge, and the
+        stored one never changes again, so the comparison had nothing to do
+        with how long ago the sweep happened.
+
+        Measured on the soak VM over 87,605 sweep transitions: 78,265 carry an
+        expiry index below 500 and so were dead the moment they were written,
+        and the rest sit at or above it and can never expire at all. Neither
+        group was ever 15 candles from anything.
+        """
+        return at - self.confirmed_at <= timeframe.duration * SWEEP_SETUP_EXPIRY_CANDLES
 
     def supports(self, direction: str) -> bool:
         """A sweep of resting sell-side liquidity clears the way up, and vice versa."""
@@ -884,6 +903,35 @@ class _History:
         first = retests[0].observed_at
 
         return any(item.kind == "RESPECT" and item.observed_at == first for item in self._items)
+
+
+def _age_in_candles(
+    created_at: datetime,
+    at: datetime,
+    timeframe: Timeframe,
+) -> int:
+    """A zone's age, measured in candles, from two real timestamps.
+
+    It used to be `max(0, last_index - confirmed_index)`, and those two
+    numbers belong to different windows. `last_index` is always the right edge
+    of the current 500-candle window; `confirmed_index` is the offset the zone
+    had when it was first detected, and the zone upsert does not list it in
+    its `set_` clause, so it never moves again. A zone is almost always found
+    at the right edge too, which is how a difference of nearly zero came out
+    of a zone that had been sitting there for days.
+
+    Measured on the soak VM over 6,388 non-terminal FVG zones: A4's
+    `fvg_age_candles <= 30` admitted 982 of them, where the age implied by
+    their timestamps admits 227. The oldest was 690 candles old and read as
+    200 -- and it was 690, past the 500-candle window, so no index could have
+    described it at all.
+
+    Both arguments are candle close times, so the division is exact. It is not
+    clamped at zero on purpose: a negative age means the zone was created
+    after the candle being scored, and A4's `0 <= fvg_age_candles` should be
+    allowed to catch that instead of being made unfalsifiable by a `max`.
+    """
+    return (at - created_at) // timeframe.duration
 
 
 def _read_pd(

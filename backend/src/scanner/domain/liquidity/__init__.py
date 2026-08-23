@@ -2,6 +2,7 @@
 
 from scanner.domain.liquidity.clusters import detect_equal_level_clusters
 from scanner.domain.liquidity.model import (
+    SWEEP_SETUP_EXPIRY_CANDLES,
     EqualLevelCluster,
     LiquidityClass,
     LiquidityPool,
@@ -35,6 +36,7 @@ from scanner.domain.liquidity.sweeps import (
 
 __all__ = [
     "MAX_POOLS",
+    "SWEEP_SETUP_EXPIRY_CANDLES",
     "EqualLevelCluster",
     "LiquidityClass",
     "LiquidityPool",
