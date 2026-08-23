@@ -21,6 +21,7 @@ confidence is readable as the partial figure it is.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -56,11 +57,13 @@ from scanner.application.ports.repositories import (
     SymbolRepository,
     TradeAggregateRepository,
 )
+from scanner.application.ports.setups import SetupRecord, SetupRepository
 from scanner.domain.common import Candle, TradeAggregate, wilder_atr, wilder_atr_series
 from scanner.domain.common.rvol import median, relative_volume
 from scanner.domain.confluence import (
     Adjustment,
     ArchetypeEvidence,
+    Confidence,
     Contribution,
     Factor,
     FactorScore,
@@ -120,7 +123,7 @@ from scanner.domain.volume import (
 )
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v19"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v20"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -238,6 +241,12 @@ class SetupCandidate:
     # factors whose scores are still computed locally rather than from
     # enumerated contributions -- absent rather than invented.
     attribution: dict[str, tuple[Contribution, ...]] = field(default_factory=dict)
+
+    # §8.4's base and §8.5's applied adjustments, kept whole. T16 stores both
+    # beside the final number, because a stored 82 that does not say which
+    # bonuses and penalties produced it cannot be recalibrated against later.
+    # None for a candidate that failed gates and was never scored.
+    breakdown: Confidence | None = None
     zone_id: str | None = None
     unreachable: tuple[str, ...] = ()
 
@@ -271,6 +280,7 @@ class ConfluenceReplayService:
         *,
         shift_algo_version: str,
         algo_version: str = CONFLUENCE_ALGO_VERSION,
+        setups: SetupRepository | None = None,
     ) -> None:
         self._candles = candles
         self._events = events
@@ -284,6 +294,7 @@ class ConfluenceReplayService:
         self._shift_state = shift_state
         self._shift_algo_version = shift_algo_version
         self._algo_version = algo_version
+        self._setups = setups
 
     async def run(
         self,
@@ -723,6 +734,7 @@ class ConfluenceReplayService:
             attribution={
                 f.value: item.contributions for f, item in scored.items() if item.contributions
             },
+            breakdown=confidence,
             zone_id=best_zone.zone_id,
             unreachable=_unreachable(htf, pd),
         )
@@ -788,7 +800,102 @@ class ConfluenceReplayService:
             )
         )
 
+        await self._store_setup(symbol, timeframe, event_at, candidate)
+
         return 1 if inserted else 0
+
+    async def _store_setup(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        evaluated_at: datetime,
+        candidate: SetupCandidate,
+    ) -> None:
+        """T16, for the candidates that cleared §8.2.
+
+        DDD T16 holds "every confluence candidate that passed gates --
+        published *and* below-floor", so a gate failure is recorded in the
+        event log and nowhere else: there is no scored evidence to calibrate
+        against, and `base_confidence` would have to be invented to store one.
+
+        The event in `_record` above still goes out either way. It is the
+        engine's audit log; this is the modelled record the product reads, and
+        they answer different questions.
+        """
+        if self._setups is None or not candidate.gates_passed:
+            return
+
+        breakdown = candidate.breakdown
+
+        if breakdown is None:
+            raise ValueError(f"{symbol}: a gate-passing candidate carries no confidence")
+
+        await self._setups.append(
+            SetupRecord(
+                setup_id=_setup_id(
+                    symbol,
+                    timeframe,
+                    candidate.direction,
+                    evaluated_at,
+                    self._algo_version,
+                ),
+                symbol=symbol,
+                timeframe=timeframe,
+                direction=candidate.direction,
+                archetype=candidate.archetype,
+                gate_results=json.dumps(
+                    {
+                        "passed": candidate.gates_passed,
+                        "failed": list(candidate.failed_gates),
+                    },
+                    sort_keys=True,
+                ),
+                factor_scores=json.dumps(
+                    {k: str(v) for k, v in candidate.factors.items()},
+                    sort_keys=True,
+                ),
+                adjustments=json.dumps(
+                    {
+                        "applied": [
+                            {"code": a.code, "points": str(a.points)} for a in breakdown.applied
+                        ],
+                        "synergy": str(breakdown.synergy),
+                        "penalty": str(breakdown.penalty),
+                        # §8.5 caps both sides. Whether a cap bound is the
+                        # difference between "no more evidence" and "more
+                        # evidence than the doctrine will pay for", and only
+                        # the flags can tell those apart later.
+                        "synergy_capped": breakdown.synergy_capped,
+                        "penalty_capped": breakdown.penalty_capped,
+                    },
+                    sort_keys=True,
+                ),
+                base_confidence=breakdown.base,
+                final_confidence=breakdown.final,
+                floor_passed=candidate.publishable,
+                algo_version=self._algo_version,
+                evaluated_at=evaluated_at,
+                evidence=json.dumps(
+                    {
+                        "zone_id": candidate.zone_id,
+                        "grade": candidate.grade,
+                        "unreachable_inputs": list(candidate.unreachable),
+                        "attribution": {
+                            factor: [
+                                {
+                                    "code": c.code,
+                                    "points": str(c.points),
+                                    "evidence_id": c.evidence_id,
+                                }
+                                for c in contributions
+                            ]
+                            for factor, contributions in candidate.attribution.items()
+                        },
+                    },
+                    sort_keys=True,
+                ),
+            )
+        )
 
     async def _read_htf_state(
         self,
@@ -961,6 +1068,33 @@ class _History:
         first = retests[0].observed_at
 
         return any(item.kind == "RESPECT" and item.observed_at == first for item in self._items)
+
+
+def _setup_id(
+    symbol: str,
+    timeframe: Timeframe,
+    direction: str,
+    evaluated_at: datetime,
+    algo_version: str,
+) -> str:
+    """T16's identity: one candidate per symbol, TF, direction and close.
+
+    Derived from real values only -- no window offset anywhere near it. The
+    §5.9 interaction ids were hashed over a sliding-window index and wrote the
+    same fact twenty times over; this is the same shape of key built the way
+    that one should have been.
+    """
+    raw = "|".join(
+        (
+            symbol,
+            timeframe.value,
+            direction,
+            evaluated_at.isoformat(),
+            algo_version,
+        )
+    )
+
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _age_in_candles(
