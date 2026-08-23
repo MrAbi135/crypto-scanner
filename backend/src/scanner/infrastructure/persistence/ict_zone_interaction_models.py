@@ -8,6 +8,7 @@ from decimal import Decimal
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Index,
     Integer,
     Numeric,
     String,
@@ -22,7 +23,21 @@ class IctZoneInteractionRow(Base):
     """Immutable SLS §5.9 interaction fact."""
 
     __tablename__ = "ict_zone_interactions"
-    __table_args__ = ({"schema": "detection"},)
+    __table_args__ = (
+        # A zone cannot be touched twice by the same candle in the same way.
+        # The primary key already hashes exactly this triple, so the index is
+        # redundant -- deliberately. `interaction_id` used to include the
+        # replay window's local offset, which changes every pass, and without
+        # this the database had no way to say so.
+        Index(
+            "uq_ict_zone_interactions_identity",
+            "zone_id",
+            "kind",
+            "observed_at",
+            unique=True,
+        ),
+        {"schema": "detection"},
+    )
 
     interaction_id: Mapped[str] = mapped_column(
         String(160),

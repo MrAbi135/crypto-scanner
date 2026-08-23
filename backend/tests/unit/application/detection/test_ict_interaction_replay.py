@@ -308,6 +308,81 @@ async def test_interaction_replay_is_idempotent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_window_advancing_does_not_rewrite_the_same_interaction() -> None:
+    """The idempotence the engine actually needs, which the test above misses.
+
+    `test_interaction_replay_is_idempotent` replays the identical range twice.
+    Every candle keeps its offset, so the id was bound to match and the check
+    could not fail. The engine never does that: it slides a 500-candle window
+    forward one candle per close, and the interaction that sat at offset 136
+    sits at 135 on the next pass.
+
+    `interaction_id` hashed that offset, so it changed, `ON CONFLICT DO
+    NOTHING` found nothing to conflict with, and the row was written again --
+    once per pass, for as long as the candle stayed inside the window. On the
+    soak VM the table held 19,823,936 rows; across a 300-zone sample, 11,197
+    of them were 544 real interactions written over and over.
+
+    Here the second call starts one candle later. Same real interaction, new
+    offset, and nothing new may be written.
+    """
+    candles = pad_for_warmup(
+        [
+            make_candle(
+                symbol="TESTUSDT",
+                timeframe=Timeframe.M5,
+                index=0,
+                open_="115",
+                high="116",
+                low="114",
+                close="115",
+            ),
+            make_candle(
+                symbol="TESTUSDT",
+                timeframe=Timeframe.M5,
+                index=1,
+                open_="112",
+                high="113",
+                low="104",
+                close="111",
+            ),
+        ]
+    )
+
+    interactions = FakeInteractionRepository()
+
+    service = IctZoneInteractionReplayService(
+        FakeCandleRepository(candles),
+        FakeContextRepository((zone(Timeframe.M5),)),
+        interactions,
+    )
+
+    first = await service.run(
+        "TESTUSDT",
+        Timeframe.M5,
+        candles[0].open_time,
+        candles[-1].close_time,
+    )
+
+    # The window slides: same end, start one candle later.
+    second = await service.run(
+        "TESTUSDT",
+        Timeframe.M5,
+        candles[1].open_time,
+        candles[-1].close_time,
+    )
+
+    assert first.interactions_inserted > 0
+    assert second.interactions_inserted == 0
+
+    # And the identity is the triple, so the stored rows say so directly.
+    stored = list(interactions.records.values())
+    triples = {(item.zone_id, item.kind, item.observed_at) for item in stored}
+
+    assert len(stored) == len(triples)
+
+
+@pytest.mark.asyncio
 async def test_respect_can_receive_ltf_confirmation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

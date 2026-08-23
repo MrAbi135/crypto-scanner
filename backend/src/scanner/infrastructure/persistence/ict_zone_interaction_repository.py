@@ -150,11 +150,16 @@ class PgIctZoneInteractionRepository:
             result = await session.execute(
                 select(IctZoneInteractionRow)
                 .where(IctZoneInteractionRow.zone_id == zone_id)
-                # Ordered so that "first retest" is answerable at all. The
-                # interaction_id tie-break keeps two interactions on one candle
-                # in a stable order rather than whatever the planner returns.
+                # Ordered so that "first retest" is answerable at all, and by
+                # observed_at rather than candle_index: the latter is the
+                # offset inside whichever sliding window recorded the row, so
+                # ordering by it sorted the history by an accident of when the
+                # engine happened to look, not by when the interactions
+                # occurred. The interaction_id tie-break keeps two interactions
+                # on one candle in a stable order rather than whatever the
+                # planner returns.
                 .order_by(
-                    IctZoneInteractionRow.candle_index.asc(),
+                    IctZoneInteractionRow.observed_at.asc(),
                     IctZoneInteractionRow.interaction_id.asc(),
                 )
             )
