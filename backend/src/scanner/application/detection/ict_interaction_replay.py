@@ -38,7 +38,7 @@ from scanner.domain.structure import (
 )
 from scanner.shared import Timeframe
 
-ICT_INTERACTION_ALGO_VERSION = "s6-interaction-v2"
+ICT_INTERACTION_ALGO_VERSION = "s6-interaction-v3"
 
 _ATR_PERIOD = 14
 _CONFIRMATION_MAX_LTF_CANDLES = 5
@@ -312,7 +312,6 @@ class IctZoneInteractionReplayService:
             interaction_id=_interaction_id(
                 record.zone_id,
                 kind.value,
-                candle_index,
                 observed_at,
             ),
             zone_id=record.zone_id,
@@ -363,7 +362,6 @@ class IctZoneInteractionReplayService:
 
         interaction_id = _confirmation_id(
             record.zone_id,
-            parent_index,
             bos_candle.close_time,
         )
 
@@ -475,14 +473,27 @@ def _lower_timeframe(
 def _interaction_id(
     zone_id: str,
     kind: str,
-    candle_index: int,
     observed_at: datetime,
 ) -> str:
+    """Identity is the zone, the kind and the candle that made it.
+
+    `candle_index` used to be in here, and it is a window-local number: the
+    replay slides a 500-candle window forward one candle per close, so the
+    same real interaction is offset 136 on one pass and 135 on the next. The
+    hash changed with it, `on_conflict_do_nothing` had nothing to conflict
+    with, and every pass wrote the interaction again -- once per pass, for as
+    long as the candle stayed inside the window.
+
+    Measured on the VM over 300 zones: 11,197 rows for 544 distinct
+    (zone, kind, candle) triples, a factor of 20.6.
+
+    A zone cannot be touched twice by one candle, so the triple below is the
+    whole identity and two different kinds on one candle still get two rows.
+    """
     raw = "|".join(
         (
             zone_id,
             kind,
-            str(candle_index),
             observed_at.isoformat(),
         )
     )
@@ -492,14 +503,13 @@ def _interaction_id(
 
 def _confirmation_id(
     zone_id: str,
-    parent_index: int,
     bos_at: datetime,
 ) -> str:
+    """Same correction as _interaction_id: `parent_index` was window-local."""
     raw = "|".join(
         (
             zone_id,
             InteractionKind.CONFIRMATION.value,
-            str(parent_index),
             bos_at.isoformat(),
         )
     )

@@ -876,9 +876,14 @@ class _History:
         if not retests:
             return False
 
-        first = retests[0].candle_index
+        # observed_at, not candle_index. The index is the row's offset inside
+        # the sliding window that recorded it, so two rows for the same real
+        # candle carried different indices and two rows for different candles
+        # could carry the same one -- this comparison could miss a true Respect
+        # and equally invent one, and A2 grades an entry on the answer.
+        first = retests[0].observed_at
 
-        return any(item.kind == "RESPECT" and item.candle_index == first for item in self._items)
+        return any(item.kind == "RESPECT" and item.observed_at == first for item in self._items)
 
 
 def _read_pd(
