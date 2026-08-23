@@ -845,13 +845,51 @@
     {
       "id": "8.2",
       "title": "Stage 1 - Hard Gates (Binary, No Score Can Compensate)",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "8.2",
-          "rule": "section not yet enumerated into rules",
+          "id": "8.2-all-gates-required",
+          "rule": "a candidate must pass all six gates",
+          "status": "covered"
+        },
+        {
+          "id": "8.2-structure-gate",
+          "rule": "G2: the trend state must be compatible with the direction, or a reversal path must exist",
+          "status": "covered"
+        },
+        {
+          "id": "8.2-zone-gate",
+          "rule": "G4: a live zone of the direction's polarity within 0.5 x ATR of price",
+          "status": "covered"
+        },
+        {
+          "id": "8.2-failure-scores-nothing",
+          "rule": "failing any gate means no setup exists and nothing is scored",
+          "status": "covered"
+        },
+        {
+          "id": "8.2-data-gate",
+          "rule": "G1: fresh feeds, not DEGRADED, warm-up complete, tier permits the timeframe",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- confluence_replay is not wired"
+          "blocked_on": "a golden series is warm and clean by construction; the failing side needs a declared gap or a cold context"
+        },
+        {
+          "id": "8.2-pd-gate",
+          "rule": "G3: 5.7's directional gate, with PD_SUSPENDED narrowing archetypes rather than failing",
+          "status": "pending",
+          "blocked_on": "needs a series with a dealing range, which needs confirmed external swings"
+        },
+        {
+          "id": "8.2-contrary-fact-gate",
+          "rule": "G5: no unexpired opposing sweep-reclaim, failed break against D, or opposing displacement in 3 candles",
+          "status": "pending",
+          "blocked_on": "passes vacuously on a market with no facts at all; the failing side needs a sweep and a reclaim"
+        },
+        {
+          "id": "8.2-volume-integrity-gate",
+          "rule": "G6: the symbol is not wash_risk-capped below the archetype's minimum",
+          "status": "pending",
+          "blocked_on": "6.6 is a daily symbol-level evaluation and a golden series has no daily history"
         }
       ]
     },

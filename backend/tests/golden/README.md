@@ -218,8 +218,19 @@ more than it proves:
 - the OTE pass needs confirmed external swings, which the short zone scenarios
   never form, so §5.7 and §5.8 produce nothing yet.
 
-Still unwired: `confluence_replay`. Every `blocked_on` in the manifest names
-which of these stands in the way.
+**Confluence runs the whole pipeline.** §8 scores what the other engines found,
+so a case for it cannot run in isolation: with no swings, no pools and no zones
+behind it, every gate fails for want of evidence and the dataset would assert
+the absence of input rather than the doctrine. `_run_confluence` therefore
+builds `DetectionPipeline` itself with in-memory ports and calls it, rather than
+re-assembling the nine services in the harness's own order — the pipeline's
+docstring insists there is exactly one definition of "run detection", and a
+second one here would be the thing it warns about.
+
+Every engine is now wired. What remains blocked is blocked on the *datasets*:
+a series long enough to confirm external swings, a declared data gap the loader
+does not yet accept, or a symbol-level daily history a golden series does not
+have. Every `blocked_on` in the manifest names which.
 
 ### Opaque identifiers
 

@@ -12,11 +12,17 @@ exists to catch.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime
 
 from scanner.application.ports.detection import EngineEventRecord
+from scanner.application.ports.ict_evidence import (
+    LiquidityEvidenceRecord,
+    ShiftEvidenceRecord,
+    StructureEvidenceRecord,
+)
 from scanner.application.ports.ict_zone_interactions import (
     IctZoneInteractionRecord,
 )
@@ -28,7 +34,8 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRecord,
     LiquidityTransitionRecord,
 )
-from scanner.domain.common import Candle
+from scanner.domain.common import Candle, TradeAggregate
+from scanner.domain.volume import WashRiskState
 from scanner.shared import Timeframe
 
 _TERMINAL_POOL_STATES = frozenset({"SWEPT", "BROKEN", "EXPIRED"})
@@ -124,6 +131,33 @@ class InMemoryEngineEventRepository:
 
     async def exists(self, event_key: str) -> bool:
         return event_key in self._keys
+
+    async def list_events(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[EngineEventRecord, ...]:
+        """Every engine's output, which is what §8 reads.
+
+        Deliberately unfiltered by type, unlike `IctEvidenceRepository`: the
+        confluence engine needs BOS, MSS, sweeps and participation flags as
+        well as swings, and a double that filtered would hand it a smaller
+        world than production does.
+        """
+        return tuple(
+            sorted(
+                (
+                    event
+                    for event in self.events
+                    if event.symbol == symbol
+                    and event.timeframe == timeframe
+                    and start <= event.event_at < end
+                ),
+                key=lambda event: (event.event_at, event.event_type, event.event_key),
+            )
+        )
 
 
 class InMemoryEngineStateStore:
@@ -371,31 +405,172 @@ class InMemoryLiquidityStateStore:
 
 
 class InMemoryIctEvidenceRepository:
-    """The S4/S5 facts the order-block engine reads, and there are none.
+    """The S4/S5 facts §5.1 and §8 read, taken from the stores that wrote them.
 
-    `ict_ob_replay` asks this for structure, shift and liquidity evidence to
-    decide an order block's qualification flags. A golden ICT dataset runs the
-    zone engines alone, so nothing has written any -- and the honest answer is
-    an empty tuple, not a fabricated one.
+    Mirrors `PgIctEvidenceRepository`'s three queries, including which event
+    types each one selects -- `SWING_*`/`STRUCTURE_*` for structure,
+    `MSS_*`/`CHOCH_*` for shifts, and the liquidity transition ledger for
+    sweeps. Getting those prefixes wrong here would hand the ICT and
+    confluence engines a different world than production gives them, and the
+    datasets would agree with the harness rather than with doctrine.
 
-    That bounds what an OB case can assert: the formation rules of SLS 5.1,
-    yes; anything gated on a structure break or a sweep, no. The coverage
-    manifest records that as the `blocked_on` for those rules rather than
-    leaving a green suite to imply otherwise.
-
-    Hand-feeding evidence here was the alternative and is worse: evidence a
-    labeller typed is not engine output, so a case built on it proves the
-    labeller and the OB engine agree about a fiction.
+    Backed by the live stores rather than a fixture, so a dataset that runs
+    the whole pipeline gives its later engines real evidence. A dataset that
+    runs the zone passes alone gives them none, which is the honest answer and
+    bounds what such a case can assert.
     """
 
-    async def list_structure(self, symbol, timeframe, start, end):
-        return ()
+    def __init__(
+        self,
+        events: InMemoryEngineEventRepository,
+        transitions: InMemoryLiquidityTransitionRepository | None = None,
+    ) -> None:
+        self._events = events
+        self._transitions = transitions
 
-    async def list_shifts(self, symbol, timeframe, start, end):
-        return ()
+    def _in_window(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> list[EngineEventRecord]:
+        return sorted(
+            (
+                event
+                for event in self._events.events
+                if event.symbol == symbol
+                and event.timeframe == timeframe
+                and start <= event.event_at < end
+            ),
+            key=lambda event: (event.event_at, event.event_type, event.event_key),
+        )
 
-    async def list_liquidity(self, symbol, timeframe, start, end):
-        return ()
+    async def list_structure(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[StructureEvidenceRecord, ...]:
+        return tuple(
+            StructureEvidenceRecord(
+                event_type=event.event_type,
+                event_at=event.event_at,
+                algo_version=event.algo_version,
+                payload=event.payload,
+            )
+            for event in self._in_window(symbol, timeframe, start, end)
+            if event.event_type.startswith(("SWING_", "STRUCTURE_"))
+        )
+
+    async def list_shifts(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[ShiftEvidenceRecord, ...]:
+        records: list[ShiftEvidenceRecord] = []
+
+        for event in self._in_window(symbol, timeframe, start, end):
+            if not event.event_type.startswith(("MSS_", "CHOCH_")):
+                continue
+
+            payload = json.loads(event.payload)
+
+            choch_index = payload.get("choch_index", payload.get("break_index"))
+
+            if choch_index is None:
+                continue
+
+            records.append(
+                ShiftEvidenceRecord(
+                    event_type=event.event_type,
+                    direction=str(payload.get("direction", "")),
+                    choch_index=int(choch_index),
+                    followthrough_index=int(payload.get("followthrough_index", choch_index)),
+                    event_at=event.event_at,
+                    payload=event.payload,
+                )
+            )
+
+        return tuple(records)
+
+    async def list_liquidity(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[LiquidityEvidenceRecord, ...]:
+        if self._transitions is None:
+            return ()
+
+        return tuple(
+            LiquidityEvidenceRecord(
+                pool_id=item.pool_id,
+                from_state=item.from_state,
+                to_state=item.to_state,
+                reason=item.reason,
+                transitioned_at=item.transitioned_at,
+                candle_index=item.candle_index,
+                evidence=item.evidence,
+            )
+            for item in sorted(
+                (
+                    item
+                    for item in self._transitions.transitions
+                    if item.symbol == symbol
+                    and item.timeframe == timeframe
+                    and start <= item.transitioned_at < end
+                ),
+                key=lambda item: (
+                    item.candle_index,
+                    item.transitioned_at,
+                    item.transition_id,
+                ),
+            )
+        )
+
+
+class InMemoryTradeAggregateRepository:
+    """DDD T4 minute buckets. Empty unless a dataset supplies them.
+
+    §6.5's size-skew test then reports None rather than a verdict, which is
+    what it does in production until the aggTrade stream has run -- so a
+    golden case sees the same behaviour an unstreamed symbol sees.
+    """
+
+    def __init__(self, aggregates: Sequence[TradeAggregate] = ()) -> None:
+        self.aggregates = list(aggregates)
+
+    async def append_many(self, aggregates: Sequence[TradeAggregate]) -> int:
+        self.aggregates.extend(aggregates)
+
+        return len(aggregates)
+
+    async def list_between(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[TradeAggregate, ...]:
+        return tuple(
+            item for item in self.aggregates if item.symbol == symbol and start <= item.minute < end
+        )
+
+
+class InMemorySymbolRepository:
+    """Only the §6.6 tag §8 reads. A golden symbol has no daily history, so it
+    carries no wash-risk tag -- and §6.7's cap is therefore not applied, which
+    is correct rather than convenient: nothing has evaluated it."""
+
+    def __init__(self, wash_risk: WashRiskState | None = None) -> None:
+        self.state = wash_risk or WashRiskState()
+
+    async def get_wash_risk(self, exchange_symbol: str) -> WashRiskState:
+        return self.state
 
 
 class InMemoryIctZoneInteractionContextRepository:

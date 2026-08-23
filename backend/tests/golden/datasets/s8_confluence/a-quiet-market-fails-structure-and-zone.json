@@ -1,0 +1,54 @@
+{
+  "dataset_id": "s8-a-quiet-market-fails-structure-and-zone",
+  "engine": "confluence",
+  "sls_sections": ["8.2"],
+  "sls_rules": ["8.2-all-gates-required", "8.2-structure-gate", "8.2-zone-gate", "8.2-failure-scores-nothing"],
+  "description": "A market that offers nothing. Both directions reach the gates, both fail on structure and zone, and neither is scored.",
+  "labelling_rationale": "SLS §8.2 requires all six gates and says failing any one means 'no setup exists; nothing is scored'. This series is three hundred identical H4 candles, so it is the cleanest statement of that rule: there is nothing for the doctrine to find, and the engine must say so rather than produce a low-confidence candidate. Gate by gate, from §8.2's own table. G1 asks for fresh, warm, non-degraded data — H4 takes the plain median of the trailing twenty candles rather than §2.11's time-of-day baseline, so RVOL reads 1.0 here and the gate passes; the same series on M5 would fail G1 instead, for want of twenty days of the same slot. G2 asks the trend state to be compatible with the direction: §3.4 needs two consecutive completed HH/HL pairs on external structure and a flat window confirms no swing at all, so the state is RANGING and neither UP nor DOWN is trend-following, and with no sweep there is no reversal path either — G2 fails both ways. G3 passes: §5.7 can build no dealing range from a series with no swings, and §8.2 treats an absent context as narrowing the archetype set rather than as a failure, so a gate on the absence of evidence is not applied. G4 asks for a live zone of the direction's polarity within half an ATR of price, and §5.4 registers no gap in a series where every candle is identical — G4 fails both ways. G5 passes vacuously and correctly: it asks for the absence of contrary facts, and there are no facts at all. G6 passes because nothing has tagged the symbol wash_risk — §6.6 is a daily symbol-level evaluation and a golden series has no daily history. So both candidates fail on G2 and G4, are not scored, and are not publishable. Confidence, grade and archetype are null because §8.2 puts scoring after the gates, not alongside them.",
+  "labelled_by": "drafted by Claude Opus 5 2026-08-23 from SLS §8.2; pending developer verification",
+  "labelled_at": "2026-08-23",
+  "algo_version": "s8-confluence-v16",
+  "symbol": "GOLDENCONF",
+  "timeframe": "H4",
+  "filler": { "count": 293, "open": "100", "high": "103", "low": "100", "close": "100" },
+  "candles": [
+    { "open_time": "2026-01-05T00:00:00+00:00", "open": "100", "high": "103", "low": "100", "close": "100" },
+    { "open_time": "2026-01-05T04:00:00+00:00", "open": "100", "high": "103", "low": "100", "close": "100" },
+    { "open_time": "2026-01-05T08:00:00+00:00", "open": "100", "high": "103", "low": "100", "close": "100" },
+    { "open_time": "2026-01-05T12:00:00+00:00", "open": "100", "high": "103", "low": "100", "close": "100" },
+    { "open_time": "2026-01-05T16:00:00+00:00", "open": "100", "high": "103", "low": "100", "close": "100" },
+    { "open_time": "2026-01-05T20:00:00+00:00", "open": "100", "high": "103", "low": "100", "close": "100" },
+    { "open_time": "2026-01-06T00:00:00+00:00", "open": "100", "high": "103", "low": "100", "close": "100" }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "trend_state": "RANGING",
+      "htf_state": null,
+      "unreachable": ["htf_state", "pd_context"],
+      "events_inserted": 0
+    },
+    "candidates": [
+      {
+        "direction": "UP",
+        "gates_passed": false,
+        "failed_gates": ["G2", "G4"],
+        "confidence": null,
+        "grade": null,
+        "archetype": null,
+        "publishable": false,
+        "factors": {}
+      },
+      {
+        "direction": "DOWN",
+        "gates_passed": false,
+        "failed_gates": ["G2", "G4"],
+        "confidence": null,
+        "grade": null,
+        "archetype": null,
+        "publishable": false,
+        "factors": {}
+      }
+    ]
+  }
+}
