@@ -26,6 +26,11 @@
           "status": "covered"
         },
         {
+          "id": "3.1-stored-once",
+          "rule": "an external swing is also an internal one and is stored once, as external",
+          "status": "covered"
+        },
+        {
           "id": "3.1-equal-extreme-tie",
           "rule": "ties within epsilon confirm the LAST member; all members go to 4.3 as a cluster",
           "status": "covered"
@@ -133,14 +138,13 @@
         {
           "id": "3.4-two-pairs-bullish",
           "rule": "BULLISH needs two consecutive completed HH/HL pairs on external structure",
-          "status": "pending",
-          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+          "status": "covered"
         },
         {
           "id": "3.4-two-pairs-bearish",
           "rule": "the bearish mirror",
           "status": "pending",
-          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+          "blocked_on": "the rising zigzag covers the bullish side; its mirror is the obvious next case"
         },
         {
           "id": "3.4-one-pair-insufficient",
