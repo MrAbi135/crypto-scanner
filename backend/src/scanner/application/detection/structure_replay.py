@@ -36,7 +36,7 @@ from scanner.shared import Timeframe
 # s4-v2 (2026-08-17): first swing of each kind now emits an explicit SEED
 # classification event. Output-changing, hence the increment — Constitution
 # §44.5. Ratified as SLS v1.0.2 §3.3.
-STRUCTURE_ALGO_VERSION = "s4-v4"
+STRUCTURE_ALGO_VERSION = "s4-v5"
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,6 +291,39 @@ class StructureReplayService:
                     swing.kind,
                 )
             )
+
+            # ...and every older level of the same kind this close already
+            # cleared, silently.
+            #
+            # §3.5 says "the break candle is the first closing candle beyond
+            # the level". Only the most recent unconsumed level is a
+            # candidate, so consuming one exposed the next one down -- and
+            # price was usually far above it already, having closed through it
+            # candles or hours earlier while the trend gate was shut. The
+            # engine then recorded that as a break *here*, and did it again on
+            # the following candle, marching backwards through history one
+            # event per candle.
+            #
+            # Measured on the VM before the fix: 93 of 186 BOS events were
+            # immediately followed, on the very next candle, by another break
+            # of an older and lower level in the same direction. Half of every
+            # recorded break was made by the queue rather than by price -- and
+            # §8's F1 reads `BOS_{direction}` straight out of the window.
+            #
+            # A level under the close has been surpassed; it is bookkeeping,
+            # not a structural event, so it is consumed without an event.
+            for other in candidates:
+                if other.index == swing.index:
+                    continue
+
+                surpassed = (
+                    other.price < candle.close
+                    if direction is BreakDirection.UP
+                    else other.price > candle.close
+                )
+
+                if surpassed:
+                    consumed.add((other.index, other.kind))
 
             if await self._persist_bos(
                 symbol=symbol,
