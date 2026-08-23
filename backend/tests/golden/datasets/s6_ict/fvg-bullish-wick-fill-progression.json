@@ -2,15 +2,20 @@
   "dataset_id": "s6-fvg-bullish-wick-fill-progression",
   "engine": "ict",
   "sls_sections": [
-    "5.4"
+    "5.4",
+    "5.9"
   ],
   "sls_rules": [
     "5.4-bullish-gap",
     "5.4-consequent-encroachment",
-    "5.4-wick-fill-progression"
+    "5.4-wick-fill-progression",
+    "5.9-mitigation",
+    "5.9-rejection",
+    "5.9-respect",
+    "5.9-touch"
   ],
   "description": "A bullish fair value gap walks its full wick-based lifecycle: OPEN, TOUCHED, CE_FILLED, then FILLED at the distal edge \u2014 without a single close through the zone.",
-  "labelling_rationale": "SLS \u00a75.4 defines a bullish FVG over three consecutive closed candles c1, c2, c3 as existing when L[c3] > H[c1], with the zone being [H[c1], L[c3]] and Consequent Encroachment stored as the midpoint. Candle 0 highs at 100 and candle 2 lows at 105, so the gap is 5 and the zone is [100, 105] with CE at 102.5, confirmed at the close of candle 2. The registration filter requires the gap to be at least 0.25 x ATR or the middle candle to be a displacement; true ranges for candles 0..2 are 2, 11 and 8, summing to 21 over three candles for an ATR of exactly 7, so the threshold is 1.75 and a gap of 5 clears it on size alone. Displacement itself cannot apply here because \u00a75.10 needs a 20-candle lookback the series does not have, so displacements is 0. The lifecycle then follows \u00a75.4's state ladder, whose critical rule is that a wick through the zone rebalances the inefficiency while only a CLOSE beyond the distal edge inverts polarity. Entry into the zone is judged by overlap of the candle's whole range with the band, not by its high alone: candle 3 spans 104 to 111, so it dips to 104 which is inside [100, 105] but stays above CE at 102.5, giving OPEN -> TOUCHED. Candle 4 wicks to 101, below the midpoint, giving CE_FILLED. Candle 5 wicks to 99, through the distal edge at 100, but closes at 106 well inside the zone \u2014 wick-through, so FILLED rather than INVERTED, which is precisely the distinction \u00a75.4 calls critical. FILLED is terminal, so no live zones remain. No further FVG registers at candles 3, 4 or 5 because in each case both the bullish and bearish three-candle gaps are negative. Candle numbers above are scenario-relative; the 294 declared filler candles (SLS \u00a71.9 warm-up) shift them by 294 in the expected output. The filler's high matches the scenario's first candle so the seam cannot form a swing high, and its low sits below so it cannot form a swing low; neither a bullish nor a bearish three-candle gap spans the seam, so declared history registers no zone of its own.",
+  "labelling_rationale": "SLS \u00a75.4 defines a bullish FVG over three consecutive closed candles c1, c2, c3 as existing when L[c3] > H[c1], with the zone being [H[c1], L[c3]] and Consequent Encroachment stored as the midpoint. Candle 0 highs at 100 and candle 2 lows at 105, so the gap is 5 and the zone is [100, 105] with CE at 102.5, confirmed at the close of candle 2. The registration filter requires the gap to be at least 0.25 x ATR or the middle candle to be a displacement; true ranges for candles 0..2 are 2, 11 and 8, summing to 21 over three candles for an ATR of exactly 7, so the threshold is 1.75 and a gap of 5 clears it on size alone. Displacement itself cannot apply here because \u00a75.10 needs a 20-candle lookback the series does not have, so displacements is 0. The lifecycle then follows \u00a75.4's state ladder, whose critical rule is that a wick through the zone rebalances the inefficiency while only a CLOSE beyond the distal edge inverts polarity. Entry into the zone is judged by overlap of the candle's whole range with the band, not by its high alone: candle 3 spans 104 to 111, so it dips to 104 which is inside [100, 105] but stays above CE at 102.5, giving OPEN -> TOUCHED. Candle 4 wicks to 101, below the midpoint, giving CE_FILLED. Candle 5 wicks to 99, through the distal edge at 100, but closes at 106 well inside the zone \u2014 wick-through, so FILLED rather than INVERTED, which is precisely the distinction \u00a75.4 calls critical. FILLED is terminal, so no live zones remain. No further FVG registers at candles 3, 4 or 5 because in each case both the bullish and bearish three-candle gaps are negative. Candle numbers above are scenario-relative; the 294 declared filler candles (SLS \u00a71.9 warm-up) shift them by 294 in the expected output. The filler's high matches the scenario's first candle so the seam cannot form a swing high, and its low sits below so it cannot form a swing low; neither a bullish nor a bearish three-candle gap spans the seam, so declared history registers no zone of its own. Extended 2026-08-23 when the harness began running the OTE, order-block and interaction passes alongside the FVG pass, in the pipeline's own order. The added counts follow SLS 5.9's grammar table: a Touch is any candle whose range intersects the band; a Rejection is a touch that closes outside on the polarity side with a wick of at least 0.3 x ATR into the zone; a Mitigation is reaching half the zone depth and closing outside on the polarity side; and a Respect is 'Rejection or Mitigation without any close-through', which is why respects track them rather than adding a third event. Dealing ranges and order blocks are zero throughout: 5.7 needs confirmed external swings that these short scenarios never produce, and 5.1's qualification reads S4/S5 evidence that a zone-only dataset does not generate.",
   "labelled_by": "spec-conformance verified by Claude Opus 5 2026-08-18 (expected output re-derived from the cited SLS sections); no doctrine choice in this case -- threshold/mirror arithmetic only",
   "labelled_at": "2026-08-16",
   "algo_version": "s6-v2",
@@ -74,7 +79,20 @@
       "fvgs_detected": 1,
       "ifvgs_created": 0,
       "bprs_created": 0,
-      "live_zones": 0
+      "live_zones": 0,
+      "dealing_ranges": 0,
+      "impulse_legs": 0,
+      "otes_detected": 0,
+      "order_blocks_detected": 0,
+      "breakers_created": 0,
+      "mitigations_created": 0,
+      "zones_evaluated": 1,
+      "touches": 3,
+      "rejections": 2,
+      "mitigations": 2,
+      "respects": 2,
+      "violations": 0,
+      "confirmations": 0
     },
     "zones": [
       {
@@ -118,6 +136,80 @@
         "reason": "wick_fill",
         "candle_index": 299,
         "transitioned_at": "2026-01-05T06:00:00+00:00"
+      }
+    ],
+    "interactions": [
+      {
+        "zone": "zone:FVG:BULLISH:296",
+        "zone_type": "FVG",
+        "kind": "TOUCH",
+        "candle_index": 297,
+        "observed_at": "2026-01-05T04:00:00+00:00",
+        "close_through": false
+      },
+      {
+        "zone": "zone:FVG:BULLISH:296",
+        "zone_type": "FVG",
+        "kind": "MITIGATION",
+        "candle_index": 298,
+        "observed_at": "2026-01-05T05:00:00+00:00",
+        "close_through": false
+      },
+      {
+        "zone": "zone:FVG:BULLISH:296",
+        "zone_type": "FVG",
+        "kind": "REJECTION",
+        "candle_index": 298,
+        "observed_at": "2026-01-05T05:00:00+00:00",
+        "close_through": false
+      },
+      {
+        "zone": "zone:FVG:BULLISH:296",
+        "zone_type": "FVG",
+        "kind": "RESPECT",
+        "candle_index": 298,
+        "observed_at": "2026-01-05T05:00:00+00:00",
+        "close_through": false
+      },
+      {
+        "zone": "zone:FVG:BULLISH:296",
+        "zone_type": "FVG",
+        "kind": "TOUCH",
+        "candle_index": 298,
+        "observed_at": "2026-01-05T05:00:00+00:00",
+        "close_through": false
+      },
+      {
+        "zone": "zone:FVG:BULLISH:296",
+        "zone_type": "FVG",
+        "kind": "MITIGATION",
+        "candle_index": 299,
+        "observed_at": "2026-01-05T06:00:00+00:00",
+        "close_through": false
+      },
+      {
+        "zone": "zone:FVG:BULLISH:296",
+        "zone_type": "FVG",
+        "kind": "REJECTION",
+        "candle_index": 299,
+        "observed_at": "2026-01-05T06:00:00+00:00",
+        "close_through": false
+      },
+      {
+        "zone": "zone:FVG:BULLISH:296",
+        "zone_type": "FVG",
+        "kind": "RESPECT",
+        "candle_index": 299,
+        "observed_at": "2026-01-05T06:00:00+00:00",
+        "close_through": false
+      },
+      {
+        "zone": "zone:FVG:BULLISH:296",
+        "zone_type": "FVG",
+        "kind": "TOUCH",
+        "candle_index": 299,
+        "observed_at": "2026-01-05T06:00:00+00:00",
+        "close_through": false
       }
     ]
   }
