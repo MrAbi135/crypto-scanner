@@ -193,3 +193,34 @@ def test_append_only_detection_does_not_repaint_confirmed_swing() -> None:
     ]
 
     assert confirmed_before == confirmed_after
+
+
+def test_an_equal_run_filling_the_left_window_is_still_a_swing() -> None:
+    """§3.1: "every external swing is by construction also an internal one."
+
+    Found by `test_every_external_swing_is_also_an_internal_swing` in the
+    property suite, on twelve candles with a three-candle equal run.
+
+    The left-side check used to read "some candle inside the k window is
+    materially lower", and an equal run can fill that window. Highs of 50 with
+    51 at indices 4, 5 and 6: at `k_ext = 5` the left window reaches back to
+    index 1 and finds a 50, so index 6 confirmed as an external swing; at
+    `k_int = 2` the window is only indices 4 and 5, both 51, so the same pivot
+    did not exist internally. One swing, visible at one strength and not the
+    other, which is exactly what §3.1 says cannot happen.
+
+    The run is one extreme, so the check now looks past it to the candle
+    before the set. A run reaching the start of the series still has nothing
+    lower to its left, which is how a flat shelf is refused -- and no golden
+    dataset changed, all of which begin with flat filler.
+    """
+    highs = ["50", "50", "50", "50", "51", "51", "51", "50", "50", "50", "50", "50"]
+    candles = [candle(i, high=high, low="49") for i, high in enumerate(highs)]
+
+    internal = detect_swings(candles, strength=SwingStrength.INTERNAL)
+    external = detect_swings(candles, strength=SwingStrength.EXTERNAL)
+
+    assert [(s.index, s.kind) for s in external] == [(6, SwingKind.HIGH)]
+
+    # The invariant itself: the external pivot is among the internal ones.
+    assert (6, SwingKind.HIGH) in [(s.index, s.kind) for s in internal]

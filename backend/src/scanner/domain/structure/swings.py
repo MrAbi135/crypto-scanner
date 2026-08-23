@@ -124,6 +124,44 @@ def detect_external_swings(
     )
 
 
+def _has_lower_left(
+    candles: Sequence[Candle],
+    *,
+    index: int,
+    candidate: Decimal,
+    epsilon: Decimal,
+) -> bool:
+    """Is anything materially lower to the left, looking past the equal run?
+
+    Walks back over candles whose high matches the candidate within epsilon --
+    the equal set the candidate terminates -- and asks whether the candle
+    before the set is lower. A run that reaches the start of the series has no
+    such candle, which is how a flat shelf is still refused.
+    """
+    cursor = index - 1
+
+    while cursor >= 0 and candles[cursor].high >= candidate - epsilon:
+        cursor -= 1
+
+    return cursor >= 0
+
+
+def _has_higher_left(
+    candles: Sequence[Candle],
+    *,
+    index: int,
+    candidate: Decimal,
+    epsilon: Decimal,
+) -> bool:
+    """Mirror of `_has_lower_left` on lows."""
+    cursor = index - 1
+
+    while cursor >= 0 and candles[cursor].low <= candidate + epsilon:
+        cursor -= 1
+
+    return cursor >= 0
+
+
 def _is_swing_high(
     candles: Sequence[Candle],
     *,
@@ -146,9 +184,15 @@ def _is_swing_high(
     if any(candle.high >= candidate - epsilon for candle in right):
         return False
 
-    # At least one left-side candle must be materially lower. This prevents
-    # a completely flat window being treated as a swing.
-    return any(candle.high < candidate - epsilon for candle in left)
+    # Something must be materially lower to the left, or a flat shelf would
+    # read as a peak. Looked for past the equal set rather than inside the
+    # window: an equal run is one extreme, and with `k` narrow enough the run
+    # can fill the whole left window, leaving nothing lower to find. That is
+    # what broke §3.1's "every external swing is by construction also an
+    # internal one" -- a three-candle equal run made the pivot visible at
+    # k_ext = 5, which sees past it, and invisible at k_int = 2, which does
+    # not.
+    return _has_lower_left(candles, index=index, candidate=candidate, epsilon=epsilon)
 
 
 def _is_swing_low(
@@ -170,4 +214,5 @@ def _is_swing_low(
     if any(candle.low <= candidate + epsilon for candle in right):
         return False
 
-    return any(candle.low > candidate + epsilon for candle in left)
+    # Mirror of the equal-high case; see `_has_lower_left`.
+    return _has_higher_left(candles, index=index, candidate=candidate, epsilon=epsilon)
