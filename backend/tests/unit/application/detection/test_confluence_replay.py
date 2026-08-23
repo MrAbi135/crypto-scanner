@@ -60,6 +60,7 @@ def make_series(
     trend: str = "up",
     last_volume: str = "50",
     last_trades: int = 10,
+    last_taker_buy: str | None = None,
 ) -> list:
     """A steadily trending context, with the newest candle's volume settable."""
     out = []
@@ -82,6 +83,13 @@ def make_series(
                 # volume, so a fixture that spikes one without the other is
                 # a wash signature by construction.
                 trade_count=last_trades if i == count - 1 else 10,
+                # §6.5(3) wants one-sided intent, which a balanced default
+                # never shows.
+                taker_buy_volume=(
+                    Decimal(last_taker_buy)
+                    if last_taker_buy is not None and i == count - 1
+                    else None
+                ),
             )
         )
 
@@ -194,11 +202,19 @@ class FakePools:
 class FakeInteractions:
     """§5.9 history, keyed by zone."""
 
-    def __init__(self, items: dict[str, list] | None = None) -> None:
+    def __init__(
+        self,
+        items: dict[str, list] | None = None,
+        respected: bool = False,
+    ) -> None:
         self.items = items or {}
+        self.respected = respected
 
     async def append(self, interaction) -> bool:
         return True
+
+    async def any_respect_at(self, symbol, timeframe, observed_at) -> bool:
+        return self.respected
 
     async def list_for_zone(self, zone_id: str) -> tuple:
         return tuple(
@@ -383,6 +399,7 @@ def service(
     candles: list | None = None,
     htf_trend: str | None = None,
     interactions: dict[str, list] | None = None,
+    respected: bool = False,
     pools: list | None = None,
     minutes: list | None = None,
     wash_risk: bool = False,
@@ -412,7 +429,7 @@ def service(
         repo,
         FakeZoneRepository(zones or []),
         FakeEvidenceRepository(liquidity),
-        FakeInteractions(interactions),
+        FakeInteractions(interactions, respected),
         FakePools(pools),
         FakeTradeAggregates(minutes),
         FakeSymbols(wash_risk),
@@ -2001,3 +2018,31 @@ async def test_no_scoring_input_is_structurally_unreadable() -> None:
     payload = json.loads(next(iter(repo.appended.values())).payload)
 
     assert "wash_risk" not in payload["unreachable_inputs"]
+
+
+@pytest.mark.asyncio
+async def test_a_zone_respect_makes_the_candle_a_structural_event() -> None:
+    """§6.5(4) lists zone Respect beside displacement, sweeps and breaks.
+
+    It asks whether the *candle* is a structural event candle, so it is any
+    zone's Respect -- not the one this setup happens to be scored against,
+    which is not even chosen until the gates have passed.
+    """
+    setup = bullish_setup()
+
+    # Everything §6.5 asks for except a structural candle: abnormal volume,
+    # real participation, one-sided tape, and T4 coverage showing this
+    # candle's prints far larger than the trailing twenty candles'.
+    candles = make_series(last_volume="250", last_trades=40, last_taker_buy="200")
+    minutes = [_minute(0, "40")] + [_minute(300 * n, "1") for n in (1, 2, 3)]
+
+    at_random, _ = service(**setup, candles=candles, minutes=minutes)
+    at_a_zone, _ = service(**setup, candles=candles, minutes=minutes, respected=True)
+
+    a = next(c for c in (await run(at_random, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(at_a_zone, "BULLISH")).candidates if c.direction == "UP")
+
+    # §6.7 pays 15 for institutional volume on top of the 15 for the aligned
+    # spike; without a structural candle §6.5 calls the same tape retail.
+    assert a.factors["F4"] == Decimal(65)
+    assert b.factors["F4"] == Decimal(80)
