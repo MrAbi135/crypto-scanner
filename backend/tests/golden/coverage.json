@@ -694,8 +694,7 @@
         {
           "id": "6.2-below-floor",
           "rule": "a SPIKE-class candle under the quote floor does not confirm",
-          "status": "pending",
-          "blocked_on": "not yet written; the participation runner is wired, so this is writable today"
+          "status": "covered"
         }
       ]
     },

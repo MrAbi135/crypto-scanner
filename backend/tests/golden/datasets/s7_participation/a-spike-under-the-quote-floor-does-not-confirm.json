@@ -1,0 +1,34 @@
+{
+  "dataset_id": "s7-a-spike-under-the-quote-floor-does-not-confirm",
+  "engine": "participation",
+  "sls_sections": ["6.1", "6.2"],
+  "sls_rules": ["6.1-bands", "6.2-below-floor"],
+  "description": "The same three-times-baseline candle as the absorption case, one dollar short of the absolute quote floor. SPIKE by class, and no spike by §6.2.",
+  "labelling_rationale": "This series is the deliberate twin of s7-volume-spike-on-a-doji-is-absorption: identical in every field except quote_volume, which is 249999 rather than 300000. §6.1 still bands it SPIKE — RVOL is exactly 3.0 against a filler median of 100, and the classification is a per-candle measurement that knows nothing about turnover. §6.2 is the gate that refuses it: it requires the SPIKE-or-ABNORMAL class AND quote-volume at or above P.volume.spike_floor = 250000, and the floor exists for exactly this reason, stated in the spec itself — an absolute floor 'prevents micro-cap spikes of $8k from scoring'. One dollar below is chosen rather than a comfortable margin because the boundary is what this case asserts: 250000 confirms and 249999 does not, so an implementation that read the comparison as strictly-greater would pass the sibling case and fail this one. Everything else is held identical so the difference cannot be attributed elsewhere: same H4 timeframe (avoiding §2.11's time-of-day baseline, which no hand-written series can supply), same doji body so §7.2's acceleration cannot fire, same two flat candles before it so §6.3's expansion test cannot see three rising volumes.",
+  "labelled_by": "drafted by Claude Opus 5 2026-08-23 from SLS §6.1/§6.2; pending developer verification",
+  "labelled_at": "2026-08-23",
+  "algo_version": "s7-participation-v2",
+  "symbol": "GOLDENVOL",
+  "timeframe": "H4",
+  "filler": { "count": 297, "open": "100", "high": "103", "low": "100", "close": "100" },
+  "candles": [
+    { "open_time": "2026-08-21T00:00:00+00:00", "open": "100", "high": "103", "low": "100", "close": "100" },
+    { "open_time": "2026-08-21T04:00:00+00:00", "open": "100", "high": "103", "low": "100", "close": "100" },
+    { "open_time": "2026-08-21T08:00:00+00:00", "open": "100", "high": "103", "low": "100", "close": "100", "volume": "300", "quote_volume": "249999" }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "volume_spikes": 0,
+      "suspect_volume": 0,
+      "expansions": 0,
+      "contractions": 0,
+      "range_expansions": 0,
+      "compressions": 0,
+      "accelerations": 0,
+      "exhaustion_watches": 0,
+      "events_inserted": 0
+    },
+    "events": []
+  }
+}
