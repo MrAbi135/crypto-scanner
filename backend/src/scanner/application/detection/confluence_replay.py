@@ -113,7 +113,7 @@ from scanner.domain.volume import (
 )
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v17"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v18"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -183,6 +183,16 @@ class _Legs:
     legs: tuple[Leg, ...]
     displacement: frozenset[int]
     swings: tuple[SwingPoint, ...]
+
+    # The window's open times, positionally. Legs are indexed into the current
+    # window and so is everything they are compared against -- except a BOS,
+    # which arrives from the events table carrying an index from whichever
+    # window recorded it. `span` turns a leg's bounds into times so the two
+    # can be compared at all.
+    open_times: tuple[datetime, ...]
+
+    def span(self, leg: Leg) -> tuple[datetime, datetime]:
+        return self.open_times[leg.start_index], self.open_times[leg.end_index]
 
     def latest(self, kind: LegKind, direction: str) -> Leg | None:
         for leg in reversed(anchoring_legs(self.legs)):
@@ -334,7 +344,7 @@ class ConfluenceReplayService:
 
         pd = _read_pd(series, legs.swings, atr)
 
-        bos_breaks = _bos_break_indices(events)
+        bos_breaks = _bos_break_times(events)
 
         htf = await self._read_htf_state(symbol, timeframe)
 
@@ -347,6 +357,7 @@ class ConfluenceReplayService:
                 timeframe=timeframe,
                 last_index=len(series) - 1,
                 at=newest.close_time,
+                opened_at=newest.open_time,
                 direction=direction,
                 trend_state=trend_state,
                 event_types=event_types,
@@ -392,6 +403,7 @@ class ConfluenceReplayService:
         timeframe: Timeframe,
         last_index: int,
         at: datetime,
+        opened_at: datetime,
         direction: str,
         trend_state: str,
         event_types: set[str],
@@ -407,7 +419,7 @@ class ConfluenceReplayService:
         price: Decimal,
         atr: Decimal | None,
         legs: _Legs,
-        bos_breaks: dict[str, frozenset[int]],
+        bos_breaks: dict[str, frozenset[datetime]],
         pd: PdContext | None,
     ) -> SetupCandidate:
         polarity = "BULLISH" if direction == "UP" else "BEARISH"
@@ -455,7 +467,7 @@ class ConfluenceReplayService:
         structural = (
             respected
             or last_index in legs.displacement
-            or last_index in bos_breaks.get(direction, frozenset())
+            or opened_at in bos_breaks.get(direction, frozenset())
             or any(s.confirmed_at == at for s in sweeps)
         )
 
@@ -563,7 +575,7 @@ class ConfluenceReplayService:
                     # SWING_* payload. Left at zero, the 30 points of trend
                     # maturity could never be earned by any candidate.
                     unbroken_pairs=unbroken_pairs(labels, direction),
-                    failed_breaks=_count_failed_breaks(events, direction, last_index),
+                    failed_breaks=_count_failed_breaks(events, direction, opened_at, timeframe),
                 )
             ).score,
             Factor.LIQUIDITY: liquidity_factor(
@@ -642,7 +654,7 @@ class ConfluenceReplayService:
                 # record displacement. The impulse leg it sits in does -- and
                 # using the leg scopes it too, since a BOS from two months back
                 # is not what the current pullback is retracing.
-                displaced_bos=_bos_inside(impulse, bos_breaks.get(direction, frozenset())),
+                displaced_bos=_bos_inside(impulse, bos_breaks.get(direction, frozenset()), legs),
                 # G4 already established price is at this zone.
                 retraced_into_zone=True,
                 htf_aligned=htf == direction,
@@ -1035,6 +1047,7 @@ def _read_legs(series: list[Candle]) -> _Legs:
         legs=segment_legs(series, swings, displacement),
         displacement=displacement,
         swings=swings,
+        open_times=tuple(candle.open_time for candle in series),
     )
 
 
@@ -1048,16 +1061,27 @@ def _is_retracement_against(leg: Leg | None, direction: str) -> bool:
     return leg is not None and leg.kind is LegKind.RETRACEMENT and leg.direction != direction
 
 
-def _bos_break_indices(
+def _bos_break_times(
     events: tuple[EngineEventRecord, ...],
-) -> dict[str, frozenset[int]]:
-    """Where each BOS actually broke, by direction.
+) -> dict[str, frozenset[datetime]]:
+    """When each BOS broke, by direction.
 
-    Parsed once per run rather than per direction, and keyed on the payload's
-    `break_index` rather than the event's own timestamp -- the two differ,
-    because a break is stamped at the candle that closed through the level.
+    This read `break_index` out of the payload, on the stated grounds that it
+    and the event's timestamp "differ, because a break is stamped at the
+    candle that closed through the level". They do not differ:
+    `structure_replay` takes both from that same candle, `event_at` from its
+    `open_time` and `break_index` from its offset. The index adds nothing --
+    except that it is the offset inside whichever window recorded the break,
+    written once and never revised, while everything it was compared against
+    belongs to the window being scored now.
+
+    On the VM, 67 of 187 BOS events carry `break_index = 500`, and
+    `last_index` is 500 on every pass for both scanned symbols -- so §6.5's
+    "the candle is a structural event candle" disjunct was permanently true,
+    which is the reverse of what §6.5 means by "institutional volume at random
+    locations is not evidence in this doctrine".
     """
-    breaks: dict[str, set[int]] = {"UP": set(), "DOWN": set()}
+    breaks: dict[str, set[datetime]] = {"UP": set(), "DOWN": set()}
 
     for record in events:
         if not record.event_type.startswith("BOS_"):
@@ -1068,20 +1092,29 @@ def _bos_break_indices(
         if direction not in breaks:
             continue
 
-        index = json.loads(record.payload).get("break_index")
-
-        if index is not None:
-            breaks[direction].add(int(index))
+        breaks[direction].add(record.event_at)
 
     return {key: frozenset(value) for key, value in breaks.items()}
 
 
-def _bos_inside(impulse: Leg | None, breaks: frozenset[int]) -> bool:
-    """§8.6 A3's "displaced BOS", scoped to the leg that is being retraced."""
+def _bos_inside(
+    impulse: Leg | None,
+    breaks: frozenset[datetime],
+    legs: _Legs,
+) -> bool:
+    """§8.6 A3's "displaced BOS", scoped to the leg that is being retraced.
+
+    The leg's bounds are offsets in the current window; the breaks arrive from
+    the events table. Comparing the two directly meant asking whether a number
+    from one window fell between two numbers from another. Both sides are
+    times now.
+    """
     if impulse is None or not impulse.displaced:
         return False
 
-    return any(impulse.start_index <= index <= impulse.end_index for index in breaks)
+    start, end = legs.span(impulse)
+
+    return any(start <= at <= end for at in breaks)
 
 
 def _is_displacement_fvg(zone: IctZoneRecord, displacement: frozenset[int]) -> bool:
@@ -1198,29 +1231,43 @@ CLEAN_RECORD_WINDOW = 20
 def _count_failed_breaks(
     events: tuple[EngineEventRecord, ...],
     direction: str,
-    last_index: int,
+    opened_at: datetime,
+    timeframe: Timeframe,
 ) -> int:
     """§8.3.1: failed breaks against D inside the clean-record window.
 
     Against D means a break *in* D that failed -- an UP setup is undermined by
-    the market rejecting an upward break, not by a downward one failing.
+    the market rejecting an upward break, not by a downward one failing. The
+    window is measured to the candle that closed back through the level rather
+    than to the break it belongs to: it asks how recently the market last
+    refused this direction.
 
-    Counted from the payload's `failed_index`, the candle that closed back
-    through the level, rather than from the break it belongs to: the window
-    asks how recently the market last refused this direction.
+    That candle used to be identified by the payload's `failed_index`, checked
+    as `last_index - failed_index < CLEAN_RECORD_WINDOW`. Those are offsets in
+    two different 500-candle windows -- the one that recorded the failure, and
+    the one being scored now -- so the subtraction did not measure elapsed
+    candles. A failure recorded at the window's right edge, which is where
+    they are recorded, keeps a difference near zero however long ago it
+    happened, and so stays inside the clean-record window permanently.
+
+    Unlike the sibling defects fixed alongside this, there is **no
+    measurement** behind it: the soak build predates §3.5's detector and the
+    VM holds zero `STRUCTURE_FAILED_BREAK_*` events, so nothing can be counted
+    yet. The reasoning is the code's shape, not observed data, and it should be
+    re-checked on real events once the detector is deployed.
+
+    `event_at` is the failure candle's open time -- `structure_replay` stamps
+    it from the same candle it takes `failed_index` from -- so the elapsed
+    count is available without an offset.
     """
     failed = 0
+    horizon = timeframe.duration * CLEAN_RECORD_WINDOW
 
     for record in events:
         if record.event_type != f"STRUCTURE_FAILED_BREAK_{direction}":
             continue
 
-        index = json.loads(record.payload).get("failed_index")
-
-        if index is None:
-            continue
-
-        if last_index - int(index) < CLEAN_RECORD_WINDOW:
+        if opened_at - record.event_at < horizon:
             failed += 1
 
     return failed
