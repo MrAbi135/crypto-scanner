@@ -317,9 +317,9 @@
         },
         {
           "id": "4.2-pool-from-range",
-          "rule": "a pool is created for each dealing-range extreme",
-          "status": "pending",
-          "blocked_on": "clause under governance review: on live data it can only duplicate (a) or resurrect a consumed level"
+          "rule": "the dealing-range extremes name which pools are external liquidity (4.4); they create no pool of their own, because 5.7 re-anchors the range off any consumed extreme, so a range extreme is always an unconsumed external swing and (a) has already made its pool",
+          "status": "covered",
+          "note": "Read as a classification statement rather than a creation rule; settled by the developer 2026-08-23. A separate range pool would also break 4.2's own dedup rule -- 'one price zone = one pool per side per TF' -- on every range extreme."
         },
         {
           "id": "4.2-state-expired",
