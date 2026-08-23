@@ -1,0 +1,622 @@
+{
+  "dataset_id": "s4-close-through-breaks-structure-downward",
+  "engine": "structure",
+  "sls_sections": [
+    "3.4",
+    "3.5"
+  ],
+  "sls_rules": [
+    "3.5-bearish-mirror",
+    "3.5-wick-only-is-not-a-break"
+  ],
+  "description": "The falling zigzag, run into its own last external low. One candle wicks three below the level and closes above it; the next closes one below on a shallower low. Only the second is a break.",
+  "labelling_rationale": "The mirror of s4-close-through-breaks-structure-a-wick-does-not, on the falling zigzag. \u00a73.5 states the bearish case as 'mirror for bearish BOS below the external swing low', and a rule stated by reflection still needs a case: the one thing this catches that its twin cannot is a detector that hard-codes the bullish comparison.\n\nThe zigzag is unchanged through absolute index 299. Its last external swing is the peak at 294, which confirms five candles later at 299 -- so 299 is the first candle on which the trend is BEARISH and the first on which a bearish BOS can be evaluated. The most recent confirmed external swing low at that point is the trough at 288, whose low is 11, and it is unconsumed.\n\nTwo candles are added, and they are the whole case.\n\nIndex 300 puts its low at 8, three below the level, and closes at 12 -- above it. \u00a73.5's wick-only rule is symmetric: a penetration whose close returns inside the level is not a break, it is a sweep candidate for the Liquidity Engine.\n\nIndex 301 closes at 10, one below the level, on a candle whose low of 9 is *higher* than the previous candle's. As in the bullish twin, the inversion is deliberate and is the point: a detector keyed on how far price travelled would break at 300 and not at 301. \u00a73.5 reads the close.\n\nThe replay uses epsilon = 0, so the comparison is Cl < 11 exactly: 12 fails, 10 passes. The break records against swing 288 at break_index 301, and the swing is marked consumed_by BOS_DOWN.",
+  "labelled_by": "drafted by Claude Opus 5 2026-08-23 from SLS 3.4/3.5; PENDING DEVELOPER VERIFICATION -- same method as the three series signed off on 2026-08-23, and the same Constitution 5 check applies",
+  "labelled_at": "2026-08-23",
+  "algo_version": "s4-v4",
+  "symbol": "GOLDENSOB",
+  "timeframe": "H4",
+  "filler": {
+    "count": 253,
+    "open": "56",
+    "high": "57",
+    "low": "55",
+    "close": "56"
+  },
+  "candles": [
+    {
+      "open_time": "2026-02-16T04:00:00+00:00",
+      "open": "56",
+      "high": "57",
+      "low": "55",
+      "close": "56"
+    },
+    {
+      "open_time": "2026-02-16T08:00:00+00:00",
+      "open": "58",
+      "high": "59",
+      "low": "57",
+      "close": "58"
+    },
+    {
+      "open_time": "2026-02-16T12:00:00+00:00",
+      "open": "60",
+      "high": "61",
+      "low": "59",
+      "close": "60"
+    },
+    {
+      "open_time": "2026-02-16T16:00:00+00:00",
+      "open": "62",
+      "high": "63",
+      "low": "61",
+      "close": "62"
+    },
+    {
+      "open_time": "2026-02-16T20:00:00+00:00",
+      "open": "64",
+      "high": "65",
+      "low": "63",
+      "close": "64"
+    },
+    {
+      "open_time": "2026-02-17T00:00:00+00:00",
+      "open": "66",
+      "high": "67",
+      "low": "65",
+      "close": "66"
+    },
+    {
+      "open_time": "2026-02-17T04:00:00+00:00",
+      "open": "63",
+      "high": "64",
+      "low": "62",
+      "close": "63"
+    },
+    {
+      "open_time": "2026-02-17T08:00:00+00:00",
+      "open": "60",
+      "high": "61",
+      "low": "59",
+      "close": "60"
+    },
+    {
+      "open_time": "2026-02-17T12:00:00+00:00",
+      "open": "57",
+      "high": "58",
+      "low": "56",
+      "close": "57"
+    },
+    {
+      "open_time": "2026-02-17T16:00:00+00:00",
+      "open": "54",
+      "high": "55",
+      "low": "53",
+      "close": "54"
+    },
+    {
+      "open_time": "2026-02-17T20:00:00+00:00",
+      "open": "51",
+      "high": "52",
+      "low": "50",
+      "close": "51"
+    },
+    {
+      "open_time": "2026-02-18T00:00:00+00:00",
+      "open": "48",
+      "high": "49",
+      "low": "47",
+      "close": "48"
+    },
+    {
+      "open_time": "2026-02-18T04:00:00+00:00",
+      "open": "50",
+      "high": "51",
+      "low": "49",
+      "close": "50"
+    },
+    {
+      "open_time": "2026-02-18T08:00:00+00:00",
+      "open": "52",
+      "high": "53",
+      "low": "51",
+      "close": "52"
+    },
+    {
+      "open_time": "2026-02-18T12:00:00+00:00",
+      "open": "54",
+      "high": "55",
+      "low": "53",
+      "close": "54"
+    },
+    {
+      "open_time": "2026-02-18T16:00:00+00:00",
+      "open": "56",
+      "high": "57",
+      "low": "55",
+      "close": "56"
+    },
+    {
+      "open_time": "2026-02-18T20:00:00+00:00",
+      "open": "58",
+      "high": "59",
+      "low": "57",
+      "close": "58"
+    },
+    {
+      "open_time": "2026-02-19T00:00:00+00:00",
+      "open": "60",
+      "high": "61",
+      "low": "59",
+      "close": "60"
+    },
+    {
+      "open_time": "2026-02-19T04:00:00+00:00",
+      "open": "55",
+      "high": "56",
+      "low": "54",
+      "close": "55"
+    },
+    {
+      "open_time": "2026-02-19T08:00:00+00:00",
+      "open": "50",
+      "high": "51",
+      "low": "49",
+      "close": "50"
+    },
+    {
+      "open_time": "2026-02-19T12:00:00+00:00",
+      "open": "45",
+      "high": "46",
+      "low": "44",
+      "close": "45"
+    },
+    {
+      "open_time": "2026-02-19T16:00:00+00:00",
+      "open": "40",
+      "high": "41",
+      "low": "39",
+      "close": "40"
+    },
+    {
+      "open_time": "2026-02-19T20:00:00+00:00",
+      "open": "35",
+      "high": "36",
+      "low": "34",
+      "close": "35"
+    },
+    {
+      "open_time": "2026-02-20T00:00:00+00:00",
+      "open": "30",
+      "high": "31",
+      "low": "29",
+      "close": "30"
+    },
+    {
+      "open_time": "2026-02-20T04:00:00+00:00",
+      "open": "32",
+      "high": "33",
+      "low": "31",
+      "close": "32"
+    },
+    {
+      "open_time": "2026-02-20T08:00:00+00:00",
+      "open": "34",
+      "high": "35",
+      "low": "33",
+      "close": "34"
+    },
+    {
+      "open_time": "2026-02-20T12:00:00+00:00",
+      "open": "36",
+      "high": "37",
+      "low": "35",
+      "close": "36"
+    },
+    {
+      "open_time": "2026-02-20T16:00:00+00:00",
+      "open": "38",
+      "high": "39",
+      "low": "37",
+      "close": "38"
+    },
+    {
+      "open_time": "2026-02-20T20:00:00+00:00",
+      "open": "40",
+      "high": "41",
+      "low": "39",
+      "close": "40"
+    },
+    {
+      "open_time": "2026-02-21T00:00:00+00:00",
+      "open": "42",
+      "high": "43",
+      "low": "41",
+      "close": "42"
+    },
+    {
+      "open_time": "2026-02-21T04:00:00+00:00",
+      "open": "37",
+      "high": "38",
+      "low": "36",
+      "close": "37"
+    },
+    {
+      "open_time": "2026-02-21T08:00:00+00:00",
+      "open": "32",
+      "high": "33",
+      "low": "31",
+      "close": "32"
+    },
+    {
+      "open_time": "2026-02-21T12:00:00+00:00",
+      "open": "27",
+      "high": "28",
+      "low": "26",
+      "close": "27"
+    },
+    {
+      "open_time": "2026-02-21T16:00:00+00:00",
+      "open": "22",
+      "high": "23",
+      "low": "21",
+      "close": "22"
+    },
+    {
+      "open_time": "2026-02-21T20:00:00+00:00",
+      "open": "17",
+      "high": "18",
+      "low": "16",
+      "close": "17"
+    },
+    {
+      "open_time": "2026-02-22T00:00:00+00:00",
+      "open": "12",
+      "high": "13",
+      "low": "11",
+      "close": "12"
+    },
+    {
+      "open_time": "2026-02-22T04:00:00+00:00",
+      "open": "14",
+      "high": "15",
+      "low": "13",
+      "close": "14"
+    },
+    {
+      "open_time": "2026-02-22T08:00:00+00:00",
+      "open": "16",
+      "high": "17",
+      "low": "15",
+      "close": "16"
+    },
+    {
+      "open_time": "2026-02-22T12:00:00+00:00",
+      "open": "18",
+      "high": "19",
+      "low": "17",
+      "close": "18"
+    },
+    {
+      "open_time": "2026-02-22T16:00:00+00:00",
+      "open": "20",
+      "high": "21",
+      "low": "19",
+      "close": "20"
+    },
+    {
+      "open_time": "2026-02-22T20:00:00+00:00",
+      "open": "22",
+      "high": "23",
+      "low": "21",
+      "close": "22"
+    },
+    {
+      "open_time": "2026-02-23T00:00:00+00:00",
+      "open": "24",
+      "high": "25",
+      "low": "23",
+      "close": "24"
+    },
+    {
+      "open_time": "2026-02-23T04:00:00+00:00",
+      "open": "22",
+      "high": "23",
+      "low": "21",
+      "close": "22"
+    },
+    {
+      "open_time": "2026-02-23T08:00:00+00:00",
+      "open": "20",
+      "high": "21",
+      "low": "19",
+      "close": "20"
+    },
+    {
+      "open_time": "2026-02-23T12:00:00+00:00",
+      "open": "18",
+      "high": "19",
+      "low": "17",
+      "close": "18"
+    },
+    {
+      "open_time": "2026-02-23T16:00:00+00:00",
+      "open": "16",
+      "high": "17",
+      "low": "15",
+      "close": "16"
+    },
+    {
+      "open_time": "2026-02-23T20:00:00+00:00",
+      "open": "14",
+      "high": "15",
+      "low": "13",
+      "close": "14"
+    },
+    {
+      "open_time": "2026-02-24T00:00:00+00:00",
+      "open": "14",
+      "high": "15",
+      "low": "8",
+      "close": "12"
+    },
+    {
+      "open_time": "2026-02-24T04:00:00+00:00",
+      "open": "12",
+      "high": "13",
+      "low": "9",
+      "close": "10"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 302,
+      "internal_swings": 7,
+      "external_swings": 7,
+      "classified_events": 14,
+      "events_inserted": 22,
+      "trend_state": "BEARISH"
+    },
+    "events": [
+      {
+        "event_type": "STRUCTURE_EXTERNAL_SEED",
+        "event_at": "2026-02-17T00:00:00+00:00",
+        "payload": {
+          "index": 258,
+          "kind": "HIGH",
+          "label": "SEED",
+          "price": "67",
+          "strength": "EXTERNAL"
+        }
+      },
+      {
+        "event_type": "STRUCTURE_INTERNAL_SEED",
+        "event_at": "2026-02-17T00:00:00+00:00",
+        "payload": {
+          "index": 258,
+          "kind": "HIGH",
+          "label": "SEED",
+          "price": "67",
+          "strength": "INTERNAL"
+        }
+      },
+      {
+        "event_type": "SWING_EXTERNAL_HIGH",
+        "event_at": "2026-02-17T00:00:00+00:00",
+        "payload": {
+          "index": 258,
+          "kind": "HIGH",
+          "price": "67",
+          "strength": "EXTERNAL"
+        }
+      },
+      {
+        "event_type": "STRUCTURE_EXTERNAL_SEED",
+        "event_at": "2026-02-18T00:00:00+00:00",
+        "payload": {
+          "index": 264,
+          "kind": "LOW",
+          "label": "SEED",
+          "price": "47",
+          "strength": "EXTERNAL"
+        }
+      },
+      {
+        "event_type": "STRUCTURE_INTERNAL_SEED",
+        "event_at": "2026-02-18T00:00:00+00:00",
+        "payload": {
+          "index": 264,
+          "kind": "LOW",
+          "label": "SEED",
+          "price": "47",
+          "strength": "INTERNAL"
+        }
+      },
+      {
+        "event_type": "SWING_EXTERNAL_LOW",
+        "event_at": "2026-02-18T00:00:00+00:00",
+        "payload": {
+          "index": 264,
+          "kind": "LOW",
+          "price": "47",
+          "strength": "EXTERNAL"
+        }
+      },
+      {
+        "event_type": "STRUCTURE_EXTERNAL_LH",
+        "event_at": "2026-02-19T00:00:00+00:00",
+        "payload": {
+          "index": 270,
+          "kind": "HIGH",
+          "label": "LH",
+          "price": "61",
+          "strength": "EXTERNAL"
+        }
+      },
+      {
+        "event_type": "STRUCTURE_INTERNAL_LH",
+        "event_at": "2026-02-19T00:00:00+00:00",
+        "payload": {
+          "index": 270,
+          "kind": "HIGH",
+          "label": "LH",
+          "price": "61",
+          "strength": "INTERNAL"
+        }
+      },
+      {
+        "event_type": "SWING_EXTERNAL_HIGH",
+        "event_at": "2026-02-19T00:00:00+00:00",
+        "payload": {
+          "index": 270,
+          "kind": "HIGH",
+          "price": "61",
+          "strength": "EXTERNAL"
+        }
+      },
+      {
+        "event_type": "STRUCTURE_EXTERNAL_LL",
+        "event_at": "2026-02-20T00:00:00+00:00",
+        "payload": {
+          "index": 276,
+          "kind": "LOW",
+          "label": "LL",
+          "price": "29",
+          "strength": "EXTERNAL"
+        }
+      },
+      {
+        "event_type": "STRUCTURE_INTERNAL_LL",
+        "event_at": "2026-02-20T00:00:00+00:00",
+        "payload": {
+          "index": 276,
+          "kind": "LOW",
+          "label": "LL",
+          "price": "29",
+          "strength": "INTERNAL"
+        }
+      },
+      {
+        "event_type": "SWING_EXTERNAL_LOW",
+        "event_at": "2026-02-20T00:00:00+00:00",
+        "payload": {
+          "index": 276,
+          "kind": "LOW",
+          "price": "29",
+          "strength": "EXTERNAL"
+        }
+      },
+      {
+        "event_type": "STRUCTURE_EXTERNAL_LH",
+        "event_at": "2026-02-21T00:00:00+00:00",
+        "payload": {
+          "index": 282,
+          "kind": "HIGH",
+          "label": "LH",
+          "price": "43",
+          "strength": "EXTERNAL"
+        }
+      },
+      {
+        "event_type": "STRUCTURE_INTERNAL_LH",
+        "event_at": "2026-02-21T00:00:00+00:00",
+        "payload": {
+          "index": 282,
+          "kind": "HIGH",
+          "label": "LH",
+          "price": "43",
+          "strength": "INTERNAL"
+        }
+      },
+      {
+        "event_type": "SWING_EXTERNAL_HIGH",
+        "event_at": "2026-02-21T00:00:00+00:00",
+        "payload": {
+          "index": 282,
+          "kind": "HIGH",
+          "price": "43",
+          "strength": "EXTERNAL"
+        }
+      },
+      {
+        "event_type": "STRUCTURE_EXTERNAL_LL",
+        "event_at": "2026-02-22T00:00:00+00:00",
+        "payload": {
+          "index": 288,
+          "kind": "LOW",
+          "label": "LL",
+          "price": "11",
+          "strength": "EXTERNAL"
+        }
+      },
+      {
+        "event_type": "STRUCTURE_INTERNAL_LL",
+        "event_at": "2026-02-22T00:00:00+00:00",
+        "payload": {
+          "index": 288,
+          "kind": "LOW",
+          "label": "LL",
+          "price": "11",
+          "strength": "INTERNAL"
+        }
+      },
+      {
+        "event_type": "SWING_EXTERNAL_LOW",
+        "event_at": "2026-02-22T00:00:00+00:00",
+        "payload": {
+          "index": 288,
+          "kind": "LOW",
+          "price": "11",
+          "strength": "EXTERNAL"
+        }
+      },
+      {
+        "event_type": "STRUCTURE_EXTERNAL_LH",
+        "event_at": "2026-02-23T00:00:00+00:00",
+        "payload": {
+          "index": 294,
+          "kind": "HIGH",
+          "label": "LH",
+          "price": "25",
+          "strength": "EXTERNAL"
+        }
+      },
+      {
+        "event_type": "STRUCTURE_INTERNAL_LH",
+        "event_at": "2026-02-23T00:00:00+00:00",
+        "payload": {
+          "index": 294,
+          "kind": "HIGH",
+          "label": "LH",
+          "price": "25",
+          "strength": "INTERNAL"
+        }
+      },
+      {
+        "event_type": "SWING_EXTERNAL_HIGH",
+        "event_at": "2026-02-23T00:00:00+00:00",
+        "payload": {
+          "index": 294,
+          "kind": "HIGH",
+          "price": "25",
+          "strength": "EXTERNAL"
+        }
+      },
+      {
+        "event_type": "BOS_DOWN",
+        "event_at": "2026-02-24T04:00:00+00:00",
+        "payload": {
+          "break_index": 301,
+          "break_price": "11",
+          "candle_close": "10",
+          "consumed_by": "BOS_DOWN",
+          "direction": "DOWN",
+          "swing_index": 288,
+          "swing_kind": "LOW",
+          "swing_price": "11",
+          "swing_strength": "EXTERNAL"
+        }
+      }
+    ]
+  }
+}

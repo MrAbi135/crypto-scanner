@@ -188,8 +188,7 @@
         {
           "id": "3.5-bearish-mirror",
           "rule": "the bearish mirror below the external swing low",
-          "status": "pending",
-          "blocked_on": "the bearish zigzag exists; running it into its level is the obvious next case"
+          "status": "covered"
         },
         {
           "id": "3.5-first-closing-candle",
