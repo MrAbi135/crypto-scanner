@@ -112,7 +112,7 @@ from scanner.domain.volume import (
 )
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v15"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v16"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -315,6 +315,15 @@ class ConfluenceReplayService:
         # symbol's, carried by §6.6's daily evaluation.
         wash_risk = (await self._symbols.get_wash_risk(symbol)).tagged
 
+        # §6.5(4)'s fourth disjunct. Once per pass, not per direction: it
+        # asks whether the candle is a structural event candle, which is
+        # not a directional question.
+        respected = await self._interactions.any_respect_at(
+            symbol,
+            timeframe,
+            newest.close_time,
+        )
+
         labels = _read_labels(events)
 
         price = series[-1].close
@@ -343,6 +352,7 @@ class ConfluenceReplayService:
                 liquidity=liquidity,
                 labels=labels,
                 wash_risk=wash_risk,
+                respected=respected,
                 resting=resting,
                 live_zones=live_zones,
                 reading=reading,
@@ -386,6 +396,7 @@ class ConfluenceReplayService:
         liquidity: tuple[LiquidityEvidenceRecord, ...],
         labels: tuple[StructureLabel, ...],
         wash_risk: bool,
+        respected: bool,
         resting: tuple[LiquidityPoolRecord, ...],
         live_zones: tuple[IctZoneRecord, ...],
         reading: _Reading,
@@ -432,13 +443,15 @@ class ConfluenceReplayService:
         # doctrine". At this candle, not within a window: §6.5 says
         # "coincides".
         #
-        # Three of the four disjuncts. §5.9's zone Respect is left out because
-        # it belongs to a particular zone, and the zone this setup is scored
-        # against is not chosen until the gates below have passed. Omitting a
-        # disjunct makes the test stricter, so it can only withhold the
-        # institutional tag, never invent one.
+        # All four disjuncts. §5.9's zone Respect was the one left out when
+        # this landed, on the reading that it belongs to a particular zone --
+        # but §6.5 asks whether the *candle* is a structural event candle, so
+        # it is any zone's Respect, and that is a question the interaction
+        # table can answer without knowing which zone the setup will be
+        # scored against.
         structural = (
-            last_index in legs.displacement
+            respected
+            or last_index in legs.displacement
             or last_index in bos_breaks.get(direction, frozenset())
             or any(s.confirmed_index == last_index for s in sweeps)
         )

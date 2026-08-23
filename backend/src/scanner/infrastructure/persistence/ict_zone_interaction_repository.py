@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -18,7 +19,7 @@ from scanner.application.ports.ict_zones import (
     IctZoneRecord,
     IctZoneTransitionRecord,
 )
-from scanner.domain.ict import TERMINAL_ZONE_STATES
+from scanner.domain.ict import TERMINAL_ZONE_STATES, InteractionKind
 from scanner.infrastructure.persistence.ict_zone_interaction_models import (
     IctZoneInteractionRow,
 )
@@ -115,6 +116,31 @@ class PgIctZoneInteractionRepository:
             await session.commit()
 
             return written
+
+    async def any_respect_at(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        observed_at: datetime,
+    ) -> bool:
+        """Existence only. §6.5 asks whether the candle qualifies, not which
+        zone made it qualify, and `(symbol, timeframe, observed_at)` is the
+        index this table already carries."""
+        async with self._sessions() as session:
+            found = (
+                await session.execute(
+                    select(IctZoneInteractionRow.interaction_id)
+                    .where(
+                        IctZoneInteractionRow.symbol == symbol,
+                        IctZoneInteractionRow.timeframe == timeframe.value,
+                        IctZoneInteractionRow.observed_at == observed_at,
+                        IctZoneInteractionRow.kind == InteractionKind.RESPECT.value,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+
+            return found is not None
 
     async def list_for_zone(
         self,

@@ -60,6 +60,25 @@ class IctZoneInteractionRepository(Protocol):
     # is what kept §8.6's A2 ("first retest with Respect") and §8.3.1's
     # entry-confirmation term out of reach -- both are questions about a
     # specific zone's history, and history you cannot query is not history.
+    async def any_respect_at(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        observed_at: datetime,
+    ) -> bool:
+        """Did any zone record a §5.9 RESPECT on the candle closing then?
+
+        §6.5(4) asks whether the candle *is* a structural event candle, and
+        lists zone Respect beside displacement, sweeps and breaks. The question
+        is about the candle, not about one zone, so this asks across all of
+        them rather than per zone.
+
+        Keyed on `observed_at`, which §5.9 writes as the candle's close time.
+        Not on `candle_index`: that is a position in the window of the pass
+        that recorded it, and the window slides.
+        """
+        ...
+
     async def list_for_zone(
         self,
         zone_id: str,
