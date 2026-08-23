@@ -61,7 +61,9 @@ from scanner.domain.common.rvol import median, relative_volume
 from scanner.domain.confluence import (
     Adjustment,
     ArchetypeEvidence,
+    Contribution,
     Factor,
+    FactorScore,
     GateEvidence,
     LiquidityEvidence,
     MomentumEvidence,
@@ -118,7 +120,7 @@ from scanner.domain.volume import (
 )
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v18"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v19"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -229,6 +231,13 @@ class SetupCandidate:
     archetype: str | None
     publishable: bool
     factors: dict[str, Decimal] = field(default_factory=dict)
+
+    # §8.3's "itemized attribution trees". The factor functions build them and
+    # the call site used to take `.score` and drop the rest, so a stored
+    # confidence could say 70 without saying what earned it. Empty for the two
+    # factors whose scores are still computed locally rather than from
+    # enumerated contributions -- absent rather than invented.
+    attribution: dict[str, tuple[Contribution, ...]] = field(default_factory=dict)
     zone_id: str | None = None
     unreachable: tuple[str, ...] = ()
 
@@ -569,7 +578,7 @@ class ConfluenceReplayService:
         # Confirmation -- are about this one's own history.
         history = _History(await self._interactions.list_for_zone(best_zone.zone_id))
 
-        factors = {
+        scored = {
             Factor.STRUCTURE: structure_factor(
                 StructureEvidence(
                     break_confirmed=f"BOS_{direction}" in event_types,
@@ -584,7 +593,7 @@ class ConfluenceReplayService:
                     unbroken_pairs=unbroken_pairs(labels, direction),
                     failed_breaks=_count_failed_breaks(events, direction, opened_at, timeframe),
                 )
-            ).score,
+            ),
             Factor.LIQUIDITY: liquidity_factor(
                 LiquidityEvidence(
                     sweep_confirmed=best_sweep is not None,
@@ -604,13 +613,19 @@ class ConfluenceReplayService:
                     stop_hunt="LIQUIDITY_STOP_HUNT" in event_types,
                     target_pool_strength=(target_pool.strength if target_pool else Decimal(0)),
                 )
-            ).score,
-            Factor.ZONE: _zone_score(
-                best_zone,
-                len(matching_zones),
-                entry_confirmation=history.confirmed,
             ),
-            Factor.VOLUME: _volume_score(reading, direction, structural, wash_risk),
+            Factor.ZONE: FactorScore(
+                Factor.ZONE,
+                _zone_score(
+                    best_zone,
+                    len(matching_zones),
+                    entry_confirmation=history.confirmed,
+                ),
+            ),
+            Factor.VOLUME: FactorScore(
+                Factor.VOLUME,
+                _volume_score(reading, direction, structural, wash_risk),
+            ),
             Factor.MOMENTUM: momentum_factor(
                 MomentumEvidence(
                     score=reading.score,
@@ -619,7 +634,7 @@ class ConfluenceReplayService:
                     decelerating=reading.decelerating,
                     exhaustion_against=reading.exhausted,
                 )
-            ).score,
+            ),
             Factor.HTF_ALIGNMENT: htf_alignment_factor(
                 # RANGING when the rung above has no state, and said so in
                 # `unreachable`. It is F6's neutral value, so an unread ladder
@@ -627,8 +642,10 @@ class ConfluenceReplayService:
                 # tell that from the record instead of having to guess.
                 htf_state=htf if htf is not None else TrendState.RANGING.value,
                 direction=direction,
-            ).score,
+            ),
         }
+
+        factors = {factor: item.score for factor, item in scored.items()}
 
         confidence = final_confidence(factors, _synergies(event_types, matching_zones))
 
@@ -703,6 +720,9 @@ class ConfluenceReplayService:
             archetype=archetype.value if archetype else None,
             publishable=publishable,
             factors={f.value: score for f, score in factors.items()},
+            attribution={
+                f.value: item.contributions for f, item in scored.items() if item.contributions
+            },
             zone_id=best_zone.zone_id,
             unreachable=_unreachable(htf, pd),
         )
@@ -736,7 +756,26 @@ class ConfluenceReplayService:
                         "grade": candidate.grade,
                         "archetype": candidate.archetype,
                         "publishable": candidate.publishable,
+                        # S8's DoD asks for "G1-G7 with recorded results" and
+                        # for every candidate to carry "the full factor
+                        # evidence tree". Both were computed and then dropped
+                        # here, which is why "which gate blocks every setup"
+                        # could not be answered from the database at all --
+                        # only guessed at by re-reading the code.
+                        "gates_passed": candidate.gates_passed,
+                        "failed_gates": list(candidate.failed_gates),
                         "factors": {k: str(v) for k, v in candidate.factors.items()},
+                        "attribution": {
+                            factor: [
+                                {
+                                    "code": c.code,
+                                    "points": str(c.points),
+                                    "evidence_id": c.evidence_id,
+                                }
+                                for c in contributions
+                            ]
+                            for factor, contributions in candidate.attribution.items()
+                        },
                         # Carried into the record itself: a stored confidence
                         # whose missing inputs are not stated cannot be read
                         # honestly a month later.

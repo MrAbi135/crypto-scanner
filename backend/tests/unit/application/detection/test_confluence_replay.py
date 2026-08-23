@@ -563,6 +563,54 @@ async def test_a_qualifying_context_is_graded_and_recorded() -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_record_carries_the_gate_results_and_the_attribution_tree() -> None:
+    """S8's DoD, which the record did not meet.
+
+    It asks for "gate battery (G1-G7 with *recorded results*)" and for every
+    candidate to carry "the full factor evidence tree". The engine computed
+    both -- `SetupCandidate` has `gates_passed` and `failed_gates`, and every
+    `*_factor` returns its `contributions` -- and `_record` wrote neither,
+    taking `.score` at the call site and dropping the rest.
+
+    The cost was not theoretical. Asked which gate blocks setups on the soak
+    VM, the database could not answer: 82 recorded candidates, no gate field
+    on any of them. The question had to be guessed at by re-reading the code.
+
+    Absent is not the same as zero, so the two locally scored factors -- ZONE
+    and VOLUME, whose scores are computed here rather than from enumerated
+    contributions -- carry no tree rather than an empty one that would read as
+    "nothing earned it".
+    """
+    svc, repo = service(**bullish_setup())
+
+    await run(svc, "BULLISH")
+
+    recorded = [
+        json.loads(r.payload)
+        for r in repo.appended.values()
+        if r.event_type.startswith("SETUP_CANDIDATE_")
+    ]
+
+    assert recorded
+
+    for payload in recorded:
+        assert "gates_passed" in payload
+        assert isinstance(payload["failed_gates"], list)
+
+        # F1 is scored from enumerated contributions, so its tree must be
+        # there and must add up to something a reader can check.
+        tree = payload["attribution"]["F1"]
+
+        assert tree
+        assert all({"code", "points", "evidence_id"} <= set(item) for item in tree)
+
+    # ZONE and VOLUME have no enumerated contributions yet, and say so by
+    # being absent rather than by an empty list.
+    assert "F3" not in recorded[0]["attribution"]
+    assert "F4" not in recorded[0]["attribution"]
+
+
+@pytest.mark.asyncio
 async def test_g2_reads_the_engines_trend_state_not_the_last_break() -> None:
     """The bug this test exists for.
 
