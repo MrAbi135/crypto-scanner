@@ -37,14 +37,12 @@ from scanner.infrastructure.persistence.database import (
     build_engine,
     build_session_factory,
 )
-from scanner.infrastructure.persistence.detection_repositories import (
-    PgEngineEventRepository,
-)
 from scanner.infrastructure.persistence.repositories import (
     PgCandleRepository,
     PgIncidentRepository,
     PgSymbolRepository,
 )
+from scanner.infrastructure.persistence.setup_repository import PgSetupRepository
 from scanner.infrastructure.redis.client import build_redis
 from scanner.interfaces.cli.main import build_parser
 from scanner.runtime.wiring.detection import build_detection_pipeline
@@ -493,7 +491,7 @@ async def _run_rank_snapshot(
         sessions = build_session_factory(engine)
 
         service = RankingSnapshotService(
-            PgEngineEventRepository(sessions),
+            PgSetupRepository(sessions),
             PgSymbolRepository(sessions),
         )
 
@@ -510,8 +508,8 @@ async def _run_rank_snapshot(
         # reason to run this by hand.
         print(
             f"timeframe={snapshot.timeframe.value} at={snapshot.at.isoformat()} "
-            f"considered={snapshot.considered} published={len(snapshot.rows)} "
-            f"unpublished={snapshot.unpublished}"
+            f"gate_passers={snapshot.gate_passers} published={len(snapshot.rows)} "
+            f"below_floor={snapshot.below_floor}"
         )
 
         for row in snapshot.rows:
