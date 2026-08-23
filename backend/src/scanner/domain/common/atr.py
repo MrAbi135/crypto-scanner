@@ -28,6 +28,13 @@ from scanner.domain.common.candle import Candle
 
 ATR_PERIOD = 14
 
+# §0.4: "ε = P.global.tolerance_atr x ATR (default 0.05 x ATR(14)) -- used
+# wherever two prices are compared for 'equality'." It lives beside ATR
+# because it is meaningless without one, and here rather than in a replay
+# service because two of them had already declared their own copy while
+# §3.5's BOS had none at all.
+TOLERANCE_ATR = Decimal("0.05")
+
 # SLS §0.4: derived quantities are quantised at the recording boundary only.
 DERIVED_DP = 4
 

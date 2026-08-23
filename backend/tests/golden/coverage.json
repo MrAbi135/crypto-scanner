@@ -193,14 +193,13 @@
         {
           "id": "3.5-first-closing-candle",
           "rule": "the break candle is the *first* closing candle beyond the level",
-          "status": "pending",
-          "blocked_on": "needs two consecutive closes beyond one level, asserting only the first is the break"
+          "status": "covered"
         },
         {
           "id": "3.5-quality-grade",
           "rule": "the break is graded displaced or plain",
           "status": "pending",
-          "blocked_on": "the grade is not in the recorded payload at all, so no dataset can assert it"
+          "blocked_on": "the grade is not in the recorded payload at all -- `_bos_payload` writes direction, swing and close, and no displaced/plain field -- so no dataset can assert it until the detector records it"
         },
         {
           "id": "3.5-failed-break",
@@ -215,14 +214,12 @@
         {
           "id": "3.5-failed-break-window",
           "rule": "a close back on the fourth candle is outside the window and records nothing",
-          "status": "pending",
-          "blocked_on": "needs a series that waits four candles before returning; the three-candle case is written"
+          "status": "covered"
         },
         {
           "id": "3.5-epsilon-is-not-a-break",
           "rule": "a break within epsilon is not a break; the tolerance is absolute",
-          "status": "pending",
-          "blocked_on": "the replay runs with epsilon = 0, so the tolerance band has no width to test"
+          "status": "covered"
         },
         {
           "id": "3.5-outside-bar",
