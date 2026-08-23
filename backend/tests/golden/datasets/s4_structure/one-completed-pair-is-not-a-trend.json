@@ -1,21 +1,21 @@
 {
-  "dataset_id": "s4-the-break-is-the-first-close-beyond-the-level",
+  "dataset_id": "s4-one-completed-pair-is-not-a-trend",
   "engine": "structure",
   "sls_sections": [
-    "3.5"
+    "3.4"
   ],
   "sls_rules": [
-    "3.5-first-closing-candle"
+    "3.4-one-pair-insufficient"
   ],
-  "description": "Three candles close beyond the same level, each further than the last. Only the first is the break.",
-  "labelling_rationale": "The same series, run three candles past its break.\n\n\u00a73.5: 'the break candle is the *first* closing candle beyond the level'. Index 301 closes at 68, one above the external high at 288 whose price is 67, and that is the break. Indices 302 and 303 close at 75 and 80 -- further beyond the same level, by more -- and neither is a break.\n\nA detector that asked 'is this close beyond the level' rather than 'is this the first such close' would record three, and it would record the largest of them last, which is the reading that flatters a backtest. \u00a73.5 dates the break to the candle that made it and consumes the level so it cannot be made again.\n\nNothing else fires on 302 and 303. Every older external high was consumed silently at 301 -- price had already closed past all of them -- so there is no level left for the higher closes to break either, and the event count for the whole series stays at one BOS.",
-  "labelled_by": "drafted by Claude Opus 5 2026-08-23 from SLS 0.4/3.5; VERIFIED by developer 2026-08-23 -- the rule each case turns on was confirmed in plain terms before signing. Per-candle arithmetic rests on the generator's assertions and on the parent series this one extends, as with its five siblings.",
+  "description": "The bullish zigzag stopped after its first completed HH/HL pair. One pair is not two, so the trend stays RANGING.",
+  "labelling_rationale": "s4-external-zigzag-turns-the-trend-bullish, cut short after its first completed pair, with nine candles added to the lead-in so the series is still 300 long.\n\nThat length matters and is not cosmetic. DETECTION_MIN_CANDLES is 300, and below it every structure engine returns nothing at all. A 291-candle version of this case reported RANGING with zero swings detected -- the right answer for the wrong reason, and a dataset that would have passed while asserting nothing. The filler count carries the difference, so the scenario itself is untouched.\n\n3.4 requires 'two consecutive completed bullish pairs (HH followed by HL, twice)' on external structure. Its parent has exactly two, and turns BULLISH. This one has exactly one, and must not.\n\n3.1 confirms an external swing five candles after its pivot, so what has confirmed by the end is: the trough at 267 (SEED), the peak at 273 (SEED), the trough at 279 (HL), the peak at 285 (HH) and the trough at 291 (HL). The next peak sits at 297 and would confirm at 302; the series ends at 299.\n\nSo the record holds HH at 285 followed by HL at 291 -- one completed bullish pair, and the second pair's HH is three candles short of existing. The trend is RANGING.\n\nThis is the case that separates 'two pairs' from 'a pair', and it is the one a detector written as 'the last pair was bullish' would fail. Its parent cannot catch that, because a detector needing one pair and a detector needing two both turn the parent BULLISH. Only stopping between them tells them apart.",
+  "labelled_by": "drafted by Claude Opus 5 2026-08-23 from SLS 3.1/3.3/3.4; PENDING DEVELOPER VERIFICATION -- a truncation of a series already signed off on 2026-08-23",
   "labelled_at": "2026-08-23",
   "algo_version": "s4-v6",
-  "symbol": "GOLDENFST",
+  "symbol": "GOLDENONE",
   "timeframe": "H4",
   "filler": {
-    "count": 253,
+    "count": 262,
     "open": "22",
     "high": "23",
     "low": "21",
@@ -287,114 +287,23 @@
       "high": "63",
       "low": "61",
       "close": "62"
-    },
-    {
-      "open_time": "2026-02-22T12:00:00+00:00",
-      "open": "60",
-      "high": "61",
-      "low": "59",
-      "close": "60"
-    },
-    {
-      "open_time": "2026-02-22T16:00:00+00:00",
-      "open": "58",
-      "high": "59",
-      "low": "57",
-      "close": "58"
-    },
-    {
-      "open_time": "2026-02-22T20:00:00+00:00",
-      "open": "56",
-      "high": "57",
-      "low": "55",
-      "close": "56"
-    },
-    {
-      "open_time": "2026-02-23T00:00:00+00:00",
-      "open": "54",
-      "high": "55",
-      "low": "53",
-      "close": "54"
-    },
-    {
-      "open_time": "2026-02-23T04:00:00+00:00",
-      "open": "56",
-      "high": "57",
-      "low": "55",
-      "close": "56"
-    },
-    {
-      "open_time": "2026-02-23T08:00:00+00:00",
-      "open": "58",
-      "high": "59",
-      "low": "57",
-      "close": "58"
-    },
-    {
-      "open_time": "2026-02-23T12:00:00+00:00",
-      "open": "60",
-      "high": "61",
-      "low": "59",
-      "close": "60"
-    },
-    {
-      "open_time": "2026-02-23T16:00:00+00:00",
-      "open": "62",
-      "high": "63",
-      "low": "61",
-      "close": "62"
-    },
-    {
-      "open_time": "2026-02-23T20:00:00+00:00",
-      "open": "64",
-      "high": "65",
-      "low": "63",
-      "close": "64"
-    },
-    {
-      "open_time": "2026-02-24T00:00:00+00:00",
-      "open": "64",
-      "high": "70",
-      "low": "63",
-      "close": "66"
-    },
-    {
-      "open_time": "2026-02-24T04:00:00+00:00",
-      "open": "66",
-      "high": "69",
-      "low": "65",
-      "close": "68"
-    },
-    {
-      "open": "68",
-      "high": "76",
-      "low": "67",
-      "close": "75",
-      "open_time": "2026-02-24T08:00:00+00:00"
-    },
-    {
-      "open": "75",
-      "high": "81",
-      "low": "74",
-      "close": "80",
-      "open_time": "2026-02-24T12:00:00+00:00"
     }
   ],
   "expected": {
     "report": {
-      "candles": 304,
-      "internal_swings": 7,
-      "external_swings": 7,
-      "classified_events": 14,
-      "events_inserted": 22,
-      "trend_state": "BULLISH"
+      "candles": 300,
+      "internal_swings": 6,
+      "external_swings": 5,
+      "classified_events": 11,
+      "events_inserted": 17,
+      "trend_state": "RANGING"
     },
     "events": [
       {
         "event_type": "STRUCTURE_EXTERNAL_SEED",
         "event_at": "2026-02-17T00:00:00+00:00",
         "payload": {
-          "index": 258,
+          "index": 267,
           "kind": "LOW",
           "label": "SEED",
           "price": "11",
@@ -405,7 +314,7 @@
         "event_type": "STRUCTURE_INTERNAL_SEED",
         "event_at": "2026-02-17T00:00:00+00:00",
         "payload": {
-          "index": 258,
+          "index": 267,
           "kind": "LOW",
           "label": "SEED",
           "price": "11",
@@ -416,7 +325,7 @@
         "event_type": "SWING_EXTERNAL_LOW",
         "event_at": "2026-02-17T00:00:00+00:00",
         "payload": {
-          "index": 258,
+          "index": 267,
           "kind": "LOW",
           "price": "11",
           "strength": "EXTERNAL"
@@ -426,7 +335,7 @@
         "event_type": "STRUCTURE_EXTERNAL_SEED",
         "event_at": "2026-02-18T00:00:00+00:00",
         "payload": {
-          "index": 264,
+          "index": 273,
           "kind": "HIGH",
           "label": "SEED",
           "price": "31",
@@ -437,7 +346,7 @@
         "event_type": "STRUCTURE_INTERNAL_SEED",
         "event_at": "2026-02-18T00:00:00+00:00",
         "payload": {
-          "index": 264,
+          "index": 273,
           "kind": "HIGH",
           "label": "SEED",
           "price": "31",
@@ -448,7 +357,7 @@
         "event_type": "SWING_EXTERNAL_HIGH",
         "event_at": "2026-02-18T00:00:00+00:00",
         "payload": {
-          "index": 264,
+          "index": 273,
           "kind": "HIGH",
           "price": "31",
           "strength": "EXTERNAL"
@@ -458,7 +367,7 @@
         "event_type": "STRUCTURE_EXTERNAL_HL",
         "event_at": "2026-02-19T00:00:00+00:00",
         "payload": {
-          "index": 270,
+          "index": 279,
           "kind": "LOW",
           "label": "HL",
           "price": "17",
@@ -469,7 +378,7 @@
         "event_type": "STRUCTURE_INTERNAL_HL",
         "event_at": "2026-02-19T00:00:00+00:00",
         "payload": {
-          "index": 270,
+          "index": 279,
           "kind": "LOW",
           "label": "HL",
           "price": "17",
@@ -480,7 +389,7 @@
         "event_type": "SWING_EXTERNAL_LOW",
         "event_at": "2026-02-19T00:00:00+00:00",
         "payload": {
-          "index": 270,
+          "index": 279,
           "kind": "LOW",
           "price": "17",
           "strength": "EXTERNAL"
@@ -490,7 +399,7 @@
         "event_type": "STRUCTURE_EXTERNAL_HH",
         "event_at": "2026-02-20T00:00:00+00:00",
         "payload": {
-          "index": 276,
+          "index": 285,
           "kind": "HIGH",
           "label": "HH",
           "price": "49",
@@ -501,7 +410,7 @@
         "event_type": "STRUCTURE_INTERNAL_HH",
         "event_at": "2026-02-20T00:00:00+00:00",
         "payload": {
-          "index": 276,
+          "index": 285,
           "kind": "HIGH",
           "label": "HH",
           "price": "49",
@@ -512,7 +421,7 @@
         "event_type": "SWING_EXTERNAL_HIGH",
         "event_at": "2026-02-20T00:00:00+00:00",
         "payload": {
-          "index": 276,
+          "index": 285,
           "kind": "HIGH",
           "price": "49",
           "strength": "EXTERNAL"
@@ -522,7 +431,7 @@
         "event_type": "STRUCTURE_EXTERNAL_HL",
         "event_at": "2026-02-21T00:00:00+00:00",
         "payload": {
-          "index": 282,
+          "index": 291,
           "kind": "LOW",
           "label": "HL",
           "price": "35",
@@ -533,7 +442,7 @@
         "event_type": "STRUCTURE_INTERNAL_HL",
         "event_at": "2026-02-21T00:00:00+00:00",
         "payload": {
-          "index": 282,
+          "index": 291,
           "kind": "LOW",
           "label": "HL",
           "price": "35",
@@ -544,20 +453,9 @@
         "event_type": "SWING_EXTERNAL_LOW",
         "event_at": "2026-02-21T00:00:00+00:00",
         "payload": {
-          "index": 282,
+          "index": 291,
           "kind": "LOW",
           "price": "35",
-          "strength": "EXTERNAL"
-        }
-      },
-      {
-        "event_type": "STRUCTURE_EXTERNAL_HH",
-        "event_at": "2026-02-22T00:00:00+00:00",
-        "payload": {
-          "index": 288,
-          "kind": "HIGH",
-          "label": "HH",
-          "price": "67",
           "strength": "EXTERNAL"
         }
       },
@@ -565,7 +463,7 @@
         "event_type": "STRUCTURE_INTERNAL_HH",
         "event_at": "2026-02-22T00:00:00+00:00",
         "payload": {
-          "index": 288,
+          "index": 297,
           "kind": "HIGH",
           "label": "HH",
           "price": "67",
@@ -573,60 +471,13 @@
         }
       },
       {
-        "event_type": "SWING_EXTERNAL_HIGH",
+        "event_type": "SWING_INTERNAL_HIGH",
         "event_at": "2026-02-22T00:00:00+00:00",
         "payload": {
-          "index": 288,
+          "index": 297,
           "kind": "HIGH",
           "price": "67",
-          "strength": "EXTERNAL"
-        }
-      },
-      {
-        "event_type": "STRUCTURE_EXTERNAL_HL",
-        "event_at": "2026-02-23T00:00:00+00:00",
-        "payload": {
-          "index": 294,
-          "kind": "LOW",
-          "label": "HL",
-          "price": "53",
-          "strength": "EXTERNAL"
-        }
-      },
-      {
-        "event_type": "STRUCTURE_INTERNAL_HL",
-        "event_at": "2026-02-23T00:00:00+00:00",
-        "payload": {
-          "index": 294,
-          "kind": "LOW",
-          "label": "HL",
-          "price": "53",
           "strength": "INTERNAL"
-        }
-      },
-      {
-        "event_type": "SWING_EXTERNAL_LOW",
-        "event_at": "2026-02-23T00:00:00+00:00",
-        "payload": {
-          "index": 294,
-          "kind": "LOW",
-          "price": "53",
-          "strength": "EXTERNAL"
-        }
-      },
-      {
-        "event_type": "BOS_UP",
-        "event_at": "2026-02-24T04:00:00+00:00",
-        "payload": {
-          "break_index": 301,
-          "break_price": "67",
-          "candle_close": "68",
-          "consumed_by": "BOS_UP",
-          "direction": "UP",
-          "swing_index": 288,
-          "swing_kind": "HIGH",
-          "swing_price": "67",
-          "swing_strength": "EXTERNAL"
         }
       }
     ]

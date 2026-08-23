@@ -1,18 +1,18 @@
 {
-  "dataset_id": "s4-the-break-is-the-first-close-beyond-the-level",
+  "dataset_id": "s4-a-break-that-gaps-over-the-level-still-breaks",
   "engine": "structure",
   "sls_sections": [
     "3.5"
   ],
   "sls_rules": [
-    "3.5-first-closing-candle"
+    "3.5-gapped-break"
   ],
-  "description": "Three candles close beyond the same level, each further than the last. Only the first is the break.",
-  "labelling_rationale": "The same series, run three candles past its break.\n\n\u00a73.5: 'the break candle is the *first* closing candle beyond the level'. Index 301 closes at 68, one above the external high at 288 whose price is 67, and that is the break. Indices 302 and 303 close at 75 and 80 -- further beyond the same level, by more -- and neither is a break.\n\nA detector that asked 'is this close beyond the level' rather than 'is this the first such close' would record three, and it would record the largest of them last, which is the reading that flatters a backtest. \u00a73.5 dates the break to the candle that made it and consumes the level so it cannot be made again.\n\nNothing else fires on 302 and 303. Every older external high was consumed silently at 301 -- price had already closed past all of them -- so there is no level left for the higher closes to break either, and the event count for the whole series stays at one BOS.",
-  "labelled_by": "drafted by Claude Opus 5 2026-08-23 from SLS 0.4/3.5; VERIFIED by developer 2026-08-23 -- the rule each case turns on was confirmed in plain terms before signing. Per-candle arithmetic rests on the generator's assertions and on the parent series this one extends, as with its five siblings.",
+  "description": "The break candle opens four above the level and never trades down to it. The close confirms, so it is a break.",
+  "labelling_rationale": "s4-close-through-breaks-structure-a-wick-does-not, with its break candle replaced by one that gaps over the level instead of trading up through it.\n\n\u00a73.5 edge case (3): 'gapped breaks (open beyond level): valid if close confirms; the gap itself is evidence of displacement'.\n\nThe level is the external high at 288, price 67. In the parent series index 301 opens at 66, below the level, and closes at 68. Here it opens at 70 -- already four above the level, with the previous candle having closed at 66 -- and closes at 70. Its low is 69, so at no point in the candle does price trade at or below the level.\n\nIt is still a break. \u00a73.5's test is the close and only the close, and the rule exists to say that a level cleared in one jump is cleared: 'valid if close confirms'. A detector that required the candle to cross the level from below -- a low at or under it, or an open inside -- would reject exactly the breaks that carry the most displacement, which is the opposite of what the doctrine says the gap means.\n\nThe wick-only candle before it is unchanged, so this series still carries its parent's contrast: index 300 puts its high four above the level and closes below it and is not a break, and index 301 never touches the level and is one.\n\nepsilon does not bind here. Wilder ATR at the break candle is larger than the parent's because of the gap, but the close clears the level by 3, far outside any 0.05 x ATR band on this series.",
+  "labelled_by": "drafted by Claude Opus 5 2026-08-23 from SLS 3.5; PENDING DEVELOPER VERIFICATION -- same method and the same parent series as the eight signed off on 2026-08-23",
   "labelled_at": "2026-08-23",
   "algo_version": "s4-v6",
-  "symbol": "GOLDENFST",
+  "symbol": "GOLDENGAP",
   "timeframe": "H4",
   "filler": {
     "count": 253,
@@ -360,29 +360,15 @@
     },
     {
       "open_time": "2026-02-24T04:00:00+00:00",
-      "open": "66",
-      "high": "69",
-      "low": "65",
-      "close": "68"
-    },
-    {
-      "open": "68",
-      "high": "76",
-      "low": "67",
-      "close": "75",
-      "open_time": "2026-02-24T08:00:00+00:00"
-    },
-    {
-      "open": "75",
-      "high": "81",
-      "low": "74",
-      "close": "80",
-      "open_time": "2026-02-24T12:00:00+00:00"
+      "open": "70",
+      "high": "71",
+      "low": "69",
+      "close": "70"
     }
   ],
   "expected": {
     "report": {
-      "candles": 304,
+      "candles": 302,
       "internal_swings": 7,
       "external_swings": 7,
       "classified_events": 14,
@@ -620,7 +606,7 @@
         "payload": {
           "break_index": 301,
           "break_price": "67",
-          "candle_close": "68",
+          "candle_close": "70",
           "consumed_by": "BOS_UP",
           "direction": "UP",
           "swing_index": 288,
