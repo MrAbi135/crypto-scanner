@@ -163,4 +163,45 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_structure_range_arguments(rebuild_state)
 
+    rank = sub.add_parser(
+        "rank",
+        help="Ranking engine operations (SLS §9)",
+    )
+
+    rank_sub = rank.add_subparsers(
+        dest="rank_command",
+        required=True,
+    )
+
+    rank_snapshot = rank_sub.add_parser(
+        "snapshot",
+        help="Order the published setups recorded at one close",
+    )
+
+    rank_snapshot.add_argument(
+        "--symbols",
+        required=True,
+        help="Comma-separated exchange symbols to consider",
+    )
+
+    rank_snapshot.add_argument(
+        "--timeframe",
+        required=True,
+        type=Timeframe.parse,
+    )
+
+    rank_snapshot.add_argument(
+        "--at",
+        required=True,
+        type=parse_date,
+        help="Candle open time, ISO date/datetime UTC",
+    )
+
+    rank_snapshot.add_argument(
+        "--elapsed-candles",
+        type=int,
+        default=0,
+        help="Closed candles since publication, for §9.3's display decay",
+    )
+
     return parser

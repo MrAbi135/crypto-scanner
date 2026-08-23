@@ -44,3 +44,13 @@ class RankableSetup:
     confidence: Decimal
     archetype: Archetype
     tier: UniverseTier
+
+    # Not one of §9.2's five keys. It is here because a signal's identity
+    # includes which way it points, and because §9.2's chain ends at the
+    # symbol -- two opposite-direction signals on one symbol with equal
+    # confidence, archetype, TF and tier would tie on every stated key, and
+    # `sorted` would then fall back to arrival order. S8's DoD forbids exactly
+    # that ("shuffled symbol order -> identical ranking"), so `order` breaks
+    # the remaining tie on this. It cannot change any ordering §9.2 states; it
+    # only decides one §9.2 leaves open.
+    direction: str = "UP"
