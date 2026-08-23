@@ -223,8 +223,7 @@
         {
           "id": "3.5-outside-bar",
           "rule": "a candle closing beyond both extremes resolves by close direction",
-          "status": "pending",
-          "blocked_on": "not implemented as written, and the doctrine conflicts with itself here. 3.5 edge case (1) says to resolve by *close* direction; `_replay_bos` takes its direction and its candidate swing kind from the trend state alone and never reads the close's direction, so one candle can only ever produce a break in the trend's direction. That makes the double-BOS the edge case exists to prevent structurally impossible, but it also means a bearish close beyond both extremes in a BULLISH trend records a bullish BOS where 3.5 says it should record a bearish one -- and 3.5's main rule forbids a bearish BOS in a BULLISH trend, so the two cannot both be satisfied. Needs a doctrine ruling before a dataset can say what is correct."
+          "status": "covered"
         },
         {
           "id": "3.5-gapped-break",
