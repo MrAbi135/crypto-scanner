@@ -22,10 +22,12 @@ import structlog
 
 from scanner.application.ports.detection import EngineEventRepository
 from scanner.application.ports.repositories import (
+    CandleRepository,
     SymbolRepository,
     TradeAggregateRepository,
 )
 from scanner.domain.common import TradeAggregate
+from scanner.domain.common.rvol import median
 from scanner.domain.volume import (
     FakeVolumeTests,
     WashRiskState,
@@ -41,6 +43,12 @@ from scanner.shared import Timeframe
 log = structlog.get_logger(__name__)
 
 _DAY = timedelta(days=1)
+
+# §6.6(2) says "elevated RVOL" without defining it for a day; §6.1's ELEVATED
+# band starts at 1.5, and the trailing window matches every other baseline in
+# this codebase.
+ELEVATED_RVOL = Decimal("1.5")
+BASELINE_DAYS = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,25 +67,33 @@ class FakeVolumeJob:
         self,
         symbols: SymbolRepository,
         trades: TradeAggregateRepository,
+        candles: CandleRepository,
         suspect_counts: SuspectVolumeCounter,
+        *,
+        timeframe: Timeframe = Timeframe.M5,
+        baseline_days: int = BASELINE_DAYS,
     ) -> None:
         self._symbols = symbols
         self._trades = trades
+        self._candles = candles
         self._suspect_counts = suspect_counts
+        self._timeframe = timeframe
+        self._baseline_days = baseline_days
 
     async def run_symbol(
         self,
         exchange_symbol: str,
         day_start: datetime,
-        *,
-        daily_delta: Decimal | None = None,
-        daily_volume: Decimal | None = None,
-        rvol_elevated: bool = False,
     ) -> FakeVolumeReport:
         minutes = await self._trades.list_between(
             exchange_symbol,
             day_start,
             day_start + _DAY,
+        )
+
+        daily_delta, daily_volume, rvol_elevated = await self._daily_flow(
+            exchange_symbol,
+            day_start,
         )
 
         tests = FakeVolumeTests(
@@ -128,6 +144,52 @@ class FakeVolumeJob:
             tagged_today=tagged_today,
             state=state,
         )
+
+    async def _daily_flow(
+        self,
+        exchange_symbol: str,
+        day_start: datetime,
+    ) -> tuple[Decimal | None, Decimal | None, bool]:
+        """§6.6(2)'s two numbers, and whether the day was busy enough to ask.
+
+        Summed from stored candles rather than fetched as a D1 bar: volume and
+        taker-buy volume are additive, so the sum *is* the day, and the ingest
+        does not subscribe to D1 anyway.
+
+        "Elevated RVOL" for a day has no §6.2 definition -- that band is
+        per-candle -- so it is read the same way: the day's volume against the
+        median of the trailing days, at §6.1's ELEVATED boundary of 1.5. Stated
+        because it is an interpretation, not a quotation.
+        """
+        series = await self._candles.fetch_series(
+            exchange_symbol,
+            self._timeframe,
+            day_start - _DAY * self._baseline_days,
+            day_start + _DAY,
+        )
+
+        days: dict[datetime, Decimal] = {}
+        delta = Decimal(0)
+        volume = Decimal(0)
+
+        for candle in series:
+            day = candle.open_time.replace(hour=0, minute=0, second=0, microsecond=0)
+
+            days[day] = days.get(day, Decimal(0)) + candle.volume
+
+            if day == day_start:
+                volume += candle.volume
+                delta += candle.taker_buy_volume * 2 - candle.volume
+
+        if volume <= 0:
+            # The day has no candles stored. Not a symmetric tape -- no tape.
+            return None, None, False
+
+        baseline = median([total for day, total in days.items() if day != day_start])
+
+        elevated = baseline is not None and baseline > 0 and volume / baseline >= ELEVATED_RVOL
+
+        return delta, volume, elevated
 
 
 class SuspectVolumeCounter:

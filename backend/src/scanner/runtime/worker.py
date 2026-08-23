@@ -11,8 +11,13 @@ import httpx
 import structlog
 from starlette.applications import Starlette
 
+from scanner.application.marketdata.contexts import parse_timeframes
 from scanner.application.marketdata.daily_universe_job import (
     DailyUniverseJob,
+)
+from scanner.application.marketdata.fake_volume_job import (
+    FakeVolumeJob,
+    SuspectVolumeCounter,
 )
 from scanner.application.marketdata.liquidity_collector import (
     DailyLiquidityCollector,
@@ -26,6 +31,7 @@ from scanner.application.marketdata.symbol_sync import (
 from scanner.application.marketdata.universe_manager import (
     UniverseManager,
 )
+from scanner.application.ports import Clock
 from scanner.config import get_settings
 from scanner.infrastructure.clock import SystemClock
 from scanner.infrastructure.exchanges.binance import (
@@ -36,9 +42,14 @@ from scanner.infrastructure.persistence.database import (
     build_engine,
     build_session_factory,
 )
+from scanner.infrastructure.persistence.detection_repositories import (
+    PgEngineEventRepository,
+)
 from scanner.infrastructure.persistence.repositories import (
+    PgCandleRepository,
     PgLiquidityHistoryRepository,
     PgSymbolRepository,
+    PgTradeAggregateRepository,
 )
 from scanner.runtime.wiring.bootstrap import bootstrap
 from scanner.runtime.wiring.health import (
@@ -47,6 +58,16 @@ from scanner.runtime.wiring.health import (
 )
 
 log = structlog.get_logger(__name__)
+
+
+def _previous_utc_day(now: datetime) -> datetime:
+    """The closed UTC day §6.6 should score.
+
+    Midnight-exact is the common case and still needs the subtraction: at
+    00:00:00 the day that just ended is yesterday, not today, and today has no
+    candles yet.
+    """
+    return (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 async def _seconds_until_next_utc_midnight() -> float:
@@ -87,6 +108,8 @@ async def _run_daily_universe_loop(
     job: DailyUniverseJob,
     symbols: PgSymbolRepository,
     sync: SymbolSyncService,
+    fake_volume: FakeVolumeJob,
+    clock: Clock,
 ) -> None:
     # Once at boot, before the first sleep. `market.symbols` had zero rows for
     # the entire life of the project because `sync-symbols` existed only as a
@@ -108,6 +131,10 @@ async def _run_daily_universe_loop(
         # loop woke every midnight, synced 733 eligible symbols, found none of
         # them ACTIVE, and did nothing -- for the life of the project.
         observable = await symbols.list_observable()
+
+        # §6.6 is "recomputed daily" over a *closed* day, and the loop wakes at
+        # midnight, so the day to score is the one that just ended.
+        day = _previous_utc_day(clock.now())
 
         for symbol in observable:
             try:
@@ -142,6 +169,18 @@ async def _run_daily_universe_loop(
             except Exception:
                 log.exception(
                     "daily_universe_evaluation_failed",
+                    symbol=symbol.exchange_symbol,
+                )
+
+        # A separate pass, not folded into the one above: §6.6 scores a symbol
+        # whether or not §1.4 could evaluate it, and a tiering failure must not
+        # take the integrity check down with it.
+        for symbol in observable:
+            try:
+                await fake_volume.run_symbol(symbol.exchange_symbol, day)
+            except Exception:
+                log.exception(
+                    "fake_volume_evaluation_failed",
                     symbol=symbol.exchange_symbol,
                 )
 
@@ -192,11 +231,23 @@ def main() -> None:
                 universe_manager,
             )
 
+            fake_volume = FakeVolumeJob(
+                symbol_repo,
+                PgTradeAggregateRepository(sessions, clock),
+                PgCandleRepository(sessions, clock),
+                SuspectVolumeCounter(
+                    PgEngineEventRepository(sessions),
+                    parse_timeframes(settings.ingest_timeframes),
+                ),
+            )
+
             task = asyncio.create_task(
                 _run_daily_universe_loop(
                     job,
                     symbol_repo,
                     symbol_sync,
+                    fake_volume,
+                    clock,
                 )
             )
 

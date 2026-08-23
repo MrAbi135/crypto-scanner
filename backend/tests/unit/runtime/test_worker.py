@@ -9,6 +9,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from scanner.runtime import worker
+from tests.support.clock import FakeClock
+
+
+class Symbol:
+    """Only the one attribute the loop reads."""
+
+    def __init__(self, exchange_symbol: str) -> None:
+        self.exchange_symbol = exchange_symbol
 
 
 @pytest.mark.asyncio
@@ -61,6 +69,8 @@ async def test_daily_loop_waits_until_midnight_before_loading_symbols() -> None:
             job,
             symbols,
             AsyncMock(),
+            AsyncMock(),
+            FakeClock(),
         )
 
     sleep_mock.assert_awaited_once_with(123.0)
@@ -68,13 +78,6 @@ async def test_daily_loop_waits_until_midnight_before_loading_symbols() -> None:
 
 @pytest.mark.asyncio
 async def test_daily_loop_runs_job_for_each_active_symbol() -> None:
-    class Symbol:
-        def __init__(
-            self,
-            exchange_symbol: str,
-        ) -> None:
-            self.exchange_symbol = exchange_symbol
-
     report = AsyncMock()
     report.evaluation = None
 
@@ -109,6 +112,8 @@ async def test_daily_loop_runs_job_for_each_active_symbol() -> None:
             job,
             symbols,
             AsyncMock(),
+            AsyncMock(),
+            FakeClock(),
         )
 
     assert job.run_symbol.await_count == 2
@@ -139,7 +144,7 @@ async def test_the_registry_is_synced_at_boot_before_the_first_sleep() -> None:
         patch.object(worker.asyncio, "sleep", AsyncMock()) as sleep_mock,
         pytest.raises(asyncio.CancelledError),
     ):
-        await worker._run_daily_universe_loop(AsyncMock(), symbols, sync)
+        await worker._run_daily_universe_loop(AsyncMock(), symbols, sync, AsyncMock(), FakeClock())
 
     # Twice: once at boot, once after the first sleep, before evaluation.
     assert sync.sync.await_count == 2
@@ -176,7 +181,80 @@ async def test_the_loop_measures_quarantined_symbols_not_just_active_ones() -> N
         patch.object(worker.asyncio, "sleep", AsyncMock()),
         pytest.raises(asyncio.CancelledError),
     ):
-        await worker._run_daily_universe_loop(AsyncMock(), symbols, AsyncMock())
+        await worker._run_daily_universe_loop(
+            AsyncMock(), symbols, AsyncMock(), AsyncMock(), FakeClock()
+        )
 
     symbols.list_observable.assert_awaited()
     symbols.list_active.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_daily_loop_also_runs_the_fake_volume_evaluation() -> None:
+    """§6.6 is "recomputed daily", and until now nothing called it.
+
+    The job existed, was tested, and had no caller -- the exact condition the
+    unwired-detector review was opened for.
+    """
+    symbols = AsyncMock()
+    symbols.list_observable = AsyncMock(side_effect=[[Symbol("BTCUSDT")], asyncio.CancelledError])
+
+    fake_volume = AsyncMock()
+
+    with (
+        patch.object(
+            worker,
+            "_seconds_until_next_utc_midnight",
+            AsyncMock(return_value=1.0),
+        ),
+        patch.object(worker.asyncio, "sleep", AsyncMock()),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await worker._run_daily_universe_loop(
+            AsyncMock(),
+            symbols,
+            AsyncMock(),
+            fake_volume,
+            FakeClock(datetime(2026, 8, 23, 0, 0, tzinfo=UTC)),
+        )
+
+    fake_volume.run_symbol.assert_awaited_once()
+
+    symbol, day = fake_volume.run_symbol.await_args.args
+
+    assert symbol == "BTCUSDT"
+
+    # The closed day, not today: the loop wakes at midnight and today has no
+    # candles yet.
+    assert day == datetime(2026, 8, 22, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_a_tiering_failure_does_not_take_the_integrity_check_with_it() -> None:
+    """§6.6 scores a symbol whether or not §1.4 could evaluate it."""
+    job = AsyncMock()
+    job.run_symbol = AsyncMock(side_effect=RuntimeError("binance down"))
+
+    symbols = AsyncMock()
+    symbols.list_observable = AsyncMock(side_effect=[[Symbol("BTCUSDT")], asyncio.CancelledError])
+
+    fake_volume = AsyncMock()
+
+    with (
+        patch.object(
+            worker,
+            "_seconds_until_next_utc_midnight",
+            AsyncMock(return_value=1.0),
+        ),
+        patch.object(worker.asyncio, "sleep", AsyncMock()),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await worker._run_daily_universe_loop(
+            job,
+            symbols,
+            AsyncMock(),
+            fake_volume,
+            FakeClock(datetime(2026, 8, 23, tzinfo=UTC)),
+        )
+
+    fake_volume.run_symbol.assert_awaited_once()

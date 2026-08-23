@@ -73,6 +73,13 @@ class EngineSettings(BaseProcessSettings):
 class WorkerSettings(BaseProcessSettings):
     health_port: int = Field(default=8003, gt=0, le=65535)
 
+    # §6.6(4) counts a symbol's `suspect_volume` candles across every scanned
+    # timeframe, so the daily evaluation has to know which those are. Same
+    # default and same meaning as `IngestSettings.ingest_timeframes` -- an
+    # operator narrowing one and not the other undercounts rather than
+    # crashing, which is why the two are worth keeping visibly identical.
+    ingest_timeframes: str = "M5,M15,H1,H4"
+
     # Sprint S3 — daily universe/liquidity evaluation.
     binance_base_url: str = "https://api.binance.com"
     binance_weight_capacity: int = Field(
