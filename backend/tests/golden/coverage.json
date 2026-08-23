@@ -606,26 +606,65 @@
     {
       "id": "6.1",
       "title": "Detector: Relative Volume (RVOL) Classification",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "6.1",
-          "rule": "section not yet enumerated into rules",
+          "id": "6.1-bands",
+          "rule": "NORMAL below 1.5, ELEVATED 1.5-3.0, SPIKE 3.0-5.0, ABNORMAL at or above 5.0",
+          "status": "covered"
+        },
+        {
+          "id": "6.1-seasonal-baseline",
+          "rule": "intraday timeframes use a time-of-day baseline (2.11)",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+          "blocked_on": "a 20-day seasonal baseline cannot be hand-written; H4 datasets avoid it by taking the plain trailing median"
+        },
+        {
+          "id": "6.1-no-baseline-across-gap",
+          "rule": "baseline windows never span a DEGRADED gap",
+          "status": "pending",
+          "blocked_on": "needs a dataset with a declared data gap"
+        },
+        {
+          "id": "6.1-halt-not-classified",
+          "rule": "a zero-volume candle routes to 1.5.4 rather than being classified",
+          "status": "pending",
+          "blocked_on": "no dataset contains a halted candle"
         }
       ]
     },
     {
       "id": "6.2",
       "title": "Detector: Volume Spike",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "6.2",
-          "rule": "section not yet enumerated into rules",
+          "id": "6.2-class-and-floor",
+          "rule": "SPIKE or ABNORMAL class AND quote volume at or above the 250k floor",
+          "status": "covered"
+        },
+        {
+          "id": "6.2-absorption-doji",
+          "rule": "a spike on a doji is tagged absorption_candidate and scores neutral",
+          "status": "covered"
+        },
+        {
+          "id": "6.2-direction-from-body",
+          "rule": "the direction tag is the sign of the candle body",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+          "blocked_on": "a directional candle in a flat golden series also trips 7.2, whose momentum score is not hand-derivable"
+        },
+        {
+          "id": "6.2-conviction",
+          "rule": "conviction is tagged when |delta_pct| is at least 0.25",
+          "status": "pending",
+          "blocked_on": "no dataset sets a one-sided taker split"
+        },
+        {
+          "id": "6.2-below-floor",
+          "rule": "a SPIKE-class candle under the quote floor does not confirm",
+          "status": "pending",
+          "blocked_on": "not yet written; the participation runner is wired, so this is writable today"
         }
       ]
     },

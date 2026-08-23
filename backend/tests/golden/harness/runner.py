@@ -14,6 +14,7 @@ from typing import Any
 
 from scanner.application.detection.ict_replay import IctReplayService
 from scanner.application.detection.liquidity_replay import LiquidityReplayService
+from scanner.application.detection.participation_replay import ParticipationReplayService
 from scanner.application.detection.state import EngineStateManager
 from scanner.application.detection.structure_replay import StructureReplayService
 from tests.golden.harness.canonical import output_hash
@@ -57,9 +58,12 @@ async def run_dataset(dataset: GoldenDataset) -> dict[str, Any]:
     if dataset.engine == "ict":
         return await _run_ict(dataset)
 
+    if dataset.engine == "participation":
+        return await _run_participation(dataset)
+
     raise ValueError(
         f"{dataset.dataset_id}: unsupported engine {dataset.engine!r}. "
-        "Supported engines: structure, liquidity, ict."
+        "Supported engines: structure, liquidity, ict, participation."
     )
 
 
@@ -91,6 +95,59 @@ async def _run_structure(dataset: GoldenDataset) -> dict[str, Any]:
             "classified_events": report.classified_events,
             "events_inserted": report.events_inserted,
             "trend_state": report.trend_state,
+        },
+        "events": sorted(
+            (
+                {
+                    "event_type": event.event_type,
+                    "event_at": event.event_at,
+                    "payload": _parse_payload(event.payload),
+                }
+                for event in events.events
+            ),
+            key=lambda item: (item["event_at"], item["event_type"]),
+        ),
+    }
+
+
+async def _run_participation(dataset: GoldenDataset) -> dict[str, Any]:
+    """SLS §6 and §7 -- volume and momentum, in one service.
+
+    The two sections share a replay because they share a reading: §6.2's spike
+    and §7.1's score are both pure functions of the same closed candles, and
+    splitting them would make a dataset choose which half of one candle's
+    participation it wanted to assert.
+    """
+    events = InMemoryEngineEventRepository()
+
+    service = ParticipationReplayService(
+        InMemoryCandleRepository(dataset.candles),
+        events,
+        FixedClock(HARNESS_CLOCK),
+        algo_version=dataset.algo_version,
+    )
+
+    report = await service.run(
+        dataset.symbol,
+        dataset.timeframe,
+        dataset.start,
+        dataset.end,
+    )
+
+    _assert_unique_event_keys(events)
+
+    return {
+        "report": {
+            "candles": report.candles,
+            "volume_spikes": report.volume_spikes,
+            "suspect_volume": report.suspect_volume,
+            "expansions": report.expansions,
+            "contractions": report.contractions,
+            "range_expansions": report.range_expansions,
+            "compressions": report.compressions,
+            "accelerations": report.accelerations,
+            "exhaustion_watches": report.exhaustion_watches,
+            "events_inserted": report.events_inserted,
         },
         "events": sorted(
             (
