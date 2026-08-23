@@ -24,6 +24,7 @@ from scanner.application.marketdata import (
     verify_continuity,
 )
 from scanner.application.marketdata.warmth import ENGINE_TIMEFRAMES, assess_all
+from scanner.application.ranking import RankingSnapshotService
 from scanner.config import (
     get_settings,
     load_ingest_settings,
@@ -35,6 +36,9 @@ from scanner.infrastructure.exchanges.binance import (
 from scanner.infrastructure.persistence.database import (
     build_engine,
     build_session_factory,
+)
+from scanner.infrastructure.persistence.detection_repositories import (
+    PgEngineEventRepository,
 )
 from scanner.infrastructure.persistence.repositories import (
     PgCandleRepository,
@@ -477,6 +481,53 @@ async def _run_engine_rebuild(
     )
 
 
+async def _run_rank_snapshot(
+    args: argparse.Namespace,
+) -> int:
+    """§9.2 over the candidates recorded at one close."""
+    settings = get_settings("engine")
+
+    engine = build_engine(settings.db_dsn)
+
+    try:
+        sessions = build_session_factory(engine)
+
+        service = RankingSnapshotService(
+            PgEngineEventRepository(sessions),
+            PgSymbolRepository(sessions),
+        )
+
+        snapshot = await service.snapshot(
+            tuple(s.strip() for s in args.symbols.split(",") if s.strip()),
+            args.timeframe,
+            args.at,
+            elapsed_candles=args.elapsed_candles,
+        )
+
+        # The counts come first and are printed even when nothing published.
+        # A board that showed only its rows would make a quiet market and a
+        # broken pipeline look the same, and that distinction is the only
+        # reason to run this by hand.
+        print(
+            f"timeframe={snapshot.timeframe.value} at={snapshot.at.isoformat()} "
+            f"considered={snapshot.considered} published={len(snapshot.rows)} "
+            f"unpublished={snapshot.unpublished}"
+        )
+
+        for row in snapshot.rows:
+            setup = row.setup
+
+            print(
+                f"{row.position:>3}  {setup.symbol:<14} {setup.direction:<4} "
+                f"{setup.archetype.value:<3} tier={setup.tier.value:<10} "
+                f"confidence={setup.confidence} display={row.display}"
+            )
+
+        return 0
+    finally:
+        await engine.dispose()
+
+
 _HANDLERS: dict[
     str,
     Callable[
@@ -494,6 +545,12 @@ _HANDLERS: dict[
 async def _dispatch(
     args: argparse.Namespace,
 ) -> int:
+    if args.command == "rank":
+        if args.rank_command == "snapshot":
+            return await _run_rank_snapshot(args)
+
+        raise ValueError(f"unknown rank command: {args.rank_command}")
+
     if args.command == "engine":
         if args.engine_command == "run":
             return await _run_engine_run(args)

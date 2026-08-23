@@ -33,6 +33,8 @@ def _key(setup: RankableSetup) -> tuple[object, ...]:
         -setup.timeframe.minutes,
         tier_priority(setup.tier),
         setup.symbol,
+        # Past the end of §9.2's chain -- see `RankableSetup.direction`.
+        setup.direction,
     )
 
 
@@ -49,17 +51,17 @@ def rank(setups: Iterable[RankableSetup]) -> tuple[RankableSetup, ...]:
     return tuple(sorted(setups, key=_key))
 
 
-def rank_positions(setups: Sequence[RankableSetup]) -> dict[str, int]:
-    """1-based board position per symbol, for the ranked setups given.
+def rank_positions(setups: Sequence[RankableSetup]) -> dict[tuple[str, str], int]:
+    """1-based board position, keyed by (symbol, direction).
 
-    Keyed by symbol because §9.2 ranks *published signals* market-wide and one
-    symbol publishes at most one; if that stops being true this needs a
-    composite key, and the assertion below is what will say so.
+    Keyed on both because one symbol can carry a long and a short candidate at
+    the same close, and §9.2 ranks *published signals* rather than symbols.
+    Keying on the symbol alone would have silently dropped one of the pair.
     """
     ordered = rank(setups)
-    symbols = [setup.symbol for setup in ordered]
+    keys = [(setup.symbol, setup.direction) for setup in ordered]
 
-    if len(set(symbols)) != len(symbols):
-        raise ValueError("two setups on one symbol: §9.2 positions are per symbol")
+    if len(set(keys)) != len(keys):
+        raise ValueError("two signals with one (symbol, direction) at one close")
 
-    return {symbol: position for position, symbol in enumerate(symbols, start=1)}
+    return {key: position for position, key in enumerate(keys, start=1)}

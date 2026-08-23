@@ -20,6 +20,7 @@ def setup(
     archetype: Archetype = Archetype.FVG_CONTINUATION,
     timeframe: Timeframe = Timeframe.H1,
     tier: UniverseTier = UniverseTier.T2,
+    direction: str = "UP",
 ) -> RankableSetup:
     return RankableSetup(
         symbol=symbol,
@@ -27,6 +28,7 @@ def setup(
         confidence=Decimal(confidence),
         archetype=archetype,
         tier=tier,
+        direction=direction,
     )
 
 
@@ -133,11 +135,36 @@ def test_a_shuffled_universe_ranks_identically() -> None:
         assert [s.symbol for s in rank(shuffled)] == expected
 
 
-def test_positions_are_one_based_and_reject_a_repeated_symbol() -> None:
-    """One symbol publishes at most one signal, and the helper says so aloud."""
-    positions = rank_positions([setup("BBB", confidence="70"), setup("AAA", confidence="90")])
+def test_positions_are_keyed_by_symbol_and_direction() -> None:
+    """§9.2 ranks signals, not symbols.
 
-    assert positions == {"AAA": 1, "BBB": 2}
+    One symbol can carry a long and a short at the same close, so keying the
+    board on the symbol alone would have silently dropped one of the pair.
+    The remaining guard is against a genuine duplicate -- the same symbol and
+    the same direction twice, which is one signal recorded twice.
+    """
+    positions = rank_positions(
+        [
+            setup("BBB", confidence="70"),
+            setup("AAA", confidence="90"),
+            setup("AAA", confidence="80", direction="DOWN"),
+        ]
+    )
 
-    with pytest.raises(ValueError, match="two setups on one symbol"):
+    assert positions == {("AAA", "UP"): 1, ("AAA", "DOWN"): 2, ("BBB", "UP"): 3}
+
+    with pytest.raises(ValueError, match=r"one \(symbol, direction\)"):
         rank_positions([setup("AAA", confidence="90"), setup("AAA", confidence="70")])
+
+
+def test_direction_settles_a_tie_9_2_leaves_open() -> None:
+    """§9.2's chain ends at the symbol, and two signals can share one.
+
+    A long and a short on one symbol with equal confidence, archetype, TF and
+    tier tie on every key the section states, and `sorted` would then fall
+    back to arrival order -- which S8's DoD forbids. Direction decides it.
+    """
+    a = [setup("AAA", direction="UP"), setup("AAA", direction="DOWN")]
+
+    assert [s.direction for s in rank(a)] == ["DOWN", "UP"]
+    assert [s.direction for s in rank(list(reversed(a)))] == ["DOWN", "UP"]
