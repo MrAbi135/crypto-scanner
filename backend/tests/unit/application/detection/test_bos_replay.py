@@ -115,19 +115,29 @@ async def test_a_close_through_a_swing_high_is_a_bos_once_trend_is_bullish() -> 
 
 
 @pytest.mark.asyncio
-async def test_a_broken_swing_is_consumed_and_the_next_level_is_taken() -> None:
-    """§3.5 consumption, plus a behaviour worth a doctrinal look.
+async def test_a_level_price_already_left_behind_is_consumed_without_a_break() -> None:
+    """The doctrinal question this test used to flag, now answered.
 
-    Candle 21 breaks the 130 high and consumes it. Candle 22 closes at 140 and
-    the engine then breaks the *next* unconsumed high, the 120 from index 6 —
-    producing a second BOS.
+    It read: "the 120 level was passed by price around candle 0, roughly twenty
+    candles before trend armed, and it is marked broken only now. §3.5 does not
+    say whether a level price left behind while RANGING should still be
+    breakable once trend arrives. This asserts what the engine does rather than
+    what it ought to; flagged for review rather than quietly encoded as intent."
 
-    Consumption itself is right: 130 is not broken twice. But the 120 level was
-    passed by price around candle 0, roughly twenty candles before trend armed,
-    and it is marked broken only now. §3.5 does not say whether a level price
-    left behind while RANGING should still be breakable once trend arrives.
-    This asserts what the engine does rather than what it ought to; flagged for
-    review rather than quietly encoded as intent.
+    It ought not to. §3.5 says "the break candle is the first closing candle
+    beyond the level", and candle 22 is not that candle for the 120 -- price
+    cleared it before the series began. Recording a break there dates a fact to
+    a candle that did not make it, and because only the most recent unconsumed
+    level is ever a candidate, it repeated: one manufactured break per candle,
+    marching backwards through the level history.
+
+    Measured on the VM before the change, 93 of 186 recorded breaks were of
+    that shape -- half of every break the engine had ever reported. Settled by
+    the developer 2026-08-23 on the strength of that count.
+
+    So candle 21 breaks the 130 and consumes it, and the 120 goes with it as
+    bookkeeping: under the close, therefore surpassed, therefore not a
+    structural event. Candle 22 has nothing left to break.
     """
 
     candles = [candle(i, "125") for i in range(21)] + [
@@ -143,22 +153,17 @@ async def test_a_broken_swing_is_consumed_and_the_next_level_is_taken() -> None:
         external_swings=tuple(UPTREND),
     )
 
-    assert inserted == 2
+    assert inserted == 1
 
-    broken = sorted(
-        (e for e in events.events.values() if e.event_type.startswith("BOS_")),
-        key=lambda e: e.event_at,
-    )
+    broken = [e for e in events.events.values() if e.event_type.startswith("BOS_")]
 
-    assert [e.event_at for e in broken] == [
-        candles[21].open_time,
-        candles[22].open_time,
-    ]
+    assert len(broken) == 1
+    assert broken[0].event_at == candles[21].open_time
 
-    # The 130 high is taken first, then the older 120 — never 130 twice.
-    prices = [json.loads(e.payload)["swing_price"] for e in broken]
-
-    assert prices == ["130", "120"]
+    # The 130 is the break. The 120 is consumed silently, so it can never be
+    # broken later either -- which is the half of the rule a count of one
+    # would not catch on its own.
+    assert json.loads(broken[0].payload)["swing_price"] == "130"
 
 
 @pytest.mark.asyncio

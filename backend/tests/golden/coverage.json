@@ -204,9 +204,19 @@
         },
         {
           "id": "3.5-failed-break",
-          "rule": "a close back beyond the level within 3 candles records a failed break",
+          "rule": "a close back beyond the level within 3 candles records a failed break, and the BOS stands",
+          "status": "covered"
+        },
+        {
+          "id": "3.5-surpassed-levels-consumed-silently",
+          "rule": "a level already under the breaking close is consumed as bookkeeping, without its own BOS",
+          "status": "covered"
+        },
+        {
+          "id": "3.5-failed-break-window",
+          "rule": "a close back on the fourth candle is outside the window and records nothing",
           "status": "pending",
-          "blocked_on": "the detector exists (PR #69) but no golden series runs price back through a broken level"
+          "blocked_on": "needs a series that waits four candles before returning; the three-candle case is written"
         },
         {
           "id": "3.5-epsilon-is-not-a-break",
