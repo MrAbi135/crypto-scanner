@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 
 from scanner.application.detection.orchestrator import build_event_key
 from scanner.application.detection.state import (
@@ -16,7 +17,12 @@ from scanner.application.ports.detection import (
     EngineEventRecord,
     EngineEventRepository,
 )
-from scanner.domain.common import Candle, detection_is_warm
+from scanner.domain.common import (
+    TOLERANCE_ATR,
+    Candle,
+    detection_is_warm,
+    wilder_atr_series,
+)
 from scanner.domain.structure import (
     BreakDirection,
     ClassifiedSwing,
@@ -36,7 +42,7 @@ from scanner.shared import Timeframe
 # s4-v2 (2026-08-17): first swing of each kind now emits an explicit SEED
 # classification event. Output-changing, hence the increment — Constitution
 # §44.5. Ratified as SLS v1.0.2 §3.3.
-STRUCTURE_ALGO_VERSION = "s4-v5"
+STRUCTURE_ALGO_VERSION = "s4-v6"
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,6 +238,15 @@ class StructureReplayService:
         consumed: set[tuple[int, SwingKind]] = set()
         confirmation_window = swing_window(SwingStrength.EXTERNAL)
 
+        # §3.5 edge case (2): "break of a level within e: not a break
+        # (tolerance is absolute)", where §0.4 fixes e as
+        # `P.global.tolerance_atr x ATR`. `detect_bos` takes the tolerance and
+        # defaults it to zero, and this call site passed nothing -- so the
+        # doctrine's own noise filter for breaks was the one place in the
+        # codebase where e did not exist. The liquidity engine derives it the
+        # same way for pools, clusters and sweeps.
+        atrs = wilder_atr_series(candles)
+
         for candle_index, candle in enumerate(candles):
             confirmed_swings = tuple(
                 swing
@@ -276,10 +291,16 @@ class StructureReplayService:
                 key=lambda item: item.index,
             )
 
+            atr = atrs[candle_index] if candle_index < len(atrs) else None
+
             bos = detect_bos(
                 candle,
                 swing,
                 direction=direction,
+                # At the break candle, not at the swing's: the question is
+                # whether this close is distinguishable from the level in
+                # today's volatility.
+                epsilon=TOLERANCE_ATR * atr if atr is not None else Decimal(0),
             )
 
             if bos is None:

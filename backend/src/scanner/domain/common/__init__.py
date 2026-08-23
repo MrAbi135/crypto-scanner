@@ -3,6 +3,7 @@
 from scanner.domain.common.atr import (
     ATR_PERIOD,
     DERIVED_DP,
+    TOLERANCE_ATR,
     quantise_derived,
     true_range,
     wilder_atr,
@@ -45,6 +46,7 @@ __all__ = [
     "DERIVED_DP",
     "DETECTION_MIN_CANDLES",
     "LISTING_MIN_DAYS",
+    "TOLERANCE_ATR",
     "VOLUME_MOMENTUM_MIN_CANDLES",
     "Candle",
     "CandleSource",
