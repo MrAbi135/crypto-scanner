@@ -36,7 +36,7 @@ from scanner.shared import Timeframe
 # s4-v2 (2026-08-17): first swing of each kind now emits an explicit SEED
 # classification event. Output-changing, hence the increment — Constitution
 # §44.5. Ratified as SLS v1.0.2 §3.3.
-STRUCTURE_ALGO_VERSION = "s4-v3"
+STRUCTURE_ALGO_VERSION = "s4-v4"
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,8 +136,22 @@ class StructureReplayService:
 
         inserted = 0
 
+        # §3.1: "every external swing is by construction also an internal
+        # swing; it is stored once with `strength = external`". A k=5 pivot is
+        # necessarily a k=2 pivot, so it comes back out of both detectors, and
+        # persisting both wrote the same pivot twice under contradictory
+        # strengths -- 486 of the VM's 493 external swings had an internal
+        # twin at the same index.
+        #
+        # The liquidity engine already skipped these when building pools, and
+        # the order-block engine parses every SWING_* event into swing
+        # evidence, so it was counting each external pivot twice. Nothing
+        # depended on the duplicate; one consumer worked around it and the
+        # other was quietly wrong.
+        promoted = {(swing.index, swing.kind) for swing in external_swings}
+
         for swing in (
-            *internal_swings,
+            *(s for s in internal_swings if (s.index, s.kind) not in promoted),
             *external_swings,
         ):
             if await self._persist_swing(
@@ -147,6 +161,18 @@ class StructureReplayService:
             ):
                 inserted += 1
 
+        # Classifications are *not* deduplicated, and that is deliberate.
+        # §3.3 labels a swing "relative to the previous confirmed swing of the
+        # same type (per strength class)", and the two classes disagree about
+        # the same pivot far more often than one would guess: on the VM, 157
+        # of 523 pivots carrying both labels carry *different* ones -- an
+        # external LH is frequently an internal HH, because its predecessor in
+        # each sequence is a different swing.
+        #
+        # Dropping one would therefore delete a fact the doctrine computes,
+        # not a duplicate. §3.1's "stored once" is a rule about the swing;
+        # whether one swing may hold two labels is a §3.3 question and has
+        # been raised as one rather than settled here.
         for classified in (
             *internal_classified,
             *external_classified,
