@@ -168,13 +168,64 @@
     {
       "id": "3.5",
       "title": "Detector: Break of Structure (BOS)",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "3.5",
-          "rule": "section not yet enumerated into rules",
+          "id": "3.5-close-confirms-break",
+          "rule": "a close beyond the most recent unconsumed external swing, with the trend agreeing",
+          "status": "covered"
+        },
+        {
+          "id": "3.5-wick-only-is-not-a-break",
+          "rule": "a wick through the level with the close back inside is a sweep candidate, not a BOS",
+          "status": "covered"
+        },
+        {
+          "id": "3.5-break-consumes-the-swing",
+          "rule": "the broken swing is marked consumed_by and may be broken at most once",
+          "status": "covered"
+        },
+        {
+          "id": "3.5-bearish-mirror",
+          "rule": "the bearish mirror below the external swing low",
           "status": "pending",
-          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+          "blocked_on": "the bearish zigzag exists; running it into its level is the obvious next case"
+        },
+        {
+          "id": "3.5-first-closing-candle",
+          "rule": "the break candle is the *first* closing candle beyond the level",
+          "status": "pending",
+          "blocked_on": "needs two consecutive closes beyond one level, asserting only the first is the break"
+        },
+        {
+          "id": "3.5-quality-grade",
+          "rule": "the break is graded displaced or plain",
+          "status": "pending",
+          "blocked_on": "the grade is not in the recorded payload at all, so no dataset can assert it"
+        },
+        {
+          "id": "3.5-failed-break",
+          "rule": "a close back beyond the level within 3 candles records a failed break",
+          "status": "pending",
+          "blocked_on": "the detector exists (PR #69) but no golden series runs price back through a broken level"
+        },
+        {
+          "id": "3.5-epsilon-is-not-a-break",
+          "rule": "a break within epsilon is not a break; the tolerance is absolute",
+          "status": "pending",
+          "blocked_on": "the replay runs with epsilon = 0, so the tolerance band has no width to test"
+        },
+        {
+          "id": "3.5-outside-bar",
+          "rule": "a candle closing beyond both extremes resolves by close direction",
+          "status": "pending",
+          "blocked_on": "no dataset contains an extreme outside bar at a break"
+        },
+        {
+          "id": "3.5-gapped-break",
+          "rule": "a break that opens beyond the level is valid if the close confirms",
+          "status": "pending",
+          "blocked_on": "the loader rejects non-contiguous series, so a gap cannot be declared yet"
         }
       ]
     },
