@@ -199,10 +199,13 @@ to the bar.
 
 `run_dataset` raises on an unsupported `engine` rather than skipping, so a
 dataset for an unwired engine fails loudly instead of passing vacuously. Today
-that means **structure, liquidity, and the FVG/IFVG/BPR ICT pass** — the order
-block, OTE and interaction services have their own ports, and
-`participation_replay` and `confluence_replay` are not wired at all. Every
-`blocked_on` in the manifest names which of these stands in the way.
+that means **structure, liquidity, the FVG/IFVG/BPR ICT pass, and
+participation** (§6 and §7 share one service, because §6.2's spike and §7.1's
+score are both readings of the same closed candle).
+
+Still unwired: the order block, OTE and interaction services, which have their
+own ports, and `confluence_replay`. Every `blocked_on` in the manifest names
+which of these stands in the way.
 
 ### Opaque identifiers
 

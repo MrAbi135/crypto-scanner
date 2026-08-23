@@ -1,0 +1,47 @@
+{
+  "dataset_id": "s7-volume-spike-on-a-doji-is-absorption",
+  "engine": "participation",
+  "sls_sections": ["6.1", "6.2"],
+  "sls_rules": ["6.1-bands", "6.2-class-and-floor", "6.2-absorption-doji"],
+  "description": "One candle trades three times the baseline volume with enough turnover to clear the absolute floor, and closes exactly where it opened. A confirmed spike, tagged absorption rather than directional.",
+  "labelling_rationale": "SLS §6.1 bands RVOL at 1.5 / 3.0 / 5.0, so a candle at exactly 3.0x its baseline is SPIKE — the boundaries are inclusive-low, which is why 3.0 is not ELEVATED. §6.2 then requires that class AND quote-volume at or above P.volume.spike_floor = 250000, the absolute floor that stops a micro-cap's $8k 'spike' from scoring on its own tiny baseline. §6.2's edge case governs the tag: 'spike on a doji (high volume, no progress) is tagged absorption_candidate ... scores as neutral, not bullish/bearish', so with close equal to open the direction is NEUTRAL and absorption_candidate is true. Conviction is false because §6.2 sets it only at |delta_pct| >= 0.25 and the default taker split leaves delta at exactly zero. H4 is chosen deliberately: §2.11 gives M5 and M15 a time-of-day baseline over 20 days, which no hand-written series can supply, while H4 takes the plain median of the trailing 20 candles — every filler candle carries volume 100, so that median is exactly 100 and the scenario candle's 300 gives RVOL exactly 3.0. The candle is a doji for a second reason worth stating: any directional candle in a series this flat also satisfies §7.2's acceleration test, and §7.2's event carries the raw §7.1 momentum score, which is a long exact Decimal no labeller can derive by hand. Keeping the body at zero holds the case to what it claims to assert. The two candles before the spike stay at volume 100 so §6.3's expansion test, which needs three strictly rising volumes, cannot fire.",
+  "labelled_by": "drafted by Claude Opus 5 2026-08-23 from SLS §6.1/§6.2; pending developer verification",
+  "labelled_at": "2026-08-23",
+  "algo_version": "s7-participation-v2",
+  "symbol": "GOLDENVOL",
+  "timeframe": "H4",
+  "filler": { "count": 297, "open": "100", "high": "103", "low": "100", "close": "100" },
+  "candles": [
+    { "open_time": "2026-08-21T00:00:00+00:00", "open": "100", "high": "103", "low": "100", "close": "100" },
+    { "open_time": "2026-08-21T04:00:00+00:00", "open": "100", "high": "103", "low": "100", "close": "100" },
+    { "open_time": "2026-08-21T08:00:00+00:00", "open": "100", "high": "103", "low": "100", "close": "100", "volume": "300", "quote_volume": "300000" }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "volume_spikes": 1,
+      "suspect_volume": 0,
+      "expansions": 0,
+      "contractions": 0,
+      "range_expansions": 0,
+      "compressions": 0,
+      "accelerations": 0,
+      "exhaustion_watches": 0,
+      "events_inserted": 1
+    },
+    "events": [
+      {
+        "event_type": "VOLUME_SPIKE",
+        "event_at": "2026-08-21T08:00:00+00:00",
+        "payload": {
+          "rvol": "3",
+          "rvol_class": "SPIKE",
+          "quote_volume": "300000",
+          "direction": "NEUTRAL",
+          "conviction": false,
+          "absorption_candidate": true
+        }
+      }
+    ]
+  }
+}
