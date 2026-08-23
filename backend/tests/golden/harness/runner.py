@@ -12,6 +12,11 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from scanner.application.detection.ict_interaction_replay import (
+    IctZoneInteractionReplayService,
+)
+from scanner.application.detection.ict_ob_replay import IctOrderBlockReplayService
+from scanner.application.detection.ict_ote_replay import IctOteReplayService
 from scanner.application.detection.ict_replay import IctReplayService
 from scanner.application.detection.liquidity_replay import LiquidityReplayService
 from scanner.application.detection.participation_replay import ParticipationReplayService
@@ -24,6 +29,9 @@ from tests.golden.harness.memory import (
     InMemoryCandleRepository,
     InMemoryEngineEventRepository,
     InMemoryEngineStateStore,
+    InMemoryIctEvidenceRepository,
+    InMemoryIctZoneInteractionContextRepository,
+    InMemoryIctZoneInteractionRepository,
     InMemoryIctZoneRepository,
     InMemoryIctZoneStateStore,
     InMemoryIctZoneTransitionRepository,
@@ -260,27 +268,76 @@ async def _run_liquidity(dataset: GoldenDataset) -> dict[str, Any]:
 
 
 async def _run_ict(dataset: GoldenDataset) -> dict[str, Any]:
-    """Run the FVG / IFVG / BPR pass of the S6 zone engine.
+    """Run the S6 zone engine as the pipeline runs it.
 
-    Order-block, OTE and interaction passes are separate services with their
-    own ports; they are wired in a later increment. A dataset that expects
-    their output will simply not see it, which is why zone-type coverage is
-    tracked in the README rather than implied by a green suite.
+    `DetectionPipeline` documents the order and this follows it exactly:
+    `ict -> ote / ob -> interaction`. All four passes share one zone store and
+    one transition ledger, which is the point -- the interaction engine runs
+    last so it can read what the zone engines wrote in the same pass, and a
+    harness that handed it a separate fixture would test the two halves
+    against each other rather than against doctrine.
+
+    The order-block pass reads S4/S5 evidence that no zone-only dataset
+    produces, so it sees none. That bounds what an OB case can assert to
+    SLS 5.1's formation rules; the coverage manifest records the rest as
+    blocked rather than letting a green suite imply they are proven.
     """
+
+    candles = InMemoryCandleRepository(dataset.candles)
+    clock = FixedClock(HARNESS_CLOCK)
 
     zones = InMemoryIctZoneRepository()
     transitions = InMemoryIctZoneTransitionRepository()
+    interactions = InMemoryIctZoneInteractionRepository()
 
-    service = IctReplayService(
-        InMemoryCandleRepository(dataset.candles),
+    report = await IctReplayService(
+        candles,
         zones,
         transitions,
         InMemoryIctZoneStateStore(),
-        FixedClock(HARNESS_CLOCK),
+        clock,
         algo_version=dataset.algo_version,
+    ).run(
+        dataset.symbol,
+        dataset.timeframe,
+        dataset.start,
+        dataset.end,
     )
 
-    report = await service.run(
+    ote_report = await IctOteReplayService(
+        candles,
+        zones,
+        transitions,
+        clock,
+        algo_version=dataset.algo_version,
+    ).run(
+        dataset.symbol,
+        dataset.timeframe,
+        dataset.start,
+        dataset.end,
+    )
+
+    ob_report = await IctOrderBlockReplayService(
+        candles,
+        zones,
+        transitions,
+        InMemoryIctZoneStateStore(),
+        InMemoryIctEvidenceRepository(),
+        clock,
+        algo_version=dataset.algo_version,
+    ).run(
+        dataset.symbol,
+        dataset.timeframe,
+        dataset.start,
+        dataset.end,
+    )
+
+    interaction_report = await IctZoneInteractionReplayService(
+        candles,
+        InMemoryIctZoneInteractionContextRepository(zones, transitions),
+        interactions,
+        algo_version=dataset.algo_version,
+    ).run(
         dataset.symbol,
         dataset.timeframe,
         dataset.start,
@@ -305,6 +362,19 @@ async def _run_ict(dataset: GoldenDataset) -> dict[str, Any]:
                 "ifvgs_created": report.ifvgs_created,
                 "bprs_created": report.bprs_created,
                 "live_zones": report.live_zones,
+                "dealing_ranges": ote_report.dealing_ranges,
+                "impulse_legs": ote_report.impulse_legs,
+                "otes_detected": ote_report.otes_detected,
+                "order_blocks_detected": ob_report.order_blocks_detected,
+                "breakers_created": ob_report.breakers_created,
+                "mitigations_created": ob_report.mitigations_created,
+                "zones_evaluated": interaction_report.zones_evaluated,
+                "touches": interaction_report.touches,
+                "rejections": interaction_report.rejections,
+                "mitigations": interaction_report.mitigations,
+                "respects": interaction_report.respects,
+                "violations": interaction_report.violations,
+                "confirmations": interaction_report.confirmations,
             },
             "zones": sorted(
                 (
@@ -342,6 +412,20 @@ async def _run_ict(dataset: GoldenDataset) -> dict[str, Any]:
                     for transition in transitions.transitions
                 ),
                 key=lambda item: (item["candle_index"], item["to_state"], item["zone_type"]),
+            ),
+            "interactions": sorted(
+                (
+                    {
+                        "zone": item.zone_id,
+                        "zone_type": item.zone_type,
+                        "kind": item.kind,
+                        "candle_index": item.candle_index,
+                        "observed_at": item.observed_at,
+                        "close_through": item.close_through,
+                    }
+                    for item in interactions.interactions
+                ),
+                key=lambda item: (item["candle_index"], item["kind"], item["zone_type"]),
             ),
         },
         aliases,

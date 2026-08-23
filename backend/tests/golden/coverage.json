@@ -403,7 +403,7 @@
           "id": "5.1",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- ict_ob_replay, ict_ote_replay and ict_interaction_replay are not wired"
+          "blocked_on": "wired, but its qualification reads S4/S5 evidence that a zone-only dataset does not generate; the harness supplies an empty evidence repository rather than a hand-fed one"
         }
       ]
     },
@@ -416,7 +416,7 @@
           "id": "5.2",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- ict_ob_replay, ict_ote_replay and ict_interaction_replay are not wired"
+          "blocked_on": "wired, but its qualification reads S4/S5 evidence that a zone-only dataset does not generate; the harness supplies an empty evidence repository rather than a hand-fed one"
         }
       ]
     },
@@ -429,7 +429,7 @@
           "id": "5.3",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- ict_ob_replay, ict_ote_replay and ict_interaction_replay are not wired"
+          "blocked_on": "wired, but its qualification reads S4/S5 evidence that a zone-only dataset does not generate; the harness supplies an empty evidence repository rather than a hand-fed one"
         }
       ]
     },
@@ -560,7 +560,7 @@
           "id": "5.7",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- ict_ob_replay, ict_ote_replay and ict_interaction_replay are not wired"
+          "blocked_on": "wired, but produces nothing on the current datasets: 5.7 needs confirmed external swings that these short zone scenarios never form"
         }
       ]
     },
@@ -573,20 +573,51 @@
           "id": "5.8",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- ict_ob_replay, ict_ote_replay and ict_interaction_replay are not wired"
+          "blocked_on": "wired, but produces nothing on the current datasets: 5.7 needs confirmed external swings that these short zone scenarios never form"
         }
       ]
     },
     {
       "id": "5.9",
       "title": "Rejection, Mitigation, Confirmation (Zone Interaction Grammar)",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "5.9",
-          "rule": "section not yet enumerated into rules",
+          "id": "5.9-touch",
+          "rule": "a candle whose range intersects the band is a Touch",
+          "status": "covered"
+        },
+        {
+          "id": "5.9-rejection",
+          "rule": "a touch closing outside on the polarity side with a wick of at least 0.3 x ATR into the zone",
+          "status": "covered"
+        },
+        {
+          "id": "5.9-mitigation",
+          "rule": "reaching at least 50% of zone depth then closing outside on the polarity side",
+          "status": "covered"
+        },
+        {
+          "id": "5.9-respect",
+          "rule": "a Rejection or Mitigation without any close-through",
+          "status": "covered"
+        },
+        {
+          "id": "5.9-violation",
+          "rule": "a close beyond the distal edge",
+          "status": "covered"
+        },
+        {
+          "id": "5.9-confirmation",
+          "rule": "a Respect plus a confirmed internal BOS one timeframe below within 5 LTF candles",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- ict_ob_replay, ict_ote_replay and ict_interaction_replay are not wired"
+          "blocked_on": "the harness replays one timeframe, so there is no rung below to agree"
+        },
+        {
+          "id": "5.9-uniform-grammar",
+          "rule": "the same grammar applies to every zone type, differing only in creation and grading",
+          "status": "pending",
+          "blocked_on": "only FVG and IFVG zones are exercised; OB, Breaker, Mitigation, BPR and OTE produce none on the current datasets"
         }
       ]
     },
@@ -599,7 +630,7 @@
           "id": "5.10",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- ict_ob_replay, ict_ote_replay and ict_interaction_replay are not wired"
+          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass"
         }
       ]
     },

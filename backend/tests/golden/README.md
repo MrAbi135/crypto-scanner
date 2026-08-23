@@ -199,12 +199,26 @@ to the bar.
 
 `run_dataset` raises on an unsupported `engine` rather than skipping, so a
 dataset for an unwired engine fails loudly instead of passing vacuously. Today
-that means **structure, liquidity, the FVG/IFVG/BPR ICT pass, and
-participation** (§6 and §7 share one service, because §6.2's spike and §7.1's
+that means **structure**, **liquidity**, **the full S6 zone engine**, and
+**participation** (§6 and §7 share one service, because §6.2's spike and §7.1's
 score are both readings of the same closed candle).
 
-Still unwired: the order block, OTE and interaction services, which have their
-own ports, and `confluence_replay`. Every `blocked_on` in the manifest names
+The zone engine runs all four of its passes in the order `DetectionPipeline`
+documents — `ict → ote / ob → interaction` — over one shared zone store and one
+transition ledger. The interaction pass runs last precisely so it reads what the
+zone passes wrote in the same run; handing it a separate fixture would test the
+two halves against each other rather than against doctrine.
+
+Two consequences worth stating, because a green suite would otherwise imply
+more than it proves:
+
+- the OB pass reads S4/S5 evidence that a zone-only dataset does not generate,
+  so it sees an **empty** evidence repository and can only exercise §5.1's
+  formation rules;
+- the OTE pass needs confirmed external swings, which the short zone scenarios
+  never form, so §5.7 and §5.8 produce nothing yet.
+
+Still unwired: `confluence_replay`. Every `blocked_on` in the manifest names
 which of these stands in the way.
 
 ### Opaque identifiers

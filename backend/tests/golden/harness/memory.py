@@ -17,6 +17,9 @@ from dataclasses import replace
 from datetime import datetime
 
 from scanner.application.ports.detection import EngineEventRecord
+from scanner.application.ports.ict_zone_interactions import (
+    IctZoneInteractionRecord,
+)
 from scanner.application.ports.ict_zones import (
     IctZoneRecord,
     IctZoneTransitionRecord,
@@ -365,3 +368,133 @@ class InMemoryLiquidityStateStore:
 
     async def delete(self, symbol: str, timeframe: Timeframe) -> None:
         self.snapshots.pop((symbol, timeframe), None)
+
+
+class InMemoryIctEvidenceRepository:
+    """The S4/S5 facts the order-block engine reads, and there are none.
+
+    `ict_ob_replay` asks this for structure, shift and liquidity evidence to
+    decide an order block's qualification flags. A golden ICT dataset runs the
+    zone engines alone, so nothing has written any -- and the honest answer is
+    an empty tuple, not a fabricated one.
+
+    That bounds what an OB case can assert: the formation rules of SLS 5.1,
+    yes; anything gated on a structure break or a sweep, no. The coverage
+    manifest records that as the `blocked_on` for those rules rather than
+    leaving a green suite to imply otherwise.
+
+    Hand-feeding evidence here was the alternative and is worse: evidence a
+    labeller typed is not engine output, so a case built on it proves the
+    labeller and the OB engine agree about a fiction.
+    """
+
+    async def list_structure(self, symbol, timeframe, start, end):
+        return ()
+
+    async def list_shifts(self, symbol, timeframe, start, end):
+        return ()
+
+    async def list_liquidity(self, symbol, timeframe, start, end):
+        return ()
+
+
+class InMemoryIctZoneInteractionContextRepository:
+    """SLS 5.9's read side, backed by the stores the zone passes just wrote.
+
+    Deliberately not a separate fixture: the interaction engine runs last in
+    the pipeline precisely so it can read what the zone engines produced in
+    the same pass, and a harness that fed it its own copy would test the two
+    halves against each other rather than against doctrine.
+    """
+
+    def __init__(
+        self,
+        zones: InMemoryIctZoneRepository,
+        transitions: InMemoryIctZoneTransitionRepository,
+    ) -> None:
+        self._zones = zones
+        self._transitions = transitions
+
+    async def list_zones(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+    ) -> tuple[IctZoneRecord, ...]:
+        return tuple(
+            zone
+            for zone in self._zones.zones.values()
+            if zone.symbol == symbol and zone.timeframe == timeframe
+        )
+
+    async def list_transitions(
+        self,
+        zone_id: str,
+    ) -> tuple[IctZoneTransitionRecord, ...]:
+        return tuple(t for t in self._transitions.transitions if t.zone_id == zone_id)
+
+    async def list_transitions_for(
+        self,
+        zone_ids: Sequence[str],
+    ) -> dict[str, tuple[IctZoneTransitionRecord, ...]]:
+        wanted = set(zone_ids)
+
+        found: dict[str, list[IctZoneTransitionRecord]] = {zone_id: [] for zone_id in wanted}
+
+        for transition in self._transitions.transitions:
+            if transition.zone_id in wanted:
+                found[transition.zone_id].append(transition)
+
+        return {zone_id: tuple(items) for zone_id, items in found.items()}
+
+
+class InMemoryIctZoneInteractionRepository:
+    """Append-only SLS 5.9 interaction ledger, idempotent on interaction_id."""
+
+    def __init__(self) -> None:
+        self.interactions: list[IctZoneInteractionRecord] = []
+        self._ids: set[str] = set()
+
+    async def append(self, interaction: IctZoneInteractionRecord) -> bool:
+        if interaction.interaction_id in self._ids:
+            return False
+
+        self._ids.add(interaction.interaction_id)
+        self.interactions.append(interaction)
+        return True
+
+    async def append_many(
+        self,
+        interactions: Sequence[IctZoneInteractionRecord],
+    ) -> frozenset[str]:
+        written: set[str] = set()
+
+        for interaction in interactions:
+            if await self.append(interaction):
+                written.add(interaction.interaction_id)
+
+        return frozenset(written)
+
+    async def any_respect_at(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        observed_at: datetime,
+    ) -> bool:
+        return any(
+            item.symbol == symbol
+            and item.timeframe == timeframe
+            and item.observed_at == observed_at
+            and item.kind == "RESPECT"
+            for item in self.interactions
+        )
+
+    async def list_for_zone(
+        self,
+        zone_id: str,
+    ) -> tuple[IctZoneInteractionRecord, ...]:
+        return tuple(
+            sorted(
+                (item for item in self.interactions if item.zone_id == zone_id),
+                key=lambda item: (item.candle_index, item.interaction_id),
+            )
+        )
