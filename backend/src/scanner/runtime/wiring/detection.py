@@ -56,6 +56,7 @@ from scanner.infrastructure.persistence.repositories import (
     PgSymbolRepository,
     PgTradeAggregateRepository,
 )
+from scanner.infrastructure.persistence.setup_repository import PgSetupRepository
 from scanner.infrastructure.redis.engine_state import RedisEngineStateStore
 from scanner.infrastructure.redis.ict_zone_state import RedisIctZoneStateStore
 from scanner.infrastructure.redis.liquidity_state import RedisLiquidityStateStore
@@ -157,5 +158,6 @@ def build_detection_pipeline(
                 namespace=SHIFT_NAMESPACE,
             ),
             shift_algo_version=STRUCTURE_SHIFT_ALGO_VERSION,
+            setups=PgSetupRepository(sessions),
         ),
     )

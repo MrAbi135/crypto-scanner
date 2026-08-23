@@ -436,6 +436,7 @@ def service(
     pools: list | None = None,
     minutes: list | None = None,
     wash_risk: bool = False,
+    setups=None,
 ):
     repo = FakeEventRepository(events)
 
@@ -469,9 +470,32 @@ def service(
         FakeClock(),
         shift_state,
         shift_algo_version=SHIFT_ALGO,
+        setups=setups,
     )
 
     return svc, repo
+
+
+class FakeSetups:
+    """T16, in memory. Append-only, like the table it stands in for."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, object] = {}
+
+    async def append(self, setup) -> bool:
+        if setup.setup_id in self.rows:
+            return False
+
+        self.rows[setup.setup_id] = setup
+
+        return True
+
+    async def list_at(self, symbols, timeframe, evaluated_at):
+        return tuple(
+            r
+            for r in self.rows.values()
+            if r.symbol in symbols and r.timeframe is timeframe and r.evaluated_at == evaluated_at
+        )
 
 
 async def run(svc, trend_state: str = "RANGING"):
@@ -608,6 +632,83 @@ async def test_the_record_carries_the_gate_results_and_the_attribution_tree() ->
     # being absent rather than by an empty list.
     assert "F3" not in recorded[0]["attribution"]
     assert "F4" not in recorded[0]["attribution"]
+
+
+@pytest.mark.asyncio
+async def test_a_gate_passing_candidate_is_stored_in_t16() -> None:
+    """DDD T16: "every confluence candidate that passed gates".
+
+    The engine wrote its candidates only to the event log until now, which is
+    an audit trail rather than the modelled record the product reads. The row
+    carries what calibration needs and the event never did: the base
+    confidence beside the final one, the adjustments that moved it, and the
+    factor attribution.
+    """
+    setups = FakeSetups()
+
+    svc, _ = service(**bullish_setup(), setups=setups)
+
+    await run(svc, "BULLISH")
+
+    stored = list(setups.rows.values())
+
+    assert stored
+
+    row = stored[0]
+
+    assert row.symbol == "BTCUSDT"
+    assert row.direction in {"UP", "DOWN"}
+    assert row.base_confidence > 0
+    assert row.final_confidence > 0
+
+    adjustments = json.loads(row.adjustments)
+
+    # §8.5 caps both sides, and whether a cap bound is the difference between
+    # "no more evidence" and "more than the doctrine will pay for".
+    assert {"applied", "synergy", "penalty", "synergy_capped", "penalty_capped"} <= set(adjustments)
+
+    assert json.loads(row.evidence)["attribution"]["F1"]
+
+
+@pytest.mark.asyncio
+async def test_a_gate_failing_candidate_is_not_stored_in_t16() -> None:
+    """T16 holds gate-passers, and a gate failure has nothing to calibrate.
+
+    There is no scored evidence behind it -- `base_confidence` would have to
+    be invented to store one -- so it stays in the event log, where the fact
+    that it was evaluated and refused is still recorded.
+    """
+    setups = FakeSetups()
+
+    # No zone, so G4 cannot pass in either direction.
+    svc, _ = service(events=[event("BOS_UP", 3, direction="UP")], setups=setups)
+
+    await run(svc, "BULLISH")
+
+    assert setups.rows == {}
+
+
+@pytest.mark.asyncio
+async def test_the_setup_row_is_append_only_across_a_re_evaluated_candle() -> None:
+    """T16's read/write pattern is append-only.
+
+    Replaying the same close must not rewrite what the first pass concluded,
+    and the id is a hash of symbol, timeframe, direction, close and algo
+    version -- real values only. The §5.9 interaction ids were hashed over a
+    sliding-window offset and wrote the same fact twenty times over; this is
+    the same shape of key built the way that one should have been.
+    """
+    setups = FakeSetups()
+
+    svc, _ = service(**bullish_setup(), setups=setups)
+
+    await run(svc, "BULLISH")
+
+    first = dict(setups.rows)
+
+    await run(svc, "BULLISH")
+
+    assert setups.rows.keys() == first.keys()
 
 
 @pytest.mark.asyncio
