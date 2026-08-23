@@ -12,6 +12,7 @@ from scanner.application.detection.state import (
     EngineStateManager,
     StructureEngineState,
 )
+from scanner.application.detection.structure_events import classification_event_type
 from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.detection import (
     EngineEventRecord,
@@ -170,15 +171,23 @@ class StructureReplayService:
         # Classifications are *not* deduplicated, and that is deliberate.
         # §3.3 labels a swing "relative to the previous confirmed swing of the
         # same type (per strength class)", and the two classes disagree about
-        # the same pivot far more often than one would guess: on the VM, 157
-        # of 523 pivots carrying both labels carry *different* ones -- an
-        # external LH is frequently an internal HH, because its predecessor in
-        # each sequence is a different swing.
+        # the same pivot far more often than one would guess. Re-measured on
+        # the VM 2026-08-23: 695 pivots carry both labels and **152 carry
+        # different ones** -- LL against HL 80 times, HH against LH 59. No
+        # pivot carries an external label without an internal one, which is
+        # §3.1's nesting holding.
         #
-        # Dropping one would therefore delete a fact the doctrine computes,
-        # not a duplicate. §3.1's "stored once" is a rule about the swing;
-        # whether one swing may hold two labels is a §3.3 question and has
-        # been raised as one rather than settled here.
+        # Neither label is wrong. The internal sequence has more and closer
+        # pivots, so a pullback low under the last internal low can still sit
+        # above the last external one; the two answer different questions.
+        # Dropping one would delete a fact the doctrine computes, not a
+        # duplicate -- §3.1's "stored once" is a rule about the swing, not
+        # about the label.
+        #
+        # Settled by the developer 2026-08-23: both are kept. The hazard that
+        # comes with that is reading them by prefix, and it is closed in
+        # `structure_events` -- nothing can ask for a label without naming
+        # which of the two series it means.
         for classified in (
             *internal_classified,
             *external_classified,
@@ -538,7 +547,7 @@ class StructureReplayService:
     ) -> bool:
         swing = classified.swing
 
-        event_type = f"STRUCTURE_{swing.strength.value}_{classified.label.value}"
+        event_type = classification_event_type(swing.strength, classified.label)
 
         payload = json.dumps(
             {

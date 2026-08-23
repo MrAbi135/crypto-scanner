@@ -29,6 +29,10 @@ from decimal import Decimal
 
 from scanner.application.detection.orchestrator import build_event_key
 from scanner.application.detection.state import EngineStateManager
+from scanner.application.detection.structure_events import (
+    is_classification,
+    read_classification,
+)
 from scanner.application.marketdata.contexts import higher_timeframe
 from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.detection import (
@@ -94,6 +98,7 @@ from scanner.domain.momentum import (
 from scanner.domain.structure import (
     StructureLabel,
     SwingPoint,
+    SwingStrength,
     TrendState,
     detect_external_swings,
     unbroken_pairs,
@@ -569,7 +574,9 @@ class ConfluenceReplayService:
                 StructureEvidence(
                     break_confirmed=f"BOS_{direction}" in event_types,
                     displaced=f"MSS_{direction}" in event_types,
-                    external=any(t.startswith("STRUCTURE_EXTERNAL") for t in event_types),
+                    external=any(
+                        is_classification(t, strength=SwingStrength.EXTERNAL) for t in event_types
+                    ),
                     mss=f"MSS_{direction}" in event_types,
                     # §7.4, from the labels §3.3 already writes into each
                     # SWING_* payload. Left at zero, the 30 points of trend
@@ -1354,22 +1361,20 @@ def _read_labels(events: tuple[EngineEventRecord, ...]) -> tuple[StructureLabel,
     labelled: list[tuple[int, StructureLabel]] = []
 
     for record in events:
-        if not record.event_type.startswith("STRUCTURE_EXTERNAL_"):
+        label = read_classification(record.event_type, strength=SwingStrength.EXTERNAL)
+
+        # None covers both "not a classification" and "an internal one", and
+        # also a label this build does not recognise -- version skew, not a
+        # reason to stop scoring. §7.4 counts what it recognises.
+        if label is None:
             continue
 
-        payload = json.loads(record.payload)
-        raw = payload.get("label")
-        index = payload.get("index")
+        index = json.loads(record.payload).get("index")
 
-        if raw is None or index is None:
+        if index is None:
             continue
 
-        try:
-            labelled.append((int(index), StructureLabel(raw)))
-        except ValueError:
-            # An unknown label is a version skew, not a reason to stop
-            # scoring; §7.4 counts what it recognises.
-            continue
+        labelled.append((int(index), label))
 
     labelled.sort()
 

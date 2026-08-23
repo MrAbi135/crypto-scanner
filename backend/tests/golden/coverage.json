@@ -122,6 +122,12 @@
           "rule": "the first post-gap swing of each kind is SEED again",
           "status": "pending",
           "blocked_on": "needs a dataset with a declared data gap"
+        },
+        {
+          "id": "3.3-two-labels-per-pivot",
+          "rule": "a pivot that is both an internal and an external swing carries a label in each series, computed against that series' own predecessor; the two may disagree and both are recorded",
+          "status": "covered",
+          "note": "Settled by the developer 2026-08-23 after re-measurement: 695 pivots on the VM carry both labels and 152 carry different ones. 3.1's 'stored once' governs the swing, not the label."
         }
       ]
     },
