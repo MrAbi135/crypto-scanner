@@ -12,6 +12,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from scanner.application.detection.confluence_replay import ConfluenceReplayService
 from scanner.application.detection.ict_interaction_replay import (
     IctZoneInteractionReplayService,
 )
@@ -20,8 +21,13 @@ from scanner.application.detection.ict_ote_replay import IctOteReplayService
 from scanner.application.detection.ict_replay import IctReplayService
 from scanner.application.detection.liquidity_replay import LiquidityReplayService
 from scanner.application.detection.participation_replay import ParticipationReplayService
-from scanner.application.detection.state import EngineStateManager
+from scanner.application.detection.pipeline import DetectionPipeline
+from scanner.application.detection.state import SHIFT_NAMESPACE, EngineStateManager
 from scanner.application.detection.structure_replay import StructureReplayService
+from scanner.application.detection.structure_shift_replay import (
+    STRUCTURE_SHIFT_ALGO_VERSION,
+    StructureShiftReplayService,
+)
 from tests.golden.harness.canonical import output_hash
 from tests.golden.harness.dataset import GoldenDataset
 from tests.golden.harness.memory import (
@@ -38,6 +44,8 @@ from tests.golden.harness.memory import (
     InMemoryLiquidityPoolRepository,
     InMemoryLiquidityStateStore,
     InMemoryLiquidityTransitionRepository,
+    InMemorySymbolRepository,
+    InMemoryTradeAggregateRepository,
 )
 
 # Any instant works; it must merely be constant. See canonical.py on why
@@ -69,9 +77,12 @@ async def run_dataset(dataset: GoldenDataset) -> dict[str, Any]:
     if dataset.engine == "participation":
         return await _run_participation(dataset)
 
+    if dataset.engine == "confluence":
+        return await _run_confluence(dataset)
+
     raise ValueError(
         f"{dataset.dataset_id}: unsupported engine {dataset.engine!r}. "
-        "Supported engines: structure, liquidity, ict, participation."
+        "Supported engines: structure, liquidity, ict, participation, confluence."
     )
 
 
@@ -115,6 +126,126 @@ async def _run_structure(dataset: GoldenDataset) -> dict[str, Any]:
             ),
             key=lambda item: (item["event_at"], item["event_type"]),
         ),
+    }
+
+
+async def _run_confluence(dataset: GoldenDataset) -> dict[str, Any]:
+    """SLS §8, which means the whole pipeline.
+
+    Confluence scores what the other engines found, so a case for it cannot
+    run in isolation: with no swings, no pools and no zones behind it every
+    gate fails for want of evidence, and the dataset would be asserting the
+    absence of input rather than the doctrine.
+
+    So this builds `DetectionPipeline` itself, with in-memory ports, and calls
+    it. Using the production composition rather than re-assembling the nine
+    services here is deliberate — a harness that wired them in its own order
+    would be a second definition of "run detection", and the one thing the
+    pipeline's own docstring insists on is that there is exactly one.
+    """
+    candles = InMemoryCandleRepository(dataset.candles)
+    clock = FixedClock(HARNESS_CLOCK)
+
+    events = InMemoryEngineEventRepository()
+    zones = InMemoryIctZoneRepository()
+    zone_transitions = InMemoryIctZoneTransitionRepository()
+    pools = InMemoryLiquidityPoolRepository()
+    pool_transitions = InMemoryLiquidityTransitionRepository()
+    interactions = InMemoryIctZoneInteractionRepository()
+
+    evidence = InMemoryIctEvidenceRepository(events, pool_transitions)
+
+    shift_state = EngineStateManager(
+        InMemoryEngineStateStore(),
+        namespace=SHIFT_NAMESPACE,
+    )
+
+    pipeline = DetectionPipeline(
+        StructureReplayService(
+            candles,
+            events,
+            EngineStateManager(InMemoryEngineStateStore()),
+            clock,
+        ),
+        LiquidityReplayService(
+            candles,
+            pools,
+            pool_transitions,
+            events,
+            InMemoryLiquidityStateStore(),
+            clock,
+        ),
+        StructureShiftReplayService(candles, events, evidence, clock, shift_state),
+        IctReplayService(
+            candles,
+            zones,
+            zone_transitions,
+            InMemoryIctZoneStateStore(),
+            clock,
+        ),
+        IctOteReplayService(candles, zones, zone_transitions, clock),
+        IctOrderBlockReplayService(
+            candles,
+            zones,
+            zone_transitions,
+            InMemoryIctZoneStateStore(),
+            evidence,
+            clock,
+        ),
+        IctZoneInteractionReplayService(
+            candles,
+            InMemoryIctZoneInteractionContextRepository(zones, zone_transitions),
+            interactions,
+        ),
+        ParticipationReplayService(candles, events, clock),
+        ConfluenceReplayService(
+            candles,
+            events,
+            zones,
+            evidence,
+            interactions,
+            pools,
+            InMemoryTradeAggregateRepository(),
+            InMemorySymbolRepository(),
+            clock,
+            shift_state,
+            shift_algo_version=STRUCTURE_SHIFT_ALGO_VERSION,
+            algo_version=dataset.algo_version,
+        ),
+    )
+
+    report = await pipeline.run(
+        dataset.symbol,
+        dataset.timeframe,
+        dataset.start,
+        dataset.end,
+    )
+
+    _assert_unique_event_keys(events)
+
+    confluence = report.confluence
+
+    return {
+        "report": {
+            "candles": report.structure.candles,
+            "trend_state": report.structure_shift.trend_state,
+            "htf_state": confluence.htf_state,
+            "unreachable": list(confluence.unreachable),
+            "events_inserted": confluence.events_inserted,
+        },
+        "candidates": [
+            {
+                "direction": candidate.direction,
+                "gates_passed": candidate.gates_passed,
+                "failed_gates": list(candidate.failed_gates),
+                "confidence": candidate.confidence,
+                "grade": candidate.grade,
+                "archetype": candidate.archetype,
+                "publishable": candidate.publishable,
+                "factors": candidate.factors,
+            }
+            for candidate in confluence.candidates
+        ],
     }
 
 
@@ -285,6 +416,7 @@ async def _run_ict(dataset: GoldenDataset) -> dict[str, Any]:
 
     candles = InMemoryCandleRepository(dataset.candles)
     clock = FixedClock(HARNESS_CLOCK)
+    events = InMemoryEngineEventRepository()
 
     zones = InMemoryIctZoneRepository()
     transitions = InMemoryIctZoneTransitionRepository()
@@ -322,7 +454,7 @@ async def _run_ict(dataset: GoldenDataset) -> dict[str, Any]:
         zones,
         transitions,
         InMemoryIctZoneStateStore(),
-        InMemoryIctEvidenceRepository(),
+        InMemoryIctEvidenceRepository(events),
         clock,
         algo_version=dataset.algo_version,
     ).run(
