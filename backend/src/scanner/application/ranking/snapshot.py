@@ -1,20 +1,17 @@
-"""Read the published setups at one close and order them (SLS §9.2)."""
+"""Read the setups recorded at one close and order them (SLS §9.2)."""
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from scanner.application.ports.detection import EngineEventRepository
 from scanner.application.ports.repositories import SymbolRepository
+from scanner.application.ports.setups import SetupRecord, SetupRepository
 from scanner.domain.common.universe import UniverseTier
 from scanner.domain.confluence import Archetype
 from scanner.domain.ranking import RankableSetup, display_rank, rank
 from scanner.shared import Timeframe
-
-_PREFIX = "SETUP_CANDIDATE_"
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,28 +29,28 @@ class RankingSnapshot:
     at: datetime
     rows: tuple[RankedRow, ...]
 
-    # Candidates seen but not published. §8.6 records below-floor candidates
-    # "for calibration", and a board that reported only its rows would make a
-    # quiet market and a broken pipeline look identical.
-    considered: int
-    unpublished: int
+    # Everything T16 holds for this close, and how much of it stopped at the
+    # floor. §8.6 keeps the below-floor candidates "for calibration", and a
+    # board reporting only its rows would make a quiet market and a broken
+    # pipeline look identical.
+    #
+    # These count *gate-passing* candidates, because that is T16's population
+    # -- a gate failure is in the event log and nowhere else. The earlier
+    # version of this service read the event log and so counted those too;
+    # the number is smaller now and means something sharper.
+    gate_passers: int
+    below_floor: int
 
 
 class RankingSnapshotService:
-    """§9.2 over the candidates recorded at a single close.
-
-    Reads `SETUP_CANDIDATE_*` events rather than a setups table, because that
-    is where the confluence engine writes them today; S8's T16 table is still
-    outstanding and this moves to it when it lands, without the ordering
-    changing.
-    """
+    """§9.2 over T16's rows at a single close."""
 
     def __init__(
         self,
-        events: EngineEventRepository,
+        setups: SetupRepository,
         symbols: SymbolRepository,
     ) -> None:
-        self._events = events
+        self._setups = setups
         self._symbols = symbols
 
     async def snapshot(
@@ -64,46 +61,25 @@ class RankingSnapshotService:
         *,
         elapsed_candles: int = 0,
     ) -> RankingSnapshot:
-        setups: list[RankableSetup] = []
-        considered = 0
+        rows = await self._setups.list_at(symbols, timeframe, at)
 
-        for symbol in symbols:
-            tier = await self._tier(symbol)
+        published = [row for row in rows if row.floor_passed]
 
-            # A half-open window of one candle: `list_events` takes a range,
-            # and a snapshot is one close.
-            records = await self._events.list_events(
-                symbol,
-                timeframe,
-                at,
-                at + timeframe.duration,
+        tiers = {symbol: await self._tier(symbol) for symbol in {r.symbol for r in published}}
+
+        ordered = rank(
+            RankableSetup(
+                symbol=row.symbol,
+                timeframe=row.timeframe,
+                confidence=row.final_confidence,
+                archetype=_archetype_of(row),
+                tier=tiers[row.symbol],
+                direction=row.direction,
             )
+            for row in published
+        )
 
-            for record in records:
-                if not record.event_type.startswith(_PREFIX):
-                    continue
-
-                considered += 1
-
-                payload = json.loads(record.payload)
-
-                if not payload.get("publishable"):
-                    continue
-
-                setups.append(
-                    RankableSetup(
-                        symbol=symbol,
-                        timeframe=timeframe,
-                        confidence=Decimal(str(payload["confidence"])),
-                        archetype=_archetype_of(payload, symbol),
-                        tier=tier,
-                        direction=record.event_type.removeprefix(_PREFIX),
-                    )
-                )
-
-        ordered = rank(setups)
-
-        rows = tuple(
+        board = tuple(
             RankedRow(
                 position=position,
                 setup=setup,
@@ -119,9 +95,9 @@ class RankingSnapshotService:
         return RankingSnapshot(
             timeframe=timeframe,
             at=at,
-            rows=rows,
-            considered=considered,
-            unpublished=considered - len(setups),
+            rows=board,
+            gate_passers=len(rows),
+            below_floor=len(rows) - len(published),
         )
 
     async def _tier(self, symbol: str) -> UniverseTier:
@@ -137,17 +113,15 @@ class RankingSnapshotService:
         return state.tier if state is not None else UniverseTier.INELIGIBLE
 
 
-def _archetype_of(payload: dict[str, object], symbol: str) -> Archetype:
-    """The archetype a published candidate must carry.
+def _archetype_of(row: SetupRecord) -> Archetype:
+    """The archetype a published setup must carry.
 
-    §8.6 gives every archetype a confidence floor and `meets_floor` cannot
-    pass a candidate without one, so `publishable` and a missing archetype
-    cannot both be true. If they are, the record is contradictory and the
-    board should say so rather than invent a rank for it.
+    T16's own check constraint refuses `floor_passed` without one, so this
+    cannot fire against the table. It can fire against a fake or a future
+    reader of some other source, and a board should say a record is
+    contradictory rather than invent a rank for it.
     """
-    raw = payload.get("archetype")
+    if row.archetype is None:
+        raise ValueError(f"{row.symbol}: published setup carries no archetype")
 
-    if raw is None:
-        raise ValueError(f"{symbol}: publishable candidate carries no archetype")
-
-    return Archetype(raw)
+    return Archetype(row.archetype)
