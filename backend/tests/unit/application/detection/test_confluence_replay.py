@@ -269,8 +269,17 @@ def event(event_type: str, index: int = 1, **payload) -> EngineEventRecord:
     )
 
 
-def failed_break_event(index: int, direction: str) -> EngineEventRecord:
-    """§3.5's failed break, as `structure_replay` writes it."""
+def failed_break_event(
+    index: int,
+    direction: str,
+    recorded_index: int | None = None,
+) -> EngineEventRecord:
+    """§3.5's failed break, as `structure_replay` writes it.
+
+    `index` fixes when the failure happened. `recorded_index` is the offset the
+    payload was stamped with, which in production comes from whichever window
+    recorded it and never changes afterwards -- so the two can disagree.
+    """
     at = BASE + TF.duration * index
 
     return EngineEventRecord(
@@ -280,7 +289,13 @@ def failed_break_event(index: int, direction: str) -> EngineEventRecord:
         event_type=f"STRUCTURE_FAILED_BREAK_{direction}",
         event_at=at,
         algo_version="test",
-        payload=json.dumps({"failed": True, "failed_index": index, "direction": direction}),
+        payload=json.dumps(
+            {
+                "failed": True,
+                "failed_index": (index if recorded_index is None else recorded_index),
+                "direction": direction,
+            }
+        ),
         created_at=at,
     )
 
@@ -1308,6 +1323,83 @@ def series_with_displacement(*, at: int = 45, count: int = CANDLES) -> list:
     return out
 
 
+def impulse_then_pullback() -> list:
+    """A displaced impulse up, then a confirmed retracement -- §8.6 A3's shape.
+
+    Two external swings are the minimum for one leg and three for two, and
+    `k_ext = 5` needs five clear candles either side of each, which is why the
+    turns sit where they do. Verified against `segment_legs`: IMPULSE UP
+    11->43 with `displaced=True`, then RETRACEMENT DOWN 43->53 as the current
+    anchoring leg. The displacement candle is at 25, far enough back that
+    §8.2 G5's `displaced_recently` stays false and the pullback is a
+    retracement rather than counter-displacement.
+    """
+    levels = [1040 - 4 * i for i in range(11)]
+    levels += [1000 + 2 * i for i in range(1, 15)]
+    levels += [1054]
+    levels += [1054 + 2 * i for i in range(1, 18)]
+    levels += [levels[-1] - 4 * i for i in range(1, 11)]
+    levels += [levels[-1] + i for i in range(1, 8)]
+
+    out = []
+
+    for i, level in enumerate(levels):
+        previous = levels[i - 1] if i else level
+
+        out.append(
+            make_candle(
+                timeframe=TF,
+                open_time=BASE + TF.duration * i,
+                open_=Decimal(previous),
+                close=Decimal(level),
+                high=Decimal(max(previous, level)) + 1,
+                low=Decimal(min(previous, level)) - 1,
+                volume=Decimal(50),
+            )
+        )
+
+    return out
+
+
+@pytest.mark.asyncio
+async def test_a_displaced_break_inside_the_impulse_classifies_as_a3() -> None:
+    """§8.6 A3, which had never classified and had no test.
+
+    Its `displaced_bos` term asked whether any BOS fell inside the impulse leg
+    being retraced, and compared the leg's bounds -- offsets in the current
+    window -- against `break_index` from the event payload, an offset in
+    whichever window recorded the break. Two windows, one comparison.
+
+    No fixture in this suite ever put `break_index` in a BOS payload, so the
+    set was empty in every test and A3 could not classify; in production the
+    numbers were real but unrelated, so it classified by coincidence. Neither
+    is a rule.
+
+    Both sides are times now. The break here sits at index 30, inside the
+    11->43 impulse, and the current leg is the retracement off its high.
+    """
+    last_close = int(impulse_then_pullback()[-1].close)
+
+    setup = bullish_setup()
+    setup["events"] = [event("BOS_UP", 30, direction="UP")]
+    setup["zones"] = [
+        zone(
+            "ob",
+            band_low=Decimal(last_close - 1),
+            band_high=Decimal(last_close + 1),
+        )
+    ]
+
+    svc, _ = service(**setup, candles=impulse_then_pullback(), htf_trend="BULLISH")
+
+    report = await run(svc, "BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    assert up.gates_passed
+    assert up.archetype == "A3"
+
+
 @pytest.mark.asyncio
 async def test_a_fresh_displacement_fvg_at_price_classifies_as_a4() -> None:
     """§8.6 A4: displacement FVG, first touch in trend direction, HTF aligned.
@@ -1869,6 +1961,37 @@ async def test_an_old_failure_is_outside_the_window() -> None:
 
 
 @pytest.mark.asyncio
+async def test_an_old_failure_stamped_at_the_windows_edge_is_still_old() -> None:
+    """The clean-record window was `last_index - failed_index`, two windows apart.
+
+    `last_index` is the right edge of the window being scored. `failed_index`
+    is the offset the failure candle had in whichever window recorded it, and
+    failures are recorded as they happen -- at the right edge. So the
+    difference stays near zero however long ago the failure was, and every
+    failure ever recorded counted as inside the last twenty candles.
+
+    Unlike its siblings this one carries **no measurement**: the soak build
+    predates §3.5's detector and the VM holds zero of these events, so nothing
+    could be counted. The claim rests on the shape of the code, and is worth
+    re-checking against real events once the detector is deployed.
+
+    This failure is 25 candles back, outside the window, but stamped with the
+    edge index the way a real one is.
+    """
+    setup = bullish_setup()
+
+    stale_index = failed_break_event(CANDLES - 25, "UP", recorded_index=LAST_INDEX)
+
+    old, _ = service(**{**setup, "events": [*setup["events"], stale_index]})
+    clean, _ = service(**setup)
+
+    a = next(c for c in (await run(old, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(clean, "BULLISH")).candidates if c.direction == "UP")
+
+    assert a.factors["F1"] == b.factors["F1"]
+
+
+@pytest.mark.asyncio
 async def test_a_failure_the_other_way_is_not_against_this_direction() -> None:
     """A downward break failing does not undermine a long -- if anything it
     supports one, and §8.3.1 asks only about failures against D."""
@@ -2124,6 +2247,48 @@ async def test_no_scoring_input_is_structurally_unreadable() -> None:
     payload = json.loads(next(iter(repo.appended.values())).payload)
 
     assert "wash_risk" not in payload["unreachable_inputs"]
+
+
+@pytest.mark.asyncio
+async def test_a_break_on_this_candle_is_structural_and_an_older_one_is_not() -> None:
+    """§6.5(4)'s break disjunct, which could not distinguish the two.
+
+    `_bos_break_indices` read `break_index` out of the payload -- the break
+    candle's offset inside whichever window recorded the event, written once
+    and never revised -- and asked whether it equalled `last_index`, the right
+    edge of the window being scored. On the VM, 67 of 187 BOS events carry
+    `break_index = 500` and `last_index` is 500 on every pass, for both
+    scanned symbols, so the disjunct was permanently true. §6.5 exists to say
+    that "institutional volume at random locations is not evidence in this
+    doctrine", and this made every location structural.
+
+    Nothing in this suite caught it, for the opposite reason: no fixture ever
+    put `break_index` in a BOS payload, so `bos_breaks` was empty in every
+    test and the disjunct was permanently *false*. The production path and the
+    tested path never met.
+
+    `event_at` is the break candle's open time -- `structure_replay` stamps it
+    from the same candle it took the index from -- so the same question is
+    answerable without an offset, and answerable correctly.
+    """
+    setup = bullish_setup()
+
+    candles = make_series(last_volume="250", last_trades=40, last_taker_buy="200")
+    minutes = [_minute(0, "40")] + [_minute(300 * n, "1") for n in (1, 2, 3)]
+
+    old_break = {**setup, "events": [event("BOS_UP", 3, direction="UP")]}
+    break_here = {**setup, "events": [event("BOS_UP", LAST_INDEX, direction="UP")]}
+
+    stale, _ = service(**old_break, candles=candles, minutes=minutes)
+    fresh, _ = service(**break_here, candles=candles, minutes=minutes)
+
+    a = next(c for c in (await run(stale, "BULLISH")).candidates if c.direction == "UP")
+    b = next(c for c in (await run(fresh, "BULLISH")).candidates if c.direction == "UP")
+
+    # The same 15 points §6.7 pays for institutional volume, on the same tape.
+    # Only where the break happened separates them.
+    assert a.factors["F4"] == Decimal(65)
+    assert b.factors["F4"] == Decimal(80)
 
 
 @pytest.mark.asyncio
