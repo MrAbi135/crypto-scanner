@@ -144,30 +144,65 @@ draft a dataset; the developer owns the label.
 
 ## Coverage status
 
-| Engine | Datasets | Roadmap DoD | State |
-|---|---|---|---|
-| structure (S4) | 4 | ≥ 60 | clean swing, equal-extreme tie, flat-window absence, HH/HL classification |
-| liquidity (S5) | 3 | ≥ 50 | single-candle sweep, close-through break, two-candle sweep |
-| ict zones (S6) | 5 | ≥ 80 | FVG wick-fill progression, sub-filter rejection, bearish mirror, IFVG born UNPROVEN, BPR from live parents. **Only the FVG/IFVG/BPR pass is wired** — the order-block, OTE and interaction services have their own ports and land later, so a dataset expecting their output would silently see nothing. |
+Roadmap v2.0.0 §8.1 replaced the per-sprint case counts (≥ 60 structure, ≥ 50
+liquidity, …) with a coverage bar:
 
-### Detectors with no golden case yet
+> Every rule and every named edge case in the governing SLS section has at
+> least one golden case asserting it, and the mapping from SLS clause → dataset
+> is machine-checked in CI. A clause with no case fails the build.
 
-Breadth before depth: a detector with *zero* cases is more dangerous than one
-with three instead of sixty, because Constitution §32.3 says it may not ship at
-all. Current gaps, and what each needs:
+That map is `coverage.json`, and `test_golden.py` enforces it. **This section no
+longer states the numbers.** The previous version of it was a hand-maintained
+table, and it went stale — it described EQH/EQL clustering as having "no
+caller" long after the clustering was wired and producing pools in production.
+A record nobody is forced to update describes the repository it was written
+against.
 
-| Detector | Blocked on |
-|---|---|
-| BOS / CHoCH / MSS (§3.5–§3.6) | A series long enough to confirm three external swings per side (`k_ext = 5`), since the trend gate that arms BOS needs two consecutive HH/HL pairs — roughly 50+ hand-built candles |
-| Trend state machine (§3.4) | Same: no external swing has ever confirmed in a golden series |
-| Stop hunts (§4.7) | **Wired as of SLS v1.0.4**, and covered by a unit test that drives the real service — but **no golden case yet**. Building one needs a 300-candle series whose sweep is followed by a qualifying displacement, which also constrains `mean_body_20` (§5.10's denominator): flat filler makes it zero and displacement can never confirm. |
-| EQH/EQL clusters (§4.3) | **Unreachable, not merely unwritten.** `detect_equal_level_clusters` is implemented and unit-tested but has **no caller** outside `domain/liquidity/`. A golden case cannot observe a detector the engine never runs. Note §4.8 makes a cluster a *pool*, so no new table is needed — `LiquidityPool` already carries `PoolSource.CLUSTER` and `member_count`. See `docs/evidence/S5/CHECKLIST.md`. |
-| BPR §5.6 parent-liveness | The rule itself is **not enforced** — see `tests/unit/application/detection/test_bpr_parent_state_defect.py`, an `xfail(strict=True)` repro. A golden case cannot encode it until the ordering is fixed. |
-| Order blocks (§5.1), Breaker (§5.2), Mitigation (§5.3), OTE (§5.7), PD arrays | Their services (`ict_ob_replay`, `ict_ote_replay`, `ict_interaction_replay`) are not wired into the harness yet |
+To see where coverage actually stands:
 
-**All 12 datasets now declare 300 candles**, so every case satisfies the §1.9 warm-up count rather than running in a regime doctrine excludes. This is the beginning of that debt being paid, not the end of it.
-`run_dataset` raises on an unsupported `engine` value rather than skipping, so
-a dataset for an unwired engine fails loudly instead of passing vacuously.
+```bash
+uv run --project backend pytest backend/tests/golden -k gap_is_reported -s
+```
+
+### How the map stays honest
+
+Each rule in `coverage.json` is `covered` or `pending`, and `pending` requires
+a `blocked_on`. The check fails in **both** directions:
+
+- a rule marked `covered` that no dataset declares — a claim nobody is making;
+- a rule marked `pending` that a dataset *does* declare — the map going stale.
+
+So coverage can only move by editing the manifest in the same commit as the
+dataset. `test_coverage_check.py` proves each failure mode actually fires,
+because a check that cannot fail is the thing this mechanism exists to prevent.
+
+### Enumeration is itself incomplete
+
+Eight of the forty-five detection subsections have had their rules written out.
+The rest carry one stub entry marked `enumerated: false`, so the report
+distinguishes "0 of 1 stub" from "0 of 11 real rules" rather than flattering the
+gap. §8.1 makes enumerating a section the first task of its sprint.
+
+### Declaring rules on a dataset
+
+`sls_rules` is required and lists the rule ids the case asserts:
+
+```json
+"sls_sections": ["4.6"],
+"sls_rules": ["4.6-single-candle-sweep", "4.6-sweep-depth"],
+```
+
+An empty list is rejected by the loader: a case that names no rule is invisible
+to the bar.
+
+### What is not wired into the harness
+
+`run_dataset` raises on an unsupported `engine` rather than skipping, so a
+dataset for an unwired engine fails loudly instead of passing vacuously. Today
+that means **structure, liquidity, and the FVG/IFVG/BPR ICT pass** — the order
+block, OTE and interaction services have their own ports, and
+`participation_replay` and `confluence_replay` are not wired at all. Every
+`blocked_on` in the manifest names which of these stands in the way.
 
 ### Opaque identifiers
 

@@ -6,8 +6,8 @@ hand-writable: prices are strings, candles are terse, and nothing in the
 `expected` block requires the labeller to compute a hash or an id.
 
 Provenance is mandatory (Constitution §32.3-§32.4): every case records who
-labelled it, when, against which SLS sections, and — in `labelling_rationale`
-— *why* the expectation follows from doctrine. A dataset whose expectation was
+labelled it, when, against which SLS sections, and -- in `labelling_rationale`
+-- *why* the expectation follows from doctrine. A dataset whose expectation was
 produced by running the detector and pasting the result proves nothing; it
 can only ever agree with the code it was copied from. The rationale field is
 where that distinction is made visible to a reviewer.
@@ -33,6 +33,7 @@ _REQUIRED_TOP_LEVEL = (
     "dataset_id",
     "engine",
     "sls_sections",
+    "sls_rules",
     "description",
     "labelling_rationale",
     "labelled_by",
@@ -50,6 +51,7 @@ class GoldenDataset:
     dataset_id: str
     engine: str
     sls_sections: tuple[str, ...]
+    sls_rules: tuple[str, ...]
     description: str
     labelling_rationale: str
     labelled_by: str
@@ -99,6 +101,12 @@ def load_dataset(path: Path) -> GoldenDataset:
             "follows from the SLS. An unexplained expectation is not a label."
         )
 
+    if not raw["sls_rules"]:
+        raise ValueError(
+            f"{path.name}: sls_rules is empty. Roadmap §8.1 makes the clause -> dataset "
+            "mapping the coverage bar, and a case that names no rule is invisible to it."
+        )
+
     if not raw["sls_sections"]:
         raise ValueError(f"{path.name}: a dataset must cite at least one SLS section")
 
@@ -127,6 +135,7 @@ def load_dataset(path: Path) -> GoldenDataset:
         dataset_id=raw["dataset_id"],
         engine=raw["engine"],
         sls_sections=tuple(raw["sls_sections"]),
+        sls_rules=tuple(raw["sls_rules"]),
         description=raw["description"],
         labelling_rationale=raw["labelling_rationale"],
         labelled_by=raw["labelled_by"],
@@ -202,7 +211,7 @@ def _build_filler(
     Filler is deliberately *identical* candles: a flat window confirms no
     swing under §3.1 and opens no gap under §5.4, so the history satisfies the
     warm-up count without contributing a single detection of its own. What it
-    does contribute is true range — pick the filler's height to equal the
+    does contribute is true range -- pick the filler's height to equal the
     scenario's mean true range and the blended ATR stays exactly on the value
     the scenario was designed around.
     """

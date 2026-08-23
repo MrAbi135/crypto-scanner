@@ -84,6 +84,9 @@ def write_dataset(tmp_path: Path, **overrides: Any) -> Path:
         "dataset_id": "filler-fixture",
         "engine": "structure",
         "sls_sections": ["1.9", "3.1"],
+        # A synthetic fixture, so it claims no rule: the coverage map is
+        # about committed datasets, and a throwaway would inflate it.
+        "sls_rules": ["3.1-swing-high"],
         "description": "fixture",
         "labelling_rationale": "x" * 200,
         "labelled_by": "test",
