@@ -10,6 +10,8 @@ import pytest
 from scanner.application.marketdata.fake_volume_job import FakeVolumeJob
 from scanner.domain.common import TradeAggregate
 from scanner.domain.volume import WashRiskState
+from scanner.shared import Timeframe
+from tests.support.builders import make_candle
 
 DAY = datetime(2026, 8, 22, tzinfo=UTC)
 
@@ -35,6 +37,14 @@ class FakeTrades:
 
     async def list_between(self, symbol, start, end):
         return tuple(i for i in self.items if start <= i.minute < end)
+
+
+class FakeCandles:
+    def __init__(self, series: list | None = None) -> None:
+        self.series = series or []
+
+    async def fetch_series(self, symbol, timeframe, start, end):
+        return tuple(c for c in self.series if start <= c.open_time < end)
 
 
 class FakeCounts:
@@ -63,8 +73,9 @@ def _job(**kwargs):
     symbols = kwargs.pop("symbols", FakeSymbols())
     trades = kwargs.pop("trades", FakeTrades())
     counts = kwargs.pop("counts", FakeCounts())
+    candles = kwargs.pop("candles", FakeCandles())
 
-    return FakeVolumeJob(symbols, trades, counts), symbols  # type: ignore[arg-type]
+    return FakeVolumeJob(symbols, trades, candles, counts), symbols  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
@@ -95,19 +106,42 @@ async def test_two_failing_tests_tag_the_symbol() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_round_trip_test_uses_the_day_the_caller_supplies() -> None:
-    job, _ = _job(counts=FakeCounts(9))
-
-    report = await job.run_symbol(
-        "BTCUSDT",
-        DAY,
-        daily_delta=Decimal(1),
-        daily_volume=Decimal(1000),
-        rvol_elevated=True,
+async def test_a_symmetric_busy_day_is_read_from_stored_candles() -> None:
+    """§6.6(2) is summed rather than fetched as a D1 bar: volume and taker-buy
+    volume are additive, and the ingest does not subscribe to D1."""
+    job, _ = _job(
+        counts=FakeCounts(9),
+        candles=FakeCandles(_quiet_days() + _balanced_day(volume="500")),
     )
+
+    report = await job.run_symbol("BTCUSDT", DAY)
 
     assert report.tests.round_trip_symmetry is True
     assert report.tagged_today
+
+
+@pytest.mark.asyncio
+async def test_the_same_symmetry_on_an_ordinary_day_does_not_trip() -> None:
+    """Without elevated volume it is a quiet day, not a wash loop."""
+    job, _ = _job(
+        counts=FakeCounts(9),
+        candles=FakeCandles(_quiet_days() + _balanced_day(volume="100")),
+    )
+
+    report = await job.run_symbol("BTCUSDT", DAY)
+
+    assert report.tests.round_trip_symmetry is False
+    assert not report.tagged_today
+
+
+@pytest.mark.asyncio
+async def test_a_day_with_no_stored_candles_has_no_reading() -> None:
+    """Not a symmetric tape -- no tape."""
+    job, _ = _job(candles=FakeCandles(_quiet_days()))
+
+    report = await job.run_symbol("BTCUSDT", DAY)
+
+    assert report.tests.round_trip_symmetry is None
 
 
 @pytest.mark.asyncio
@@ -132,3 +166,26 @@ async def test_a_clean_day_walks_the_hysteresis_down() -> None:
 
     assert not report.tagged_today
     assert symbols.saved == [WashRiskState(False, 0)]
+
+
+def _candle(open_time, volume: str, taker_buy: str):
+    return make_candle(
+        timeframe=Timeframe.M5,
+        open_time=open_time,
+        open_=Decimal(100),
+        close=Decimal(100),
+        volume=Decimal(volume),
+        taker_buy_volume=Decimal(taker_buy),
+    )
+
+
+def _quiet_days() -> list:
+    """Twenty prior days at 100 units each, so the baseline median is 100."""
+    return [_candle(DAY - timedelta(days=back), "100", "50") for back in range(1, 21)]
+
+
+def _balanced_day(*, volume: str) -> list:
+    """One candle on the scored day, taker-balanced so |delta| is zero."""
+    half = Decimal(volume) / 2
+
+    return [_candle(DAY, volume, str(half))]
