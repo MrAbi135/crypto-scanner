@@ -9,7 +9,7 @@
   ],
   "description": "The break holds for three candles and price closes back on the fourth. Outside \u00a73.5's window, so no failure is recorded.",
   "labelling_rationale": "The failed-break case, with the close-back moved outside the window.\n\n\u00a73.5: 'a failed break is recorded (fact, not deletion) if within P.structure.failed_break_candles = 3 closed candles price closes back beyond the broken level in the opposite direction'.\n\ns4-a-break-that-fails-is-recorded-not-erased puts the close-back on the very next candle and records the failure. This one holds above the level for three candles -- 302, 303 and 304 close at 68, 69 and 68 -- and only on 305, the fourth, closes back at 66.\n\nThree closed candles have passed, so the window is shut. No STRUCTURE_FAILED_BREAK_UP is recorded, and the BOS at 301 stands alone.\n\nThis is the boundary its sibling cannot test. A window implemented as `<= 4` or as `elapsed < 4` rather than `elapsed <= 3` passes every case where the failure is prompt and fails only here.",
-  "labelled_by": "drafted by Claude Opus 5 2026-08-23 from SLS 0.4/3.5; PENDING DEVELOPER VERIFICATION -- same method and the same parent series as the five signed off on 2026-08-23",
+  "labelled_by": "drafted by Claude Opus 5 2026-08-23 from SLS 0.4/3.5; VERIFIED by developer 2026-08-23 -- the rule each case turns on was confirmed in plain terms before signing. Per-candle arithmetic rests on the generator's assertions and on the parent series this one extends, as with its five siblings.",
   "labelled_at": "2026-08-23",
   "algo_version": "s4-v6",
   "symbol": "GOLDENWIN",
