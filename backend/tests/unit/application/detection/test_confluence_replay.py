@@ -318,10 +318,19 @@ def zone(
     grade: str = "OB_A",
     state: str = "FRESH",
     confirmed_index: int = 5,
+    created_at: datetime | None = None,
     band_low: Decimal | None = None,
     band_high: Decimal | None = None,
     evidence: str = "{}",
 ) -> IctZoneRecord:
+    # A zone confirmed at index N was created by the candle at index N, and
+    # §5.4 stamps an FVG with that candle's close time. Defaulting the two to
+    # agree keeps a fixture from claiming to be recent by its index while its
+    # timestamp says otherwise -- which is the state the real table was in,
+    # and what `test_a_zone_older_than_its_index_claims...` is about.
+    if created_at is None:
+        created_at = BASE + TF.duration * (confirmed_index + 1)
+
     return IctZoneRecord(
         zone_id=zone_id,
         symbol="BTCUSDT",
@@ -336,8 +345,8 @@ def zone(
         refined_high=None,
         created_index=confirmed_index,
         confirmed_index=confirmed_index,
-        created_at=BASE,
-        updated_at=BASE,
+        created_at=created_at,
+        updated_at=created_at,
         parent_zone_id=None,
         dealing_range_id=None,
         stale_context=False,
@@ -359,7 +368,7 @@ def sweep(
     side: str = "SSL",
     liquidity_class: str = "EXTERNAL",
     confirmed_index: int = RECENT_SWEEP,
-    expiry_index: int | None = None,
+    recorded_index: int | None = None,
     reclaimed: bool = False,
     depth_atr: str = "0.9",
 ) -> LiquidityEvidenceRecord:
@@ -369,15 +378,24 @@ def sweep(
         to_state="SWEPT",
         reason="liquidity_sweep",
         transitioned_at=BASE + TF.duration * confirmed_index,
-        candle_index=confirmed_index,
+        # `confirmed_index` fixes when the sweep happened. `recorded_index` is
+        # the offset the row was stamped with, which in production comes from
+        # whichever window recorded it and then never changes -- so the two
+        # can disagree, and on the VM they overwhelmingly do.
+        candle_index=(confirmed_index if recorded_index is None else recorded_index),
         evidence=json.dumps(
             {
                 "side": side,
                 "liquidity_class": liquidity_class,
                 "sweep_depth_atr": depth_atr,
                 "reclaimed": reclaimed,
+                # Still written, because the liquidity engine writes it --
+                # but nothing reads it now, and no test may set it
+                # independently of `confirmed_index`. Expressing a sweep's age
+                # through this number instead of its timestamp is the defect,
+                # not a way to describe one.
                 "setup_expiry_index": (
-                    confirmed_index + 15 if expiry_index is None else expiry_index
+                    (confirmed_index if recorded_index is None else recorded_index) + 15
                 ),
             }
         ),
@@ -606,12 +624,51 @@ async def test_a_stale_mss_does_not_clear_g2_by_itself() -> None:
 async def test_a_sweep_past_its_setup_expiry_no_longer_seeds_a_reversal() -> None:
     """§4.6: relevance expires 15 closed candles after confirmation.
 
-    The liquidity engine stamps `setup_expiry_index` on every sweep. Nothing was
-    reading it, so a sweep from the far end of an 1849-candle replay counted as
-    present evidence of current flow.
+    Nothing read the expiry at all once, so a sweep from the far end of an
+    1849-candle replay counted as present evidence of current flow. Then it
+    was read as `last_index <= setup_expiry_index`, and both of those are
+    offsets in windows that had long since parted company -- 78,265 of the
+    87,605 sweeps on the VM carried an expiry below the window's right edge
+    and so were dead on arrival, and the rest could never expire.
+
+    It is counted in time now, and this sweep is 59 candles behind the one
+    being scored.
     """
     setup = bullish_setup()
-    setup["liquidity"] = [sweep(confirmed_index=1, expiry_index=LAST_INDEX - 1)]
+    setup["liquidity"] = [sweep(confirmed_index=1)]
+    setup["events"] = [e for e in setup["events"] if e.event_type != "MSS_UP"]
+
+    svc, _ = service(**setup)
+
+    report = await run(svc, trend_state="BEARISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    assert not up.gates_passed
+
+
+@pytest.mark.asyncio
+async def test_a_sweep_whose_index_says_live_but_whose_clock_says_expired() -> None:
+    """The state nearly every sweep on the VM is actually in.
+
+    Liveness was `last_index <= setup_expiry_index`. `last_index` is the right
+    edge of the current 500-candle window, always. `setup_expiry_index` is
+    `confirmed_index + 15` computed in whichever window first saw the sweep,
+    and nothing rewrites it. A sweep confirmed at the right edge is stamped
+    with an expiry fifteen candles *past* the edge, and since the edge is
+    where the comparison always stands, it stays live for the rest of time.
+
+    Measured on the soak VM over 87,605 sweep transitions: 78,265 carry an
+    expiry below 500 -- dead from the moment they were written, whatever
+    their age -- and the remaining 9,340 sit at or above it and can never
+    expire. Not one of them was ever fifteen candles from anything.
+
+    This sweep happened 40 candles ago, well past §4.6's fifteen, and carries
+    an index from a window that has long since moved on. It is expired, and
+    only the clock can say so.
+    """
+    setup = bullish_setup()
+    setup["liquidity"] = [sweep(confirmed_index=LAST_INDEX - 40, recorded_index=LAST_INDEX)]
     setup["events"] = [e for e in setup["events"] if e.event_type != "MSS_UP"]
 
     svc, _ = service(**setup)
@@ -851,7 +908,7 @@ async def test_an_expired_sweep_pays_nothing_at_all() -> None:
     """`supporting` drops it before scoring, so no term survives it."""
     setup = bullish_setup()
 
-    expired, _ = service(**{**setup, "liquidity": [sweep(expiry_index=0)]})
+    expired, _ = service(**{**setup, "liquidity": [sweep(confirmed_index=0)]})
     without, _ = service(**{**setup, "liquidity": []})
 
     a = next(c for c in (await run(expired, "BULLISH")).candidates if c.direction == "UP")
@@ -1273,6 +1330,55 @@ async def test_a_fresh_displacement_fvg_at_price_classifies_as_a4() -> None:
 
     assert up.gates_passed
     assert up.archetype == "A4"
+
+
+@pytest.mark.asyncio
+async def test_a_zone_older_than_its_index_claims_is_too_old_for_a4() -> None:
+    """A4's age gate read two numbers from two different windows.
+
+    `fvg_age_candles` was `max(0, last_index - confirmed_index)`. `last_index`
+    is the right edge of the current 500-candle window. `confirmed_index` is
+    the offset the zone had when it was first detected -- and the zone upsert
+    does not list that column in its `set_` clause, so it is written once and
+    never moves. A zone is almost always detected at the right edge, so the
+    subtraction returned nearly zero no matter how long the zone had been
+    sitting there.
+
+    Measured on the soak VM across 6,388 non-terminal FVG zones: the gate
+    `fvg_age_candles <= 30` admitted 982, where the age implied by their
+    timestamps admits 227. The oldest zone was 690 candles old and read as
+    200 -- and 690 is past the window, so no index could have described it.
+
+    The zone here is the A4 fixture with one thing changed: its index still
+    says 13 candles back, its timestamp says it formed before the window
+    opened. It is too old for A4, and only the timestamp can say so.
+    """
+    setup = bullish_setup()
+    setup["zones"] = [
+        zone(
+            "fvg",
+            zone_type="FVG",
+            grade="FVG",
+            state="OPEN",
+            confirmed_index=46,
+            created_at=BASE - TF.duration * 40,
+        )
+    ]
+
+    svc, _ = service(
+        **setup,
+        candles=series_with_displacement(),
+        htf_trend="BULLISH",
+    )
+
+    report = await run(svc, "BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    # Everything else about it still qualifies -- G4 passed, the displacement
+    # is there, it is a first touch. Age alone disqualifies it.
+    assert up.gates_passed
+    assert up.archetype is None
 
 
 @pytest.mark.asyncio

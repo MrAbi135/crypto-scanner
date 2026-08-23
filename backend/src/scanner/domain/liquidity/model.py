@@ -7,6 +7,10 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 
+# §4.6: "a sweep's setup relevance expires P.liquidity.sweep_expiry = 15
+# closed candles after confirmation".
+SWEEP_SETUP_EXPIRY_CANDLES = 15
+
 
 class LiquiditySide(str, Enum):
     BSL = "BSL"
@@ -111,7 +115,7 @@ class SweepEvent:
 
     @property
     def setup_expiry_index(self) -> int:
-        return self.confirmed_index + 15
+        return self.confirmed_index + SWEEP_SETUP_EXPIRY_CANDLES
 
 
 @dataclass(frozen=True, slots=True)
