@@ -35,6 +35,7 @@ from scanner.application.detection.structure_events import (
     read_classification,
 )
 from scanner.application.marketdata.contexts import higher_timeframe
+from scanner.application.parameters import PARAM_SET_VERSION
 from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.detection import (
     EngineEventRecord,
@@ -54,10 +55,12 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRepository,
 )
 from scanner.application.ports.repositories import (
+    IncidentRepository,
     SymbolRepository,
     TradeAggregateRepository,
 )
 from scanner.application.ports.setups import SetupRecord, SetupRepository
+from scanner.application.ports.signals import SignalRecord, SignalRepository
 from scanner.domain.common import (
     TOLERANCE_ATR,
     Candle,
@@ -76,12 +79,16 @@ from scanner.domain.confluence import (
     GateEvidence,
     LiquidityEvidence,
     MomentumEvidence,
+    SignalLevels,
     StructureEvidence,
+    TargetBand,
     ZoneEvidence,
     classify_archetype,
+    entry_zone,
     evaluate_gates,
     final_confidence,
     htf_alignment_factor,
+    invalidation_for,
     liquidity_factor,
     meets_floor,
     momentum_factor,
@@ -97,6 +104,7 @@ from scanner.domain.ict import (
     detect_displacement,
     evaluate_pd_context,
 )
+from scanner.domain.lifecycle import SignalPayload, publication_checks
 from scanner.domain.liquidity import SWEEP_SETUP_EXPIRY_CANDLES
 from scanner.domain.momentum import (
     Leg,
@@ -106,6 +114,7 @@ from scanner.domain.momentum import (
     momentum_score,
     segment_legs,
 )
+from scanner.domain.ranking import ttl_candles
 from scanner.domain.structure import (
     StructureLabel,
     SwingPoint,
@@ -129,7 +138,7 @@ from scanner.domain.volume import (
 )
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v20"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v21"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -252,6 +261,22 @@ class SetupCandidate:
     # bonuses and penalties produced it cannot be recalibrated against later.
     # None for a candidate that failed gates and was never scored.
     breakdown: Confidence | None = None
+
+    # §15.2's three priced rows. None when the candidate is not publishable,
+    # or when its archetype wants a swept extreme and none was recorded --
+    # §15.3 then refuses it rather than a level being invented.
+    levels: SignalLevels | None = None
+
+    # §15.2's snapshot, assembled where every input is still in scope.
+    # None whenever the candidate cannot publish, so `_publish` has
+    # nothing to guess at.
+    payload: SignalPayload | None = None
+
+    # §2.15 flags a zone formed across a DEGRADED gap. §15.3(2) refuses a
+    # payload whose evidence chain contains one, so the flag has to travel
+    # with the candidate rather than be re-read from a zone the publisher
+    # no longer holds.
+    stale_context: bool = False
     zone_id: str | None = None
     unreachable: tuple[str, ...] = ()
 
@@ -286,6 +311,8 @@ class ConfluenceReplayService:
         shift_algo_version: str,
         algo_version: str = CONFLUENCE_ALGO_VERSION,
         setups: SetupRepository | None = None,
+        signals: SignalRepository | None = None,
+        incidents: IncidentRepository | None = None,
     ) -> None:
         self._candles = candles
         self._events = events
@@ -300,6 +327,8 @@ class ConfluenceReplayService:
         self._shift_algo_version = shift_algo_version
         self._algo_version = algo_version
         self._setups = setups
+        self._signals = signals
+        self._incidents = incidents
 
     async def run(
         self,
@@ -725,6 +754,40 @@ class ConfluenceReplayService:
             and meets_floor(archetype, confidence.final)
         )
 
+        levels = (
+            _levels_for(
+                archetype,
+                direction=direction,
+                zone=best_zone,
+                swept_extreme=best_sweep.reference_level if best_sweep else None,
+                target_pool=target_pool,
+                pd=pd,
+            )
+            if publishable and archetype is not None
+            else None
+        )
+
+        payload = (
+            _payload_for(
+                symbol=symbol,
+                timeframe=timeframe,
+                direction=direction,
+                archetype=archetype,
+                confidence=confidence,
+                factors=factors,
+                levels=levels,
+                atr=atr,
+                price=price,
+                htf=htf,
+                zone=best_zone,
+                wash_risk=wash_risk,
+                reading=reading,
+                algo_version=self._algo_version,
+            )
+            if levels is not None and archetype is not None
+            else None
+        )
+
         return SetupCandidate(
             symbol=symbol,
             timeframe=timeframe,
@@ -740,6 +803,9 @@ class ConfluenceReplayService:
                 f.value: item.contributions for f, item in scored.items() if item.contributions
             },
             breakdown=confidence,
+            levels=levels,
+            payload=payload,
+            stale_context=best_zone.stale_context,
             zone_id=best_zone.zone_id,
             unreachable=_unreachable(htf, pd),
         )
@@ -806,8 +872,151 @@ class ConfluenceReplayService:
         )
 
         await self._store_setup(symbol, timeframe, event_at, candidate)
+        await self._publish(symbol, timeframe, event_at, candidate)
 
         return 1 if inserted else 0
+
+    async def _publish(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        event_at: datetime,
+        candidate: SetupCandidate,
+    ) -> None:
+        """§12.2: evaluate §15.3 once, atomically, and publish or suppress.
+
+        A candidate with no payload never reaches here as a publication: it
+        either failed the gates, missed its floor, or could not fill a §15.2
+        row. All three are already recorded — the event log has the candidate
+        and T16 has the scored one — so there is nothing further to say.
+        """
+        if self._signals is None or candidate.payload is None:
+            return
+
+        payload = candidate.payload
+
+        decision = publication_checks(
+            payload,
+            feeds_fresh=await self._feeds_clean(symbol, candidate),
+            dedup_clear=await self._dedup_clear(payload, timeframe, event_at),
+        )
+
+        if not decision.published:
+            # §12.2: "Fail => SUPPRESSED with recorded reason (auditable
+            # funnel: candidates -> published is a monitored ratio, §14)".
+            # The reason rides on the event log rather than T17, because T17
+            # holds published signals and a suppression is the absence of one.
+            await self._events.append(
+                EngineEventRecord(
+                    event_key=build_event_key(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        event_type=f"SIGNAL_SUPPRESSED_{candidate.direction}",
+                        event_at=event_at,
+                        algo_version=self._algo_version,
+                    ),
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    event_type=f"SIGNAL_SUPPRESSED_{candidate.direction}",
+                    event_at=event_at,
+                    algo_version=self._algo_version,
+                    payload=json.dumps(
+                        {"reasons": [r.value for r in decision.reasons]},
+                        sort_keys=True,
+                    ),
+                    created_at=self._clock.now(),
+                )
+            )
+
+            return
+
+        levels = payload.levels
+
+        await self._signals.append(
+            SignalRecord(
+                signal_id=_setup_id(
+                    symbol,
+                    timeframe,
+                    candidate.direction,
+                    event_at,
+                    self._algo_version,
+                ),
+                setup_id=_setup_id(
+                    symbol,
+                    timeframe,
+                    candidate.direction,
+                    event_at,
+                    self._algo_version,
+                ),
+                symbol=symbol,
+                timeframe=timeframe,
+                direction=candidate.direction,
+                archetype=payload.archetype,
+                grade=payload.grade,
+                final_confidence=payload.confidence,
+                entry_proximal=levels.entry.proximal,
+                entry_distal=levels.entry.distal,
+                invalidation_level=levels.invalidation.price,
+                target_bands=json.dumps(
+                    payload.as_dict()["targets"], sort_keys=True, separators=(",", ":")
+                ),
+                published_at=event_at,
+                ttl_candles=ttl_candles(timeframe),
+                algo_version=self._algo_version,
+                param_set_version=payload.param_set_version,
+                payload=json.dumps(payload.as_dict(), sort_keys=True, separators=(",", ":")),
+                payload_hash=payload.seal(),
+                dedup_key=payload.dedup_key(),
+            )
+        )
+
+    async def _feeds_clean(self, symbol: str, candidate: SetupCandidate) -> bool:
+        """§15.3(2): "all feeds fresh at publish moment; no DEGRADED input in
+        the evidence chain".
+
+        Two claims, and both are checkable here. An open incident on the
+        symbol is the feed not being clean (§2.15), and a zone carrying
+        `stale_context` is a DEGRADED input that reached the chain -- §2.15
+        flags exactly that on anything formed across a gap.
+
+        G1's `data_ready` is *not* reused for this. Its own comment admits it
+        is partial -- it checks the warm-up and says freshness is still owed --
+        so treating it as freshness would have made §15.3(2) a check that
+        could not fail.
+        """
+        if candidate.stale_context:
+            return False
+
+        if self._incidents is None:
+            return True
+
+        return not await self._incidents.list_open(symbol)
+
+    async def _dedup_clear(
+        self,
+        payload: SignalPayload,
+        timeframe: Timeframe,
+        at: datetime,
+    ) -> bool:
+        """§15.3(4): "dedup key clear (§10.3)".
+
+        Clear means no signal on this key is still inside its TTL. §10.3 only
+        merges against an *ACTIVE* signal, so a key that produced a signal
+        long enough ago for it to have expired is free again -- which is why
+        the query returns the latest row and the TTL arithmetic happens here
+        rather than in SQL.
+        """
+        if self._signals is None:
+            return True
+
+        latest = await self._signals.latest_for_dedup_key(payload.dedup_key())
+
+        if latest is None:
+            return True
+
+        elapsed = at - latest.published_at
+
+        return elapsed >= timeframe.duration * latest.ttl_candles
 
     async def _store_setup(
         self,
@@ -1100,6 +1309,191 @@ def _setup_id(
     )
 
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _payload_for(
+    *,
+    symbol: str,
+    timeframe: Timeframe,
+    direction: str,
+    archetype: Archetype,
+    confidence: Confidence,
+    factors: dict[Factor, Decimal],
+    levels: SignalLevels,
+    atr: Decimal | None,
+    price: Decimal,
+    htf: str | None,
+    zone: IctZoneRecord,
+    wash_risk: bool,
+    reading: _Reading,
+    algo_version: str,
+) -> SignalPayload | None:
+    """§15.2's nine rows, assembled where every input is still in scope.
+
+    Returns None when the risk row cannot be filled: §15.2 wants the
+    invalidation distance "in ATR and %", and without an ATR there is no ATR
+    distance to state. §15.3 would refuse the payload anyway; refusing to
+    build it says the same thing one step earlier and without a zero standing
+    in for a measurement nobody took.
+    """
+    if atr is None or atr <= 0 or price <= 0:
+        return None
+
+    multiple = levels.r_multiple
+
+    if multiple is None:
+        return None
+
+    distance = abs(levels.entry.mid - levels.invalidation.price)
+
+    return SignalPayload(
+        symbol=symbol,
+        timeframe=timeframe.value,
+        direction=direction,
+        # §15.2's "complete event-id chain". The attribution trees carry the
+        # evidence id behind each scored contribution, which is the chain §8
+        # actually built; the zone is added because §15.2 names zones
+        # separately and a zone with no interaction contributes no id.
+        evidence_ids=(zone.zone_id,),
+        confidence=confidence.final,
+        grade=confidence.published_grade.value if confidence.published_grade else "",
+        factors={f.value: str(score) for f, score in factors.items()},
+        archetype=archetype.value,
+        reason=_reason(archetype, direction),
+        invalidation_distance_atr=distance / atr,
+        invalidation_distance_pct=distance / price * Decimal(100),
+        r_multiple=multiple,
+        condition_tags=_condition_tags(wash_risk=wash_risk, reading=reading),
+        levels=levels,
+        # §15.2's "HTF bias chain states at creation (snapshot)". RANGING when
+        # the rung above has no state, which is what §8.4's F6 reads too --
+        # and the record says so rather than omitting the row.
+        htf_chain={
+            timeframe.value: "SIGNAL",
+            "HTF": htf if htf is not None else TrendState.RANGING.value,
+        },
+        algo_version=algo_version,
+        param_set_version=PARAM_SET_VERSION,
+    )
+
+
+def _reason(archetype: Archetype, direction: str) -> str:
+    """§15.2's "deterministic reason string (template, human-readable)".
+
+    Deterministic is the operative word: the same archetype and direction
+    always produce the same sentence, so two signals that differ in their text
+    differ in their evidence. §11's AI thesis is the interpretive one and is
+    written separately, against its own version pair.
+    """
+    side = "long" if direction == "UP" else "short"
+
+    return f"{archetype.value} {side}: {_ARCHETYPE_SENTENCE[archetype]}"
+
+
+_ARCHETYPE_SENTENCE: dict[Archetype, str] = {
+    Archetype.SWEEP_REVERSAL: "external sweep, then a shift, retested at its origin zone.",
+    Archetype.BREAKER_RETEST: "a breaker held on its first retest.",
+    Archetype.CONTINUATION_PULLBACK: "trend with a displaced break, retraced into the zone.",
+    Archetype.FVG_CONTINUATION: "first touch of a displacement gap in the trend direction.",
+    Archetype.RANGE_LIQUIDITY_PLAY: "range extreme swept and rejected.",
+}
+
+
+def _condition_tags(*, wash_risk: bool, reading: _Reading) -> tuple[str, ...]:
+    """§15.2's "market-condition tags (wash_risk, funding extreme, exhaustion_watch, news_risk)".
+
+    Only the two this engine can establish are emitted. Funding and news come
+    from feeds the detection stack does not read, and a tag list that always
+    omitted them silently would read as "checked and clear".
+    """
+    tags = []
+
+    if wash_risk:
+        tags.append("wash_risk")
+
+    if reading.exhausted:
+        tags.append("exhaustion_watch")
+
+    return tuple(tags)
+
+
+def _levels_for(
+    archetype: Archetype,
+    *,
+    direction: str,
+    zone: IctZoneRecord,
+    swept_extreme: Decimal | None,
+    target_pool: LiquidityPoolRecord | None,
+    pd: PdContext | None,
+) -> SignalLevels | None:
+    """§15.2's entry, invalidation and targets for one candidate.
+
+    Returns None when a required row cannot be filled. §15.3(1) wants every
+    field non-null, so an absent target or an A1 with no recorded swept
+    extreme is a signal that must not publish -- and inventing either would
+    hand a trader a level the doctrine never derived.
+    """
+    entry = entry_zone(
+        zone_id=zone.zone_id,
+        direction=direction,
+        band_low=zone.band_low,
+        band_high=zone.band_high,
+        refined_low=zone.refined_low,
+        refined_high=zone.refined_high,
+    )
+
+    invalidation = invalidation_for(
+        archetype,
+        entry=entry,
+        swept_extreme=swept_extreme,
+    )
+
+    if invalidation is None:
+        return None
+
+    primary = _primary_target(archetype, direction=direction, pool=target_pool, pd=pd)
+
+    if primary is None:
+        return None
+
+    return SignalLevels(
+        direction=direction,
+        entry=entry,
+        invalidation=invalidation,
+        primary_target=primary,
+    )
+
+
+def _primary_target(
+    archetype: Archetype,
+    *,
+    direction: str,
+    pool: LiquidityPoolRecord | None,
+    pd: PdContext | None,
+) -> TargetBand | None:
+    """§15.2's "nearest opposing external liquidity pool band", except for A5.
+
+    §8.6 gives A5 its own: "Target = opposing range extreme". The archetype's
+    own row wins over the general rule, and reading only §15.2 would send a
+    range play at a pool that has nothing to do with the range it is playing.
+    """
+    if archetype is Archetype.RANGE_LIQUIDITY_PLAY:
+        if pd is None:
+            return None
+
+        extreme = pd.range_high if direction == "UP" else pd.range_low
+
+        return TargetBand(low=extreme, high=extreme)
+
+    if pool is None:
+        return None
+
+    return TargetBand(
+        low=pool.band_low,
+        high=pool.band_high,
+        pool_id=pool.pool_id,
+        strength=pool.strength,
+    )
 
 
 def _age_in_candles(

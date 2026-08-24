@@ -53,10 +53,12 @@ from scanner.infrastructure.persistence.liquidity_detection_repositories import 
 )
 from scanner.infrastructure.persistence.repositories import (
     PgCandleRepository,
+    PgIncidentRepository,
     PgSymbolRepository,
     PgTradeAggregateRepository,
 )
 from scanner.infrastructure.persistence.setup_repository import PgSetupRepository
+from scanner.infrastructure.persistence.signal_repository import PgSignalRepository
 from scanner.infrastructure.redis.engine_state import RedisEngineStateStore
 from scanner.infrastructure.redis.ict_zone_state import RedisIctZoneStateStore
 from scanner.infrastructure.redis.liquidity_state import RedisLiquidityStateStore
@@ -159,5 +161,7 @@ def build_detection_pipeline(
             ),
             shift_algo_version=STRUCTURE_SHIFT_ALGO_VERSION,
             setups=PgSetupRepository(sessions),
+            signals=PgSignalRepository(sessions),
+            incidents=PgIncidentRepository(sessions),
         ),
     )

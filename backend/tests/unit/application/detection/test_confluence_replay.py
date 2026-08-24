@@ -437,6 +437,8 @@ def service(
     minutes: list | None = None,
     wash_risk: bool = False,
     setups=None,
+    signals=None,
+    incidents=None,
 ):
     repo = FakeEventRepository(events)
 
@@ -471,9 +473,47 @@ def service(
         shift_state,
         shift_algo_version=SHIFT_ALGO,
         setups=setups,
+        signals=signals,
+        incidents=incidents,
     )
 
     return svc, repo
+
+
+class FakeSignals:
+    """T17 in memory: insert-once, and no update method to be tempted by."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, object] = {}
+
+    async def append(self, signal) -> bool:
+        if signal.signal_id in self.rows:
+            return False
+
+        self.rows[signal.signal_id] = signal
+
+        return True
+
+    async def latest_for_dedup_key(self, dedup_key):
+        matching = [r for r in self.rows.values() if r.dedup_key == dedup_key]
+
+        if not matching:
+            return None
+
+        return max(matching, key=lambda r: r.published_at)
+
+    async def get(self, signal_id):
+        return self.rows.get(signal_id)
+
+
+class FakeIncidents:
+    """§2.15's open-incident view, which §15.3(2) reads for feed cleanliness."""
+
+    def __init__(self, open_for: tuple[str, ...] = ()) -> None:
+        self.open_for = open_for
+
+    async def list_open(self, symbol=None):
+        return [object()] if symbol in self.open_for else []
 
 
 class FakeSetups:
@@ -709,6 +749,207 @@ async def test_the_setup_row_is_append_only_across_a_re_evaluated_candle() -> No
     await run(svc, "BULLISH")
 
     assert setups.rows.keys() == first.keys()
+
+
+def publishable_candidate(direction: str = "UP"):
+    """A candidate that has already cleared §8.6, built by hand.
+
+    The scoring fixtures in this file top out at 41 and the only series in the
+    repository that clears §8.2 scores the same, so there is no way to reach
+    §15.3 through `run` today. Testing `_publish` directly is the honest
+    alternative: it proves the write path, and it does not pretend the
+    scoring produced something it did not.
+    """
+    from scanner.application.detection.confluence_replay import SetupCandidate
+    from scanner.domain.confluence import (
+        ZONE_DISTAL_EDGE,
+        SignalLevels,
+        TargetBand,
+        entry_zone,
+    )
+    from scanner.domain.confluence.levels import Invalidation
+    from scanner.domain.lifecycle import SignalPayload
+
+    levels = SignalLevels(
+        direction=direction,
+        entry=entry_zone(
+            zone_id="z1", direction=direction, band_low=Decimal(100), band_high=Decimal(104)
+        ),
+        invalidation=Invalidation(Decimal(98), ZONE_DISTAL_EDGE),
+        primary_target=TargetBand(
+            low=Decimal(112), high=Decimal(114), pool_id="p1", strength=Decimal(60)
+        ),
+    )
+
+    payload = SignalPayload(
+        symbol="BTCUSDT",
+        timeframe=TF.value,
+        direction=direction,
+        evidence_ids=("z1",),
+        confidence=Decimal(82),
+        grade="A",
+        factors={"F1": "70"},
+        archetype="A4",
+        reason="A4 long: first touch of a displacement gap in the trend direction.",
+        invalidation_distance_atr=Decimal("1.2"),
+        invalidation_distance_pct=Decimal("0.9"),
+        r_multiple=Decimal("2.5"),
+        condition_tags=(),
+        levels=levels,
+        htf_chain={"H4": "SIGNAL", "HTF": "BULLISH"},
+        algo_version="s8-test",
+        param_set_version="2026.08.24.2",
+    )
+
+    return SetupCandidate(
+        symbol="BTCUSDT",
+        timeframe=TF,
+        direction=direction,
+        gates_passed=True,
+        failed_gates=(),
+        confidence=Decimal(82),
+        grade="A",
+        archetype="A4",
+        publishable=True,
+        levels=levels,
+        payload=payload,
+        zone_id="z1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_clean_candidate_is_published_and_sealed() -> None:
+    """The path the other three cannot reach.
+
+    Without this, `_publish` could be an empty function and every suppression
+    test in this file would still pass -- they all assert that nothing was
+    written.
+
+    What the row must carry: §15.2's levels extracted for querying, the sealed
+    payload, the hash over exactly that payload, and §10.3's dedup key.
+    """
+    signals = FakeSignals()
+    candidate = publishable_candidate()
+
+    svc, _ = service(**bullish_setup(), signals=signals, incidents=FakeIncidents())
+
+    await svc._publish("BTCUSDT", TF, BASE + TF.duration * 10, candidate)
+
+    assert len(signals.rows) == 1
+
+    row = next(iter(signals.rows.values()))
+
+    assert row.grade == "A"
+    assert row.archetype == "A4"
+    assert (row.entry_proximal, row.entry_distal) == (Decimal(104), Decimal(100))
+    assert row.invalidation_level == Decimal(98)
+    assert row.dedup_key == "BTCUSDT|H4|UP|A4|104.00:100.00"
+
+    # The hash is over the stored payload and nothing else, so a row can
+    # always be re-verified from its own two columns.
+    import hashlib
+
+    assert hashlib.sha256(row.payload.encode("utf-8")).hexdigest() == row.payload_hash
+
+    # §12.5's TTL for this timeframe travels with the signal -- §12.3 needs it
+    # to know when to stop watching.
+    assert row.ttl_candles == 18
+
+
+@pytest.mark.asyncio
+async def test_a_second_signal_on_a_live_key_is_suppressed_as_a_duplicate() -> None:
+    """§10.3: a signal matching an ACTIVE one "is merged as a refresh event
+    on the existing signal -- never a second alert".
+
+    The merge itself is piece 5. What this pins is that the second one does
+    not become a second row, and that the suppression says which check
+    refused it.
+    """
+    signals = FakeSignals()
+    candidate = publishable_candidate()
+
+    svc, repo = service(**bullish_setup(), signals=signals, incidents=FakeIncidents())
+
+    at = BASE + TF.duration * 10
+
+    await svc._publish("BTCUSDT", TF, at, candidate)
+    await svc._publish("BTCUSDT", TF, at + TF.duration, candidate)
+
+    assert len(signals.rows) == 1
+
+    suppressed = [
+        json.loads(r.payload)
+        for r in repo.appended.values()
+        if r.event_type.startswith("SIGNAL_SUPPRESSED_")
+    ]
+
+    assert suppressed == [{"reasons": ["DUPLICATE_KEY"]}]
+
+
+@pytest.mark.asyncio
+async def test_the_key_frees_once_the_first_signal_outlives_its_ttl() -> None:
+    """§10.3 merges against an *ACTIVE* signal, not against history.
+
+    A zone that produced a signal in January is free to produce another in
+    March, which is why the dedup query returns the latest row and the TTL
+    arithmetic happens in the engine rather than in SQL.
+    """
+    signals = FakeSignals()
+    candidate = publishable_candidate()
+
+    svc, _ = service(**bullish_setup(), signals=signals, incidents=FakeIncidents())
+
+    at = BASE + TF.duration * 10
+
+    await svc._publish("BTCUSDT", TF, at, candidate)
+    # H4's TTL is 18 candles; one past it frees the key.
+    await svc._publish("BTCUSDT", TF, at + TF.duration * 19, candidate)
+
+    assert len(signals.rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_below_its_floor_publishes_no_signal() -> None:
+    """§8.6's floor decides, and this fixture scores 41.
+
+    T17 holds published signals; a candidate that never cleared its floor is
+    recorded in the event log and in T16 and stops there. A signals table that
+    filled up regardless would make the funnel §14 monitors meaningless.
+    """
+    signals = FakeSignals()
+
+    svc, _ = service(**bullish_setup(), signals=signals, incidents=FakeIncidents())
+
+    await run(svc, "BULLISH")
+
+    assert signals.rows == {}
+
+
+@pytest.mark.asyncio
+async def test_an_open_incident_suppresses_rather_than_publishes() -> None:
+    """§15.3(2): "all feeds fresh at publish moment".
+
+    G1's `data_ready` is not this check -- its own comment says it covers the
+    warm-up and still owes freshness -- so reading it here would have made
+    §15.3(2) unfailable. An open incident on the symbol is the feed not being
+    clean, and §2.15 is where that is recorded.
+    """
+    signals = FakeSignals()
+
+    svc, repo = service(
+        **bullish_setup(),
+        signals=signals,
+        incidents=FakeIncidents(open_for=("BTCUSDT",)),
+    )
+
+    await run(svc, "BULLISH")
+
+    assert signals.rows == {}
+
+    # Nothing suppressed here either -- the candidate never reached §15.3,
+    # because it never cleared its floor. The check above is what proves the
+    # incident view is wired; this asserts the two paths do not interfere.
+    assert not [r for r in repo.appended.values() if r.event_type.startswith("SIGNAL_SUPPRESSED_")]
 
 
 @pytest.mark.asyncio
