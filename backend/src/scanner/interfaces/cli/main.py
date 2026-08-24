@@ -243,4 +243,38 @@ def build_parser() -> argparse.ArgumentParser:
         help="Recompute every T17 payload seal (SLS §15.3.5)",
     )
 
+    users = sub.add_parser(
+        "users",
+        help="Account operations (DDD T21)",
+    )
+
+    users_sub = users.add_subparsers(
+        dest="users_command",
+        required=True,
+    )
+
+    users_create = users_sub.add_parser(
+        "create",
+        help="Provision an account (stands in for /auth/register until email lands)",
+    )
+
+    users_create.add_argument(
+        "--email",
+        required=True,
+    )
+
+    # No --password. The password is read from the environment or prompted
+    # for, never taken as an argument: argv is visible in `ps`, lands in shell
+    # history, and is captured by process accounting.
+    users_create.add_argument(
+        "--password-env",
+        default="SCANNER_NEW_PASSWORD",
+        help="environment variable holding the password (default: SCANNER_NEW_PASSWORD)",
+    )
+
+    users_sub.add_parser(
+        "list",
+        help="Accounts on this database",
+    )
+
     return parser

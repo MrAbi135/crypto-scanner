@@ -107,3 +107,35 @@ async def test_dispatch_refuses_an_unknown_signals_subcommand() -> None:
 
     with pytest.raises(ValueError, match="unknown signals command"):
         await cli._dispatch(args)
+
+
+def test_users_create_takes_an_email_and_a_password_env_var() -> None:
+    """No `--password`.
+
+    argv is visible in `ps`, lands in shell history, and is captured by
+    process accounting. The password comes from the environment or a prompt.
+    """
+    args = build_parser().parse_args(["users", "create", "--email", "ops@example.com"])
+
+    assert (args.command, args.users_command) == ("users", "create")
+    assert args.email == "ops@example.com"
+    assert args.password_env == "SCANNER_NEW_PASSWORD"
+    assert not hasattr(args, "password")
+
+
+def test_users_create_requires_an_email() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["users", "create"])
+
+
+def test_users_requires_a_subcommand() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["users"])
+
+
+async def test_dispatch_refuses_an_unknown_users_subcommand() -> None:
+    args = build_parser().parse_args(["users", "list"])
+    args.users_command = "not-a-command"
+
+    with pytest.raises(ValueError, match="unknown users command"):
+        await cli._dispatch(args)

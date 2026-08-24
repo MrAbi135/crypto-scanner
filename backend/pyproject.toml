@@ -20,6 +20,13 @@ dependencies = [
   # --- Sprint S0.3 additions ---
   "sentry-sdk>=2.0",      # exception reporting (TDR §20); DSN-gated, disabled by default
   "websockets>=17.0.1",
+  # --- Sprint S10 additions ---
+  # DDD T21 names Argon2id specifically. The reference implementation is
+  # the one the RFC 9106 authors ship; rolling a KDF is not a place to be
+  # inventive.
+  "argon2-cffi>=23.1",
+  # Access tokens per TAD §20 ("access JWT <= 15 min").
+  "pyjwt>=2.8",
 ]
 
 [dependency-groups]
