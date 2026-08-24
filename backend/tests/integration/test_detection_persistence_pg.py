@@ -46,6 +46,7 @@ from scanner.application.ports.liquidity_detection import (
 from scanner.application.ports.param_sets import ParamSetRecord
 from scanner.application.ports.signal_transitions import SignalTransitionRecord
 from scanner.application.ports.signals import SignalRecord
+from scanner.application.signal_audit import reseal, verify_seals
 from scanner.domain.ict import MAX_ZONES
 from scanner.infrastructure.persistence.database import build_session_factory
 from scanner.infrastructure.persistence.detection_repositories import (
@@ -1242,3 +1243,99 @@ async def test_a_disabled_trigger_is_not_a_guard(engine) -> None:
 
     # Restored, so the rest of the module still runs against a guarded schema.
     assert (await verify_immutability_guards(inspector)).guarded
+
+
+async def test_recent_returns_the_newest_first_and_honours_the_filters(engine) -> None:
+    """What `signals tail` reads.
+
+    The tie-break on `signal_id` matters more than it looks: two signals can
+    publish on the same close, and without it the pair comes back in whatever
+    order the plan produced -- which changes between runs and makes a tail
+    look like it is shuffling.
+    """
+    repo = PgSignalRepository(build_session_factory(engine))
+
+    base = datetime(2027, 1, 1, tzinfo=UTC)
+
+    await repo.append(replace(signal("tail-old"), published_at=base))
+    await repo.append(replace(signal("tail-b"), published_at=base + timedelta(hours=2)))
+    await repo.append(replace(signal("tail-a"), published_at=base + timedelta(hours=2)))
+
+    rows = await repo.recent(limit=3, symbol="BTCUSDT", timeframe=TF)
+
+    assert [r.signal_id for r in rows] == ["tail-b", "tail-a", "tail-old"]
+
+    assert await repo.recent(limit=3, symbol="NOSUCHUSDT") == ()
+
+
+async def test_scan_pages_through_every_row_without_repeating_one(engine) -> None:
+    """Keyset paging, at a batch size smaller than the table.
+
+    A batch equal to or larger than the row count exercises none of the
+    cursor logic -- the first page returns everything and the loop exits. The
+    off-by-one that duplicates a boundary row or skips it only appears when
+    the pages actually meet.
+    """
+    repo = PgSignalRepository(build_session_factory(engine))
+
+    base = datetime(2028, 1, 1, tzinfo=UTC)
+
+    for i in range(7):
+        await repo.append(replace(signal(f"scan-{i}"), published_at=base + timedelta(hours=i)))
+
+    rows = await repo.scan(batch=2)
+
+    ids = [r.signal_id for r in rows if r.signal_id.startswith("scan-")]
+
+    assert ids == [f"scan-{i}" for i in range(7)]
+    # And nothing anywhere in the scan came back twice.
+    assert len({r.signal_id for r in rows}) == len(rows)
+
+
+async def test_scan_separates_rows_sharing_a_timestamp(engine) -> None:
+    """The cursor is the (published_at, signal_id) pair, not the timestamp.
+
+    A cursor on `published_at` alone would skip every row after the first at
+    a shared timestamp when the page boundary fell between them -- silently,
+    and only for signals published on the same close.
+    """
+    repo = PgSignalRepository(build_session_factory(engine))
+
+    at = datetime(2029, 1, 1, tzinfo=UTC)
+
+    for name in ("same-a", "same-b", "same-c"):
+        await repo.append(replace(signal(name), published_at=at))
+
+    rows = await repo.scan(batch=1)
+
+    found = [r.signal_id for r in rows if r.signal_id.startswith("same-")]
+
+    assert found == ["same-a", "same-b", "same-c"]
+
+
+async def test_verify_seals_reads_the_stored_payloads(engine) -> None:
+    """§15.3(5)'s seals over rows that made a round trip through Postgres.
+
+    The payload column is text and the hash is over its bytes, so anything the
+    driver does to the string on the way in or out would show up here and
+    nowhere in the unit tests.
+    """
+    repo = PgSignalRepository(build_session_factory(engine))
+
+    sealed = '{"symbol":"BTCUSDT","note":"non-ascii: \u00e9"}'
+
+    await repo.append(replace(signal("seal-1"), payload=sealed, payload_hash=reseal(sealed)))
+
+    report = await verify_seals(repo, batch=2)
+
+    assert report.checked > 0
+
+    failed = {f.signal_id for f in report.failures}
+
+    assert "seal-1" not in failed
+
+    # And the check discriminates on this database rather than reporting
+    # everything clean: the module's own fixture rows carry a placeholder
+    # `payload_hash` of "aaaa..." and every one of them is caught. A pass that
+    # found no failures at all here would mean the scan was reading nothing.
+    assert "sig-1" in failed

@@ -62,3 +62,23 @@ class SignalRepository(Protocol):
         ...
 
     async def get(self, signal_id: str) -> SignalRecord | None: ...
+
+    async def recent(
+        self,
+        *,
+        limit: int,
+        symbol: str | None = None,
+        timeframe: Timeframe | None = None,
+    ) -> tuple[SignalRecord, ...]:
+        """The newest published signals first, for an operator reading a tail."""
+        ...
+
+    async def scan(self, *, batch: int = 500) -> list[SignalRecord]:
+        """Every signal, oldest first, for a full audit pass.
+
+        Separate from `recent` because the two want opposite orders and
+        opposite bounds: a tail wants the newest few, an audit wants all of
+        them and must not miss a row published while it runs. Oldest-first
+        keyset paging gives that -- new rows land after the cursor.
+        """
+        ...

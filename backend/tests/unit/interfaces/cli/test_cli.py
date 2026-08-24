@@ -63,3 +63,47 @@ async def test_dispatch_routes_to_handler(monkeypatch: pytest.MonkeyPatch) -> No
     args = build_parser().parse_args(["sync-symbols"])
     assert await cli._dispatch(args) == 7
     assert seen["command"] == "sync-symbols"
+
+
+def test_signals_tail_defaults_to_every_series() -> None:
+    args = build_parser().parse_args(["signals", "tail"])
+
+    assert (args.command, args.signals_command) == ("signals", "tail")
+    # None rather than a sentinel symbol: the repository turns each one into
+    # an absent WHERE clause, so "no filter" and "filter on nothing" cannot be
+    # confused.
+    assert (args.symbol, args.timeframe) == (None, None)
+    assert args.limit == 20
+
+
+def test_signals_tail_takes_a_series_and_a_limit() -> None:
+    args = build_parser().parse_args(
+        ["signals", "tail", "--symbol", "BTCUSDT", "--timeframe", "H4", "--limit", "5"]
+    )
+
+    assert (args.symbol, args.timeframe, args.limit) == ("BTCUSDT", Timeframe.H4, 5)
+
+
+def test_signals_verify_hashes_takes_no_arguments() -> None:
+    args = build_parser().parse_args(["signals", "verify-hashes"])
+
+    assert args.signals_command == "verify-hashes"
+
+
+def test_signals_requires_a_subcommand() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["signals"])
+
+
+async def test_dispatch_refuses_an_unknown_signals_subcommand() -> None:
+    """The dispatch arm has to fail loudly rather than fall through.
+
+    `_HANDLERS[args.command]` at the bottom would raise a bare KeyError for a
+    subcommand the parser accepted and the dispatcher forgot -- a real risk
+    while both grow.
+    """
+    args = build_parser().parse_args(["signals", "tail"])
+    args.signals_command = "not-a-command"
+
+    with pytest.raises(ValueError, match="unknown signals command"):
+        await cli._dispatch(args)

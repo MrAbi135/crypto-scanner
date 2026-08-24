@@ -204,4 +204,43 @@ def build_parser() -> argparse.ArgumentParser:
         help="Closed candles since publication, for §9.3's display decay",
     )
 
+    signals = sub.add_parser(
+        "signals",
+        help="Published signal record operations (SLS §15, DDD T17)",
+    )
+
+    signals_sub = signals.add_subparsers(
+        dest="signals_command",
+        required=True,
+    )
+
+    tail = signals_sub.add_parser(
+        "tail",
+        help="The most recently published signals and their current state",
+    )
+
+    tail.add_argument(
+        "--symbol",
+        default=None,
+        help="default: every symbol",
+    )
+
+    tail.add_argument(
+        "--timeframe",
+        default=None,
+        type=Timeframe.parse,
+        help="default: every timeframe",
+    )
+
+    tail.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+    )
+
+    signals_sub.add_parser(
+        "verify-hashes",
+        help="Recompute every T17 payload seal (SLS §15.3.5)",
+    )
+
     return parser
