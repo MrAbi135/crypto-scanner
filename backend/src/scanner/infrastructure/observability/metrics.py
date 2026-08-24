@@ -35,10 +35,24 @@ def _require_convention(name: str) -> None:
         raise ValueError(f"metric name must be lowercase snake_case: {name!r}")
 
 
+# One gauge per registry, remembered. `Gauge(...)` raises on a duplicate name,
+# so a second call would take the process down at boot -- and `bootstrap` is
+# the one function every entrypoint runs. Held by registry object rather than
+# a module flag so a test registry and the default one do not shadow each
+# other.
+_PROCESS_INFO: dict[CollectorRegistry, Gauge] = {}
+
+
 def set_process_info(process: str, version: str, *, registry: CollectorRegistry = REGISTRY) -> None:
-    gauge = Gauge(
-        "scanner_process_info", "Process metadata", ["process", "version"], registry=registry
-    )
+    gauge = _PROCESS_INFO.get(registry)
+
+    if gauge is None:
+        gauge = Gauge(
+            "scanner_process_info", "Process metadata", ["process", "version"], registry=registry
+        )
+
+        _PROCESS_INFO[registry] = gauge
+
     gauge.labels(process=process, version=version).set(1)
 
 

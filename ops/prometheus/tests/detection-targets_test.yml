@@ -1,0 +1,174 @@
+# promtool unit tests for the SLS §14 alert rules.
+#
+# `promtool check rules` only says the PromQL parses. These say the rules
+# fire, and — as importantly — that they stay quiet when they should. A §14
+# alert that cannot fire is the same failure as no alert at all, and it looks
+# healthier.
+#
+# Run:  promtool test rules ops/prometheus/tests/detection-targets_test.yml
+rule_files:
+  - ../alerts/detection-targets.yml
+
+evaluation_interval: 5m
+
+tests:
+  # ---------------------------------------------------------------- pass p95
+  - interval: 5m
+    name: a pass p95 above the 2s target fires, and one below stays quiet
+    input_series:
+      # Everything lands in the (2s, 5s] bucket: the cumulative counts below
+      # 2s stay flat and the ones from 5s up climb together.
+      - series: 'scanner_detection_pass_seconds_bucket{le="0.5",timeframe="H1"}'
+        values: "0+0x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="1.0",timeframe="H1"}'
+        values: "0+0x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="2.0",timeframe="H1"}'
+        values: "0+0x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="5.0",timeframe="H1"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="10.0",timeframe="H1"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="30.0",timeframe="H1"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="60.0",timeframe="H1"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="120.0",timeframe="H1"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="300.0",timeframe="H1"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="+Inf",timeframe="H1"}'
+        values: "0+10x24"
+      # H4 is comfortably inside the target: everything at or under 1s.
+      - series: 'scanner_detection_pass_seconds_bucket{le="0.5",timeframe="H4"}'
+        values: "0+0x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="1.0",timeframe="H4"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="2.0",timeframe="H4"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="5.0",timeframe="H4"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="10.0",timeframe="H4"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="30.0",timeframe="H4"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="60.0",timeframe="H4"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="120.0",timeframe="H4"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="300.0",timeframe="H4"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="+Inf",timeframe="H4"}'
+        values: "0+10x24"
+    alert_rule_test:
+      # The rule holds `for: 15m`, so nothing at ten minutes.
+      - eval_time: 10m
+        alertname: DetectionPassSlow
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: DetectionPassSlow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              timeframe: H1
+            # The rendered number, pinned: a description that interpolated
+            # nothing would still pass a labels-only assertion, and the number
+            # is the only part an operator acts on.
+            exp_annotations:
+              summary: "Detection pass p95 over the SLS §14 target"
+              description: >-
+                H1 p95 is 4.8s against a 2s target. The backlog grows whenever a
+                pass costs more than the interval between closes.
+      # 2s is over target but nowhere near the 60s cycle ceiling, so the
+      # critical rule must stay silent — the two severities have to mean
+      # different things.
+      - eval_time: 60m
+        alertname: DetectionPassOverCycleCeiling
+        exp_alerts: []
+
+  # ------------------------------------------------------- cycle ceiling p99
+  - interval: 5m
+    name: a pass p99 past the 60s cycle ceiling is critical
+    input_series:
+      - series: 'scanner_detection_pass_seconds_bucket{le="0.5",timeframe="H1"}'
+        values: "0+0x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="1.0",timeframe="H1"}'
+        values: "0+0x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="2.0",timeframe="H1"}'
+        values: "0+0x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="5.0",timeframe="H1"}'
+        values: "0+0x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="10.0",timeframe="H1"}'
+        values: "0+0x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="30.0",timeframe="H1"}'
+        values: "0+0x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="60.0",timeframe="H1"}'
+        values: "0+0x24"
+      # The 104s measured on the soak VM: past every §14 target and still
+      # inside the histogram's range, which is the whole reason the bucket set
+      # runs to 300s.
+      - series: 'scanner_detection_pass_seconds_bucket{le="120.0",timeframe="H1"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="300.0",timeframe="H1"}'
+        values: "0+10x24"
+      - series: 'scanner_detection_pass_seconds_bucket{le="+Inf",timeframe="H1"}'
+        values: "0+10x24"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: DetectionPassOverCycleCeiling
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              timeframe: H1
+            exp_annotations:
+              summary: "Detection pass p99 over the SLS §14 cycle ceiling"
+              description: >-
+                H1 p99 is 119s. At this rate closes arrive faster than they are
+                processed and the stream backlog only grows.
+
+  # --------------------------------------------------------- doctrine drift
+  - interval: 5m
+    name: the publication ratio collapsing against yesterday fires
+    input_series:
+      # 30 hours of series so the `offset 1d` lookback has something to read.
+      #
+      # Yesterday: one publication per step against two candidates — a ratio
+      # of 0.5. Today the publications stop while candidates keep arriving,
+      # so the ratio goes to 0 and the shift is well past -50%.
+      - series: 'scanner_detection_publications_total{outcome="published"}'
+        values: "0+1x288 288+0x72"
+      - series: 'scanner_detection_publications_total{outcome="BELOW_MIN_RR"}'
+        values: "0+1x288 288+1x72"
+      # Refreshes climb throughout and must not move the ratio: they are the
+      # same setup seen again, not a candidate that was refused.
+      - series: 'scanner_detection_publications_total{outcome="refreshed"}'
+        values: "0+20x360"
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: PublicationRatioShift
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Candidate→published ratio shifted more than ±50% (SLS §14)"
+              description: >-
+                The publication rate is 0.00× yesterday's at the same hour.
+                Either the market changed or the doctrine did; check which
+                suppression reason moved before assuming the first.
+
+  - interval: 5m
+    name: a steady publication ratio does not fire
+    input_series:
+      - series: 'scanner_detection_publications_total{outcome="published"}'
+        values: "0+1x360"
+      - series: 'scanner_detection_publications_total{outcome="BELOW_MIN_RR"}'
+        values: "0+1x360"
+      # A refresh flood on top of an unchanged ratio. If `refreshed` were in
+      # the denominator this would read as the publish rate collapsing and
+      # would fire — the exclusion is what keeps a long-lived setup from
+      # tripping the doctrine-drift alert.
+      - series: 'scanner_detection_publications_total{outcome="refreshed"}'
+        values: "0+0x288 0+50x72"
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: PublicationRatioShift
+        exp_alerts: []

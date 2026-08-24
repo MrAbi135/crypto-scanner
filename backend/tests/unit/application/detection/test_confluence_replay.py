@@ -441,6 +441,7 @@ def service(
     signals=None,
     incidents=None,
     transitions=None,
+    metrics=None,
 ):
     repo = FakeEventRepository(events)
 
@@ -478,6 +479,7 @@ def service(
         signals=signals,
         incidents=incidents,
         transitions=transitions,
+        metrics=metrics,
     )
 
     return svc, repo
@@ -2882,3 +2884,70 @@ async def test_a_zone_respect_makes_the_candle_a_structural_event() -> None:
     # spike; without a structural candle §6.5 calls the same tape retail.
     assert a.factors["F4"] == Decimal(65)
     assert b.factors["F4"] == Decimal(80)
+
+
+class RecordingMetrics:
+    def __init__(self) -> None:
+        self.outcomes: list[tuple[str, str]] = []
+
+    def observe_pass(self, seconds: float, *, symbol: str, timeframe: str) -> None:
+        raise AssertionError("the confluence service does not time passes")
+
+    def record_publication(self, outcome: str, *, timeframe: str) -> None:
+        self.outcomes.append((outcome, timeframe))
+
+
+@pytest.mark.asyncio
+async def test_the_funnel_counts_a_publication_a_refresh_and_a_suppression() -> None:
+    """§14: the candidate-to-published ratio is "a monitored ratio ... alert on
+    ±50% day-over-day shift (doctrine drift detector)".
+
+    Nothing counted it. Three decisions here and each lands under its own
+    outcome -- in particular a refresh is neither published nor suppressed,
+    because folding it into suppressions would make one setup held for forty
+    candles look like forty rejected candidates and move the ratio the alert
+    watches.
+    """
+    metrics = RecordingMetrics()
+
+    svc, _ = service(
+        **bullish_setup(),
+        signals=FakeSignals(),
+        incidents=FakeIncidents(),
+        transitions=FakeTransitions(),
+        metrics=metrics,
+    )
+
+    at = BASE + TF.duration * 10
+
+    await svc._publish("BTCUSDT", TF, at, publishable_candidate())
+    await svc._publish("BTCUSDT", TF, at + TF.duration, publishable_candidate())
+    await svc._publish(
+        "BTCUSDT",
+        TF,
+        at + TF.duration * 2,
+        replace(publishable_candidate(), stale_context=True),
+    )
+
+    assert metrics.outcomes == [
+        ("published", TF.value),
+        ("refreshed", TF.value),
+        ("STALE_FEEDS", TF.value),
+        ("DUPLICATE_KEY", TF.value),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_publishing_without_metrics_still_works() -> None:
+    """`NullMetrics` is the default; a collector is never required.
+
+    The golden harness and `engine run` build the service without one, and a
+    replay must not increment the live funnel anyway.
+    """
+    signals = FakeSignals()
+
+    svc, _ = service(**bullish_setup(), signals=signals, incidents=FakeIncidents())
+
+    await svc._publish("BTCUSDT", TF, BASE + TF.duration * 10, publishable_candidate())
+
+    assert len(signals.rows) == 1

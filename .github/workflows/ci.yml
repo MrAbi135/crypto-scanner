@@ -130,3 +130,20 @@ jobs:
           tags: |
             ghcr.io/mrabi135/crypto-scanner/frontend:${{ github.sha }}
             ghcr.io/mrabi135/crypto-scanner/frontend:main
+
+  # SLS §14's alert rules, checked and unit-tested. `check rules` only says the
+  # PromQL parses; `test rules` says each one fires on the shape it is meant to
+  # catch and stays quiet otherwise. An alert that cannot fire looks healthier
+  # than no alert at all, which is what makes it worth a CI job.
+  prometheus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: check and test alert rules
+        run: |
+          docker run --rm -v "$PWD/ops/prometheus:/p" -w /p/tests \
+            --entrypoint promtool prom/prometheus:v3.1.0 \
+            check rules ../alerts/detection-targets.yml ../alerts/process-liveness.yml
+          docker run --rm -v "$PWD/ops/prometheus:/p" -w /p/tests \
+            --entrypoint promtool prom/prometheus:v3.1.0 \
+            test rules detection-targets_test.yml
