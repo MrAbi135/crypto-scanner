@@ -115,15 +115,35 @@ def signal(*, published_at: datetime = T0, ttl: int = 24) -> SignalRecord:
     )
 
 
+class FakeOutcomes:
+    def __init__(self) -> None:
+        self.rows: dict[str, object] = {}
+
+    async def append(self, outcome) -> bool:
+        if outcome.signal_id in self.rows:
+            return False
+
+        self.rows[outcome.signal_id] = outcome
+
+        return True
+
+    async def get(self, signal_id):
+        return self.rows.get(signal_id)
+
+
 def monitor(*, live=("sig-1",), state=SignalState.PUBLISHED.value, candles=None, **kw):
     transitions = FakeTransitions(live, state)
+    outcomes = FakeOutcomes()
 
     svc = SignalMonitorService(
         FakeCandles(candles if candles is not None else []),
         FakeSignals([signal(**kw)]),
         transitions,
         FakeClock(),
+        outcomes,
     )
+
+    svc.outcomes = outcomes
 
     return svc, transitions
 
@@ -257,3 +277,49 @@ async def test_the_levels_come_from_the_published_record() -> None:
 
     assert report.resolved == 1
     assert transitions.written[0].to_state == "SUCCESS"
+
+
+@pytest.mark.asyncio
+async def test_resolving_writes_the_outcome_once() -> None:
+    """§12.4's accounting lands when the signal resolves, and only then.
+
+    The excursions come from the candles the signal lived through, which the
+    monitor fetches at resolution rather than accumulating as it ran -- an
+    accumulator would need updating on tables with no UPDATE surface.
+    """
+    lived = [
+        candle(1, high="106", low="99", close="103"),
+        candle(2, high="113", low="102", close="112"),
+    ]
+
+    svc, _ = monitor(state=SignalState.ACTIVE.value, candles=lived)
+
+    report = await svc.run("BTCUSDT", TF, T0 + timedelta(hours=2))
+
+    assert report.resolved == 1
+
+    book = await svc.outcomes.get("sig-1")
+
+    assert book is not None
+    assert book.outcome == "SUCCESS"
+    # Entry mid 102, R = 4. Best high 113 is 11 above = 2.75R; worst low 99 is
+    # 3 below = 0.75R.
+    assert book.mfe_r == Decimal("2.75")
+    assert book.mae_r == Decimal("0.75")
+
+
+@pytest.mark.asyncio
+async def test_a_signal_that_does_not_resolve_gets_no_outcome_row() -> None:
+    """T19 is "exactly one row per *resolved* signal".
+
+    A stress test is not a resolution, and writing a row for one would put a
+    live signal into the statistics.
+    """
+    svc, _ = monitor(
+        state=SignalState.ACTIVE.value,
+        candles=[candle(3, high="105", low="97", close="101")],
+    )
+
+    await svc.run("BTCUSDT", TF, T0 + timedelta(hours=3))
+
+    assert await svc.outcomes.get("sig-1") is None

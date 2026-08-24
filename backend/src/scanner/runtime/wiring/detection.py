@@ -59,6 +59,9 @@ from scanner.infrastructure.persistence.repositories import (
     PgTradeAggregateRepository,
 )
 from scanner.infrastructure.persistence.setup_repository import PgSetupRepository
+from scanner.infrastructure.persistence.signal_outcome_repository import (
+    PgSignalOutcomeRepository,
+)
 from scanner.infrastructure.persistence.signal_repository import PgSignalRepository
 from scanner.infrastructure.persistence.signal_transition_repository import (
     PgSignalTransitionRepository,
@@ -174,5 +177,6 @@ def build_detection_pipeline(
             PgSignalRepository(sessions),
             PgSignalTransitionRepository(sessions),
             clock,
+            PgSignalOutcomeRepository(sessions),
         ),
     )
