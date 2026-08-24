@@ -129,6 +129,7 @@ class SignalMonitorService:
                     at_candle_open_time=at,
                     recorded_at=self._clock.now(),
                     stress_test=observation.stress_test,
+                    refresh=False,
                     trigger_evidence=json.dumps(
                         {
                             "reason": observation.reason,
@@ -277,13 +278,18 @@ def _levels_of(signal: SignalRecord) -> SignalLevels:
     )
 
 
-def _transition_id(signal_id: str, at: datetime) -> str:
+def _transition_id(signal_id: str, at: datetime, *, refresh: bool = False) -> str:
     """One transition per signal per candle, and the id says so.
 
     Derived from the natural key the table is unique on, so a replayed candle
     collides on both and the second write is a no-op rather than a duplicate
     history entry.
+
+    `refresh` is part of that key. §12's monitor and §10.3's merge both write
+    on the same closed candle, so without it a signal that moved *and* was
+    re-detected on one candle would produce two rows with one id -- and the
+    second, whichever it was, would be silently dropped.
     """
-    raw = "|".join((signal_id, at.isoformat()))
+    raw = "|".join((signal_id, at.isoformat(), "refresh" if refresh else "transition"))
 
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()

@@ -109,7 +109,13 @@ from scanner.domain.ict import (
     detect_displacement,
     evaluate_pd_context,
 )
-from scanner.domain.lifecycle import SignalPayload, SignalState, publication_checks
+from scanner.domain.lifecycle import (
+    TERMINAL_STATES,
+    SignalPayload,
+    SignalState,
+    SuppressionReason,
+    publication_checks,
+)
 from scanner.domain.liquidity import SWEEP_SETUP_EXPIRY_CANDLES
 from scanner.domain.momentum import (
     Leg,
@@ -901,12 +907,37 @@ class ConfluenceReplayService:
             return
 
         payload = candidate.payload
+        blocker = await self._dedup_blocker(payload, timeframe, event_at)
 
         decision = publication_checks(
             payload,
             feeds_fresh=await self._feeds_clean(symbol, candidate),
-            dedup_clear=await self._dedup_clear(payload, timeframe, event_at),
+            dedup_clear=blocker is None,
         )
+
+        # §10.3: "merged as a refresh event on the existing signal (evidence
+        # appended) -- never a second alert". A merge, not a suppression: the
+        # setup is still there and the detector just saw it again, which is
+        # worth recording *on the signal that holds the key* rather than
+        # filed away as a candidate that failed.
+        #
+        # Only when the duplicate key is the *sole* reason. A candidate that
+        # also had stale feeds or no room to travel would not have published
+        # on a free key either, and calling that a refresh would append
+        # evidence the live signal should not inherit.
+        #
+        # A merge that could not be recorded at all falls through to the
+        # funnel below rather than vanishing: a duplicate that is neither
+        # merged nor suppressed is a detection with no trace, and §12.2's
+        # candidates-to-published ratio would quietly drift.
+        merged = (
+            blocker is not None
+            and decision.reasons == (SuppressionReason.DUPLICATE_KEY,)
+            and await self._merge_refresh(blocker, event_at, payload)
+        )
+
+        if merged:
+            return
 
         if not decision.published:
             # §12.2: "Fail => SUPPRESSED with recorded reason (auditable
@@ -991,6 +1022,7 @@ class ConfluenceReplayService:
                     at_candle_open_time=event_at,
                     recorded_at=self._clock.now(),
                     stress_test=False,
+                    refresh=False,
                     trigger_evidence=json.dumps(
                         {"reason": "publication checks passed"}, sort_keys=True
                     ),
@@ -1019,31 +1051,108 @@ class ConfluenceReplayService:
 
         return not await self._incidents.list_open(symbol)
 
-    async def _dedup_clear(
+    async def _dedup_blocker(
         self,
         payload: SignalPayload,
         timeframe: Timeframe,
         at: datetime,
-    ) -> bool:
-        """§15.3(4): "dedup key clear (§10.3)".
+    ) -> _Blocker | None:
+        """The live signal already holding this key, for §15.3(4) and §10.3.
 
-        Clear means no signal on this key is still inside its TTL. §10.3 only
-        merges against an *ACTIVE* signal, so a key that produced a signal
-        long enough ago for it to have expired is free again -- which is why
-        the query returns the latest row and the TTL arithmetic happens here
-        rather than in SQL.
+        Returns the signal rather than a yes/no because the two clauses need
+        different halves of the same lookup: §15.3(4) asks whether the key is
+        clear, §10.3 asks *which* signal to append the refresh to. One query
+        answers both.
+
+        **"ACTIVE" is read as "still live", not as §12's literal ACTIVE
+        state.** The case §10.3 exists for is the dominant one -- the same
+        setup re-detected candle after candle while price has not yet reached
+        the entry zone. That signal is PUBLISHED, not ACTIVE. Reading the word
+        literally would let every pre-touch signal alert once per candle,
+        which is the exact thing §10.3 forbids.
+
+        Two conditions, and either one frees the key: the signal reached a
+        terminal state, or its TTL lapsed. The TTL is checked as well as the
+        state because §12.5's expiry is written by the monitor, and a key
+        whose monitor has not run yet would otherwise be held forever.
         """
         if self._signals is None:
-            return True
+            return None
 
         latest = await self._signals.latest_for_dedup_key(payload.dedup_key())
 
         if latest is None:
-            return True
+            return None
 
-        elapsed = at - latest.published_at
+        if at - latest.published_at >= timeframe.duration * latest.ttl_candles:
+            return None
 
-        return elapsed >= timeframe.duration * latest.ttl_candles
+        if self._transitions is None:
+            # No history to read, so the TTL is the whole answer. Blocking is
+            # the safe half of the guess: the cost is one alert delayed, and
+            # the cost of the other reading is the duplicate §10.3 forbids.
+            return _Blocker(latest, SignalState.PUBLISHED.value)
+
+        state = await self._transitions.current_state(latest.signal_id)
+
+        if state is None or SignalState(state) in TERMINAL_STATES:
+            return None
+
+        return _Blocker(latest, state)
+
+    async def _merge_refresh(
+        self,
+        blocker: _Blocker,
+        event_at: datetime,
+        payload: SignalPayload,
+    ) -> bool:
+        """§10.3's merge: append the re-detection to the signal holding the key.
+
+        The evidence is *appended*, never applied. §12.1 makes the signal's
+        core immutable -- "evidence, zones, levels never mutate
+        post-creation" -- so a refresh carrying a higher confidence or a
+        tighter zone must not move the published one. What it records is that
+        the setup was still there on this candle and at what score, which is
+        what makes a stale-looking signal distinguishable from a live one
+        when someone reads the history back.
+        """
+        if self._transitions is None:
+            return False
+
+        await self._transitions.append(
+            SignalTransitionRecord(
+                transition_id=_transition_id(
+                    blocker.signal.signal_id, event_at, refresh=True
+                ),
+                signal_id=blocker.signal.signal_id,
+                # A refresh is news about the signal, not a move, so it sits
+                # where the signal already is -- the same shape §12.3 uses for
+                # a stress test.
+                from_state=blocker.state,
+                to_state=blocker.state,
+                at_candle_open_time=event_at,
+                recorded_at=self._clock.now(),
+                stress_test=False,
+                refresh=True,
+                trigger_evidence=json.dumps(
+                    {
+                        "reason": "re-detected on a live dedup key (SLS 10.3)",
+                        "dedup_key": payload.dedup_key(),
+                        "confidence": str(payload.confidence),
+                        "grade": payload.grade,
+                        "archetype": payload.archetype,
+                    },
+                    sort_keys=True,
+                ),
+            )
+        )
+
+        # True even when the append was refused. A refusal means this candle's
+        # refresh is already on the signal -- a replay, not a failure -- and
+        # returning False there would send the replay down the suppression
+        # path and give the same candle two different histories depending on
+        # how many times it was read.
+        return True
 
     async def _store_setup(
         self,
@@ -1309,6 +1418,19 @@ class _History:
         first = retests[0].observed_at
 
         return any(item.kind == "RESPECT" and item.observed_at == first for item in self._items)
+
+
+@dataclass(frozen=True, slots=True)
+class _Blocker:
+    """The live signal holding a dedup key, and the state it is holding it in.
+
+    The state travels with the record because §10.3's refresh row needs it for
+    `from_state`/`to_state`, and re-reading it would leave the two facts free
+    to disagree.
+    """
+
+    signal: SignalRecord
+    state: str
 
 
 def _setup_id(

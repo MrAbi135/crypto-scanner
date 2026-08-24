@@ -29,15 +29,20 @@ class PgSignalTransitionRepository:
                 at_candle_open_time=transition.at_candle_open_time,
                 recorded_at=transition.recorded_at,
                 stress_test=transition.stress_test,
+                refresh=transition.refresh,
                 trigger_evidence=transition.trigger_evidence,
             )
             # On the natural key, not the id: a replayed candle produces the
             # same verdict with a different id if the id ever stops being
             # derived, and it is the candle that must not be read twice.
+            # `refresh` is part of that key because the monitor and the
+            # detector both write on the same closed candle -- see migration
+            # 017.
             .on_conflict_do_nothing(
                 index_elements=[
                     SignalTransitionRow.signal_id,
                     SignalTransitionRow.at_candle_open_time,
+                    SignalTransitionRow.refresh,
                 ]
             )
             .returning(SignalTransitionRow.transition_id)
@@ -51,9 +56,23 @@ class PgSignalTransitionRepository:
             return written is not None
 
     async def current_state(self, signal_id: str) -> str | None:
+        """The signal's state now.
+
+        Refresh rows are excluded rather than ordered around. A refresh
+        carries `from_state == to_state`, so it looks harmless -- but it lands
+        on the same candle as the monitor's verdict, and the tie-break
+        between two rows on one candle is `transition_id`, which is a hash.
+        A refresh written in the same minute a signal resolved could therefore
+        win the ordering and report the signal live again, about half the
+        time. §12's state machine is the non-refresh rows; this reads those.
+        """
+
         stmt = (
             select(SignalTransitionRow.to_state)
-            .where(SignalTransitionRow.signal_id == signal_id)
+            .where(
+                SignalTransitionRow.signal_id == signal_id,
+                SignalTransitionRow.refresh.is_(False),
+            )
             # `transition_id` breaks the tie the unique constraint already
             # forbids, so this is deterministic even if that constraint is
             # ever relaxed.
@@ -91,7 +110,14 @@ class PgSignalTransitionRepository:
                 .label("rank"),
             )
             .join(SignalRow, SignalRow.signal_id == SignalTransitionRow.signal_id)
-            .where(SignalRow.symbol == symbol, SignalRow.timeframe == timeframe)
+            .where(
+                SignalRow.symbol == symbol,
+                SignalRow.timeframe == timeframe,
+                # Excluded for the reason `current_state` gives: a refresh on
+                # the candle a signal resolved would otherwise outrank the
+                # resolution and keep a finished signal in the live set.
+                SignalTransitionRow.refresh.is_(False),
+            )
             .subquery()
         )
 

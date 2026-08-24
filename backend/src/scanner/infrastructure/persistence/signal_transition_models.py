@@ -52,4 +52,5 @@ class SignalTransitionRow(Base):
     at_candle_open_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     stress_test: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
+    refresh: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
     trigger_evidence: Mapped[str] = mapped_column(Text(), nullable=False)
