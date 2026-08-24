@@ -20,10 +20,14 @@ class AlgoVersionRow(Base):
 
     __tablename__ = "algo_versions"
     __table_args__ = (
+        # `param_set_version` joins the key because a parameter change keeps
+        # the algo version and increments the set -- see migration 013 for why
+        # `engine` stays in it.
         UniqueConstraint(
             "engine",
             "version",
-            name="uq_algo_versions_engine_version",
+            "param_set_version",
+            name="uq_algo_versions_engine_version_param_set",
         ),
         {"schema": "detection"},
     )
@@ -43,9 +47,41 @@ class AlgoVersionRow(Base):
         nullable=False,
     )
 
+    param_set_version: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+
+    param_payload: Mapped[str | None] = mapped_column(
+        Text(),
+        nullable=True,
+    )
+
+    # Null means the row predates verification, not that the checksum is
+    # empty. Boot fills it in; it never compares against a null.
+    checksum: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+
+    sls_reference: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
+    )
+
+    deployed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    retired_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
 
 

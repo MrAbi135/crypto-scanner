@@ -23,6 +23,7 @@ Requires Docker (testcontainers). Run: pytest -m integration tests/integration
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -38,6 +39,7 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRecord,
     LiquidityTransitionRecord,
 )
+from scanner.application.ports.param_sets import ParamSetRecord
 from scanner.domain.ict import MAX_ZONES
 from scanner.infrastructure.persistence.database import build_session_factory
 from scanner.infrastructure.persistence.detection_repositories import (
@@ -58,6 +60,7 @@ from scanner.infrastructure.persistence.liquidity_detection_repositories import 
     PgLiquidityPoolRepository,
     PgLiquidityTransitionRepository,
 )
+from scanner.infrastructure.persistence.param_set_repository import PgParamSetRepository
 from scanner.shared import Timeframe
 
 pytestmark = pytest.mark.integration
@@ -733,3 +736,91 @@ async def test_evidence_reader_is_empty_for_an_unknown_symbol(engine) -> None:
 
     assert await reader.list_structure("NOPE", TF, T0, T0 + timedelta(days=1)) == ()
     assert await reader.list_liquidity("NOPE", TF, T0, T0 + timedelta(days=1)) == ()
+
+
+# --------------------------------------------------------------------------
+# T10 parameter sets (DDD T10, TAD §14)
+# --------------------------------------------------------------------------
+
+
+async def test_param_set_round_trips_and_a_repeat_registration_is_ignored(engine) -> None:
+    """T10 is written per release and read at boot.
+
+    Registration is `ON CONFLICT DO NOTHING` because two engine processes
+    booting together both see no row and both register. They register the same
+    triple with the same digest, so the loser of the race has nothing to
+    correct -- but an upsert would let a second process silently rewrite the
+    first's payload, which is the one thing a version registry must not allow.
+    """
+    repo = PgParamSetRepository(build_session_factory(engine))
+
+    record = ParamSetRecord(
+        engine="detection",
+        algo_version="s8-pgtest",
+        param_set_version="2026.08.24.1",
+        param_payload='{"parameters":[]}',
+        checksum="a" * 64,
+        sls_reference="Appendix A",
+        deployed_at=T0,
+    )
+
+    await repo.register(record)
+    await repo.register(replace(record, checksum="b" * 64))
+
+    found = await repo.get("detection", "s8-pgtest", "2026.08.24.1")
+
+    assert found is not None
+    assert found.checksum == "a" * 64
+    assert found.param_payload == '{"parameters":[]}'
+
+
+async def test_a_row_with_no_checksum_reads_as_absent(engine) -> None:
+    """Migration 013 backfilled the existing rows rather than inventing digests.
+
+    A null checksum is the absence of a record, not a record of absence. If
+    `get` returned such a row, boot would compare the running digest against
+    `None`, call it a mismatch, and refuse to start on rows that only ever
+    meant "this predates verification".
+    """
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO detection.algo_versions "
+                "(id, engine, version, param_set_version, created_at) "
+                "VALUES ('legacy-row','detection','s4-old','unverified', now())"
+            )
+        )
+
+    repo = PgParamSetRepository(build_session_factory(engine))
+
+    assert await repo.get("detection", "s4-old", "unverified") is None
+
+
+async def test_the_same_algo_version_may_carry_two_parameter_sets(engine) -> None:
+    """The key widened for exactly this.
+
+    A parameter change keeps the algo version and increments
+    `param_set_version` (SLS Appendix A), so the old `(engine, version)`
+    unique constraint would have rejected the second row -- the registry would
+    have been unable to record the very event it exists to track.
+    """
+    repo = PgParamSetRepository(build_session_factory(engine))
+
+    for version, digest in (("2026.01.01.1", "c" * 64), ("2026.02.01.1", "d" * 64)):
+        await repo.register(
+            ParamSetRecord(
+                engine="detection",
+                algo_version="s8-twoparams",
+                param_set_version=version,
+                param_payload="{}",
+                checksum=digest,
+                sls_reference=None,
+                deployed_at=T0,
+            )
+        )
+
+    first = await repo.get("detection", "s8-twoparams", "2026.01.01.1")
+    second = await repo.get("detection", "s8-twoparams", "2026.02.01.1")
+
+    assert first is not None and first.checksum == "c" * 64
+    assert second is not None and second.checksum == "d" * 64

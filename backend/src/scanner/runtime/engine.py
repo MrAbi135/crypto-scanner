@@ -21,7 +21,9 @@ from redis.exceptions import RedisError
 from starlette.applications import Starlette
 
 from scanner.application.detection.candle_close_consumer import CandleCloseConsumer
+from scanner.application.detection.confluence_replay import CONFLUENCE_ALGO_VERSION
 from scanner.application.detection.trailing_window import TrailingWindowRunner
+from scanner.application.param_set_verification import verify_parameter_set
 from scanner.application.ports.event_consumer import CANDLE_GROUP
 from scanner.application.ports.event_stream import CANDLE_STREAM
 from scanner.config import get_settings
@@ -30,6 +32,9 @@ from scanner.infrastructure.clock import SystemClock
 from scanner.infrastructure.persistence.database import (
     build_engine,
     build_session_factory,
+)
+from scanner.infrastructure.persistence.param_set_repository import (
+    PgParamSetRepository,
 )
 from scanner.infrastructure.redis.client import build_redis
 from scanner.infrastructure.redis.event_consumer import RedisEventStreamConsumer
@@ -186,10 +191,26 @@ def main() -> None:
         db = build_engine(settings.db_dsn)
         redis_client = build_redis(settings.redis_url)
 
+        sessions = build_session_factory(db)
+        clock = SystemClock()
+
+        # TAD §14, before anything is built that could score with the wrong
+        # numbers: "param-set checksum mismatch => engine refuses to score".
+        # `verify_parameter_set` raises here and the lifespan never opens, so
+        # the container dies with a precise reason instead of coming up
+        # healthy and scoring under a parameter set nobody recorded.
+        await verify_parameter_set(
+            PgParamSetRepository(sessions),
+            engine="detection",
+            algo_version=CONFLUENCE_ALGO_VERSION,
+            now=clock.now(),
+            sls_reference="Appendix A",
+        )
+
         pipeline = build_detection_pipeline(
-            build_session_factory(db),
+            sessions,
             redis_client,
-            SystemClock(),
+            clock,
         )
 
         name = _consumer_name()
