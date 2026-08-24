@@ -9,6 +9,10 @@ from datetime import datetime
 from decimal import Decimal
 
 from scanner.application.ports import CandleRepository, Clock
+from scanner.application.ports.signal_outcomes import (
+    SignalOutcomeRecord,
+    SignalOutcomeRepository,
+)
 from scanner.application.ports.signal_transitions import (
     SignalTransitionRecord,
     SignalTransitionRepository,
@@ -21,7 +25,7 @@ from scanner.domain.confluence import (
 )
 from scanner.domain.confluence.levels import Invalidation
 from scanner.domain.lifecycle import Candle as LifecycleCandle
-from scanner.domain.lifecycle import SignalState, observe
+from scanner.domain.lifecycle import SignalState, accounting, observe
 from scanner.shared import Timeframe
 
 
@@ -52,11 +56,13 @@ class SignalMonitorService:
         signals: SignalRepository,
         transitions: SignalTransitionRepository,
         clock: Clock,
+        outcomes: SignalOutcomeRepository | None = None,
     ) -> None:
         self._candles = candles
         self._signals = signals
         self._transitions = transitions
         self._clock = clock
+        self._outcomes = outcomes
 
     async def run(
         self,
@@ -147,6 +153,14 @@ class SignalMonitorService:
                 if observation.to_state in _RESOLVED:
                     resolved += 1
 
+                    await self._record_outcome(
+                        signal,
+                        observation.to_state,
+                        at=at,
+                        timeframe=timeframe,
+                        reason=observation.reason,
+                    )
+
         return MonitorReport(
             symbol=symbol,
             timeframe=timeframe,
@@ -155,6 +169,62 @@ class SignalMonitorService:
             transitions=transitions,
             stress_tests=stress,
             resolved=resolved,
+        )
+
+    async def _record_outcome(
+        self,
+        signal: SignalRecord,
+        outcome: SignalState,
+        *,
+        at: datetime,
+        timeframe: Timeframe,
+        reason: str,
+    ) -> None:
+        """§12.4's accounting, written once when the signal resolves.
+
+        The excursions are computed from the candles the signal actually lived
+        through, fetched here rather than accumulated as it ran. An
+        accumulator would need updating on tables with no UPDATE surface, and
+        a monitor that missed a candle would under-report the excursion for
+        the rest of the signal's life -- silently, and in the direction that
+        flatters the record.
+        """
+        if self._outcomes is None:
+            return
+
+        lived = await self._candles.fetch_series(
+            signal.symbol,
+            timeframe,
+            signal.published_at,
+            at + timeframe.duration,
+        )
+
+        levels = _levels_of(signal)
+
+        try:
+            book = accounting(
+                outcome,
+                levels=levels,
+                candles=[LifecycleCandle(high=c.high, low=c.low, close=c.close) for c in lived],
+            )
+        except ValueError:
+            # R is zero, which T17's own check constraint should have refused
+            # at publication. Recording no outcome is better than recording an
+            # infinite one, and the signal's transition history still says
+            # what happened to it.
+            return
+
+        await self._outcomes.append(
+            SignalOutcomeRecord(
+                signal_id=signal.signal_id,
+                outcome=outcome.value,
+                resolved_at=at,
+                elapsed_candles=book.elapsed_candles,
+                mfe_r=book.mfe_r,
+                mae_r=book.mae_r,
+                excluded_from_stats=False,
+                resolution_evidence=json.dumps({"reason": reason}, sort_keys=True),
+            )
         )
 
 
