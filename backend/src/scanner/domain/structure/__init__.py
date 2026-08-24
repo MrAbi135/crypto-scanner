@@ -30,12 +30,15 @@ from scanner.domain.structure.swings import (
     swing_window,
 )
 from scanner.domain.structure.trend import (
+    IDLE_CANDLES,
     TrendState,
     TrendStateMachine,
+    structure_is_idle,
 )
 
 __all__ = [
     "FAILED_BREAK_CANDLES",
+    "IDLE_CANDLES",
     "BosEvent",
     "BreakDirection",
     "ClassifiedSwing",
@@ -56,6 +59,7 @@ __all__ = [
     "failed_break_index",
     "is_wick_only_penetration",
     "mss_is_low_quality",
+    "structure_is_idle",
     "swing_window",
     "unbroken_pairs",
 ]

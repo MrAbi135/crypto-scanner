@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -25,17 +26,20 @@ from scanner.domain.common import (
     wilder_atr_series,
 )
 from scanner.domain.structure import (
+    IDLE_CANDLES,
     BreakDirection,
     ClassifiedSwing,
     StructureLabel,
     SwingKind,
     SwingPoint,
     SwingStrength,
+    TrendState,
     classify_swings,
     detect_bos,
     detect_external_swings,
     detect_internal_swings,
     failed_break_index,
+    structure_is_idle,
     swing_window,
 )
 from scanner.shared import Timeframe
@@ -43,7 +47,7 @@ from scanner.shared import Timeframe
 # s4-v2 (2026-08-17): first swing of each kind now emits an explicit SEED
 # classification event. Output-changing, hence the increment — Constitution
 # §44.5. Ratified as SLS v1.0.2 §3.3.
-STRUCTURE_ALGO_VERSION = "s4-v7"
+STRUCTURE_ALGO_VERSION = "s4-v8"
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,7 +203,7 @@ class StructureReplayService:
             ):
                 inserted += 1
 
-        bos_inserted = await self._replay_bos(
+        bos_inserted, broke_at = await self._replay_bos(
             symbol=symbol,
             timeframe=timeframe,
             candles=candles,
@@ -207,7 +211,12 @@ class StructureReplayService:
         )
         inserted += bos_inserted
 
-        trend_state = _infer_external_trend(external_classified)
+        trend_state = _idle_adjusted(
+            _infer_external_trend(external_classified),
+            candles=candles,
+            external_swings=external_swings,
+            broke_at=broke_at,
+        )
 
         last_open_time = candles[-1].open_time
 
@@ -240,10 +249,16 @@ class StructureReplayService:
         timeframe: Timeframe,
         candles: list[Candle],
         external_swings: tuple[SwingPoint, ...],
-    ) -> int:
-        """Replay BOS chronologically using trend known at each candle."""
+    ) -> tuple[int, frozenset[int]]:
+        """Replay BOS chronologically using trend known at each candle.
+
+        Returns the break indices as well as the count, because §3.4's
+        idle rule needs to know whether the trend broke anything recently
+        and the count cannot say when.
+        """
 
         inserted = 0
+        broke_at: set[int] = set()
         consumed: set[tuple[int, SwingKind]] = set()
         confirmation_window = swing_window(SwingStrength.EXTERNAL)
 
@@ -373,6 +388,7 @@ class StructureReplayService:
                 direction=direction,
             ):
                 inserted += 1
+                broke_at.add(candle_index)
 
             # §3.5: "a failed break is recorded (fact, not deletion) if within
             # `failed_break_candles = 3` closed candles price closes back
@@ -397,7 +413,7 @@ class StructureReplayService:
             ):
                 inserted += 1
 
-        return inserted
+        return inserted, frozenset(broke_at)
 
     async def _persist_failed_break(
         self,
@@ -643,6 +659,57 @@ def _close_agrees(candle: Candle, direction: BreakDirection) -> bool:
         return candle.close > candle.open
 
     return candle.close < candle.open
+
+
+def _idle_adjusted(
+    trend_state: str,
+    *,
+    candles: Sequence[Candle],
+    external_swings: Sequence[SwingPoint],
+    broke_at: frozenset[int],
+) -> str:
+    """§3.4's `BULLISH --> RANGING: structure idle 100 candles`, and its mirror.
+
+    The label sequence says what the trend *was*; this asks whether it has
+    since gone quiet. A market that has closed inside its own external bracket
+    for a hundred candles without breaking a level is not trending, however
+    tidy the last pair of swings looked.
+
+    The bracket is the most recent confirmed external swing on each side --
+    §5.7's anchors, which §5.7 itself calls "confirmed-swing facts". With
+    either side missing there is no bracket to be inside of, and the trend
+    stands.
+
+    Only BULLISH and BEARISH are eligible, because those are the two edges the
+    state diagram draws. RANGING is already the destination and the CAUTION
+    states are mid-transition -- idling out of one would discard the CHoCH
+    that put it there.
+    """
+    if trend_state not in {TrendState.BULLISH.value, TrendState.BEARISH.value}:
+        return trend_state
+
+    highs = [s for s in external_swings if s.kind is SwingKind.HIGH]
+    lows = [s for s in external_swings if s.kind is SwingKind.LOW]
+
+    if not highs or not lows:
+        return trend_state
+
+    high = max(highs, key=lambda s: s.index)
+    low = max(lows, key=lambda s: s.index)
+
+    if high.price < low.price:
+        return trend_state
+
+    window_start = len(candles) - IDLE_CANDLES
+
+    idle = structure_is_idle(
+        [candle.close for candle in candles],
+        range_low=low.price,
+        range_high=high.price,
+        broke_externally=any(index >= window_start for index in broke_at),
+    )
+
+    return TrendState.RANGING.value if idle else trend_state
 
 
 def _infer_external_trend(

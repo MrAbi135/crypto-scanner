@@ -14,6 +14,7 @@ from scanner.application.detection.state import (
 )
 from scanner.application.detection.structure_replay import (
     StructureReplayService,
+    _idle_adjusted,
 )
 from scanner.application.ports.detection import (
     EngineEventRecord,
@@ -250,7 +251,7 @@ async def test_replay_persists_structure_events_and_state() -> None:
     state = await states.load(
         "BTCUSDT",
         Timeframe.H1.value,
-        "s4-v7",
+        "s4-v8",
     )
 
     assert state is not None
@@ -307,9 +308,9 @@ async def test_rebuild_state_replaces_old_snapshot() -> None:
     states = EngineStateManager(store)
 
     await store.save(
-        (f"structure:s4-v7:BTCUSDT:{Timeframe.H1.value}"),
+        (f"structure:s4-v8:BTCUSDT:{Timeframe.H1.value}"),
         (
-            '{"algo_version":"s4-v7",'
+            '{"algo_version":"s4-v8",'
             '"last_processed_open_time":null,'
             '"symbol":"BTCUSDT",'
             f'"timeframe":"{Timeframe.H1.value}",'
@@ -345,7 +346,7 @@ async def test_rebuild_state_replaces_old_snapshot() -> None:
     state = await states.load(
         "BTCUSDT",
         Timeframe.H1.value,
-        "s4-v7",
+        "s4-v8",
     )
 
     assert state is not None
@@ -464,7 +465,7 @@ async def test_bos_replay_waits_for_confirmed_external_swings() -> None:
         FakeClock(),
     )
 
-    inserted = await service._replay_bos(
+    inserted, _ = await service._replay_bos(
         symbol="BTCUSDT",
         timeframe=Timeframe.H1,
         candles=candles,
@@ -492,3 +493,119 @@ async def test_bos_replay_waits_for_confirmed_external_swings() -> None:
     assert payload["failed"] is True
     assert payload["broken_level"] == "120"
     assert payload["elapsed_candles"] == 1
+
+
+# --------------------------------------------------------------------------
+# §3.4's idle route into RANGING
+# --------------------------------------------------------------------------
+
+
+def _bracket_swings() -> tuple[SwingPoint, ...]:
+    """A confirmed external high and low: §5.7's two anchors."""
+    return (
+        SwingPoint(
+            index=5,
+            open_time=datetime(2026, 8, 1, tzinfo=UTC),
+            price=Decimal(100),
+            kind=SwingKind.LOW,
+            strength=SwingStrength.EXTERNAL,
+        ),
+        SwingPoint(
+            index=9,
+            open_time=datetime(2026, 8, 1, tzinfo=UTC),
+            price=Decimal(110),
+            kind=SwingKind.HIGH,
+            strength=SwingStrength.EXTERNAL,
+        ),
+    )
+
+
+def _quiet(count: int = 150) -> list[Candle]:
+    return [make_candle(i, high="106", low="104") for i in range(count)]
+
+
+def test_a_bullish_trend_that_has_gone_quiet_becomes_ranging() -> None:
+    """§3.4's state diagram: `BULLISH --> RANGING: structure idle 100 candles`.
+
+    The label sequence says what the trend was; the idle rule asks whether it
+    has since stopped happening. Neither constant nor check existed before —
+    the state machine only moved on CHoCH and MSS, so a market could sit
+    inside its own bracket indefinitely and still report BULLISH.
+    """
+    assert (
+        _idle_adjusted(
+            "BULLISH",
+            candles=_quiet(),
+            external_swings=_bracket_swings(),
+            broke_at=frozenset(),
+        )
+        == "RANGING"
+    )
+
+
+def test_a_break_inside_the_window_keeps_the_trend() -> None:
+    """A trend still breaking external levels is not idle.
+
+    The break leaves no trace in the closes -- price closed back inside the
+    bracket -- so the range condition alone would call this quiet.
+    """
+    candles = _quiet()
+
+    assert (
+        _idle_adjusted(
+            "BULLISH",
+            candles=candles,
+            external_swings=_bracket_swings(),
+            broke_at=frozenset({len(candles) - 3}),
+        )
+        == "BULLISH"
+    )
+
+
+def test_a_break_older_than_the_window_does_not_keep_it_alive() -> None:
+    """The window is a hundred candles, and the break was before it."""
+    candles = _quiet()
+
+    assert (
+        _idle_adjusted(
+            "BULLISH",
+            candles=candles,
+            external_swings=_bracket_swings(),
+            broke_at=frozenset({3}),
+        )
+        == "RANGING"
+    )
+
+
+def test_only_the_two_trending_states_can_idle_out() -> None:
+    """§3.4 draws the edge from BULLISH and BEARISH and from nowhere else.
+
+    RANGING is already the destination, and the CAUTION states are
+    mid-transition -- idling out of one would discard the CHoCH that put it
+    there.
+    """
+    for state in ("RANGING", "BULLISH_CAUTION", "BEARISH_CAUTION"):
+        assert (
+            _idle_adjusted(
+                state,
+                candles=_quiet(),
+                external_swings=_bracket_swings(),
+                broke_at=frozenset(),
+            )
+            == state
+        )
+
+
+def test_without_both_anchors_the_trend_stands() -> None:
+    """There is no bracket to be inside of, so the question cannot be asked."""
+    highs_only = tuple(s for s in _bracket_swings() if s.kind is SwingKind.HIGH)
+
+    assert (
+        _idle_adjusted(
+            "BULLISH",
+            candles=_quiet(),
+            external_swings=highs_only,
+            broke_at=frozenset(),
+        )
+        == "BULLISH"
+    )
