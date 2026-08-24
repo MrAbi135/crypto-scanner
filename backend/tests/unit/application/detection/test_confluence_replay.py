@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -29,6 +29,7 @@ from scanner.application.ports.ict_evidence import LiquidityEvidenceRecord
 from scanner.application.ports.ict_zone_interactions import IctZoneInteractionRecord
 from scanner.application.ports.ict_zones import IctZoneRecord
 from scanner.application.ports.liquidity_detection import LiquidityPoolRecord
+from scanner.application.ports.signal_transitions import SignalTransitionRecord
 from scanner.domain.common import TradeAggregate
 from scanner.domain.volume import WashRiskState
 from scanner.shared import Timeframe
@@ -439,6 +440,7 @@ def service(
     setups=None,
     signals=None,
     incidents=None,
+    transitions=None,
 ):
     repo = FakeEventRepository(events)
 
@@ -475,9 +477,45 @@ def service(
         setups=setups,
         signals=signals,
         incidents=incidents,
+        transitions=transitions,
     )
 
     return svc, repo
+
+
+class FakeTransitions:
+    """T18 in memory, unique on (signal, candle, refresh) as migration 017 is."""
+
+    def __init__(self) -> None:
+        self.rows: list = []
+        self._seen: set = set()
+
+    async def append(self, transition) -> bool:
+        key = (
+            transition.signal_id,
+            transition.at_candle_open_time,
+            transition.refresh,
+        )
+
+        if key in self._seen:
+            return False
+
+        self._seen.add(key)
+        self.rows.append(transition)
+
+        return True
+
+    async def current_state(self, signal_id):
+        states = [r.to_state for r in self.rows if r.signal_id == signal_id and not r.refresh]
+
+        return states[-1] if states else None
+
+    async def list_live(self, symbol, timeframe):
+        return ()
+
+    @property
+    def refreshes(self) -> list:
+        return [r for r in self.rows if r.refresh]
 
 
 class FakeSignals:
@@ -857,18 +895,25 @@ async def test_a_clean_candidate_is_published_and_sealed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_second_signal_on_a_live_key_is_suppressed_as_a_duplicate() -> None:
-    """§10.3: a signal matching an ACTIVE one "is merged as a refresh event
-    on the existing signal -- never a second alert".
+async def test_a_second_signal_on_a_live_key_merges_as_a_refresh() -> None:
+    """§10.3: a signal matching a live one "is merged as a refresh event on
+    the existing signal (evidence appended) -- never a second alert".
 
-    The merge itself is piece 5. What this pins is that the second one does
-    not become a second row, and that the suppression says which check
-    refused it.
+    A merge, not a suppression. The distinction is the whole clause: a
+    suppression files the re-detection away from the signal it belongs to,
+    and the thing a reader needs later is whether *this* signal's setup was
+    still standing on that candle.
     """
     signals = FakeSignals()
+    transitions = FakeTransitions()
     candidate = publishable_candidate()
 
-    svc, repo = service(**bullish_setup(), signals=signals, incidents=FakeIncidents())
+    svc, repo = service(
+        **bullish_setup(),
+        signals=signals,
+        incidents=FakeIncidents(),
+        transitions=transitions,
+    )
 
     at = BASE + TF.duration * 10
 
@@ -877,13 +922,143 @@ async def test_a_second_signal_on_a_live_key_is_suppressed_as_a_duplicate() -> N
 
     assert len(signals.rows) == 1
 
+    published_id = next(iter(signals.rows))
+
+    assert len(transitions.refreshes) == 1
+
+    row = transitions.refreshes[0]
+
+    # Appended to the signal that holds the key -- not to a new one, and not
+    # to nothing.
+    assert row.signal_id == published_id
+    assert row.at_candle_open_time == at + TF.duration
+    # A refresh does not move the signal, so it sits where the signal is.
+    assert row.from_state == row.to_state == "PUBLISHED"
+    assert not row.stress_test
+
+    # "Never a second alert", and never a suppression either: a merge is not
+    # a candidate that failed a check.
+    assert not [r for r in repo.appended.values() if r.event_type.startswith("SIGNAL_SUPPRESSED_")]
+
+
+@pytest.mark.asyncio
+async def test_the_refresh_does_not_change_what_the_signal_was_published_with() -> None:
+    """§12.1: "evidence, zones, levels never mutate post-creation (refresh
+    events append)".
+
+    The second detection here scores higher than the first. Its number lands
+    in the refresh row and nowhere else -- a published signal whose confidence
+    crept upward every candle would make the grade on the alert a fiction.
+    """
+    signals = FakeSignals()
+    transitions = FakeTransitions()
+
+    svc, _ = service(
+        **bullish_setup(),
+        signals=signals,
+        incidents=FakeIncidents(),
+        transitions=transitions,
+    )
+
+    at = BASE + TF.duration * 10
+
+    first = publishable_candidate()
+
+    await svc._publish("BTCUSDT", TF, at, first)
+
+    published = next(iter(signals.rows.values()))
+    original = published.final_confidence
+
+    await svc._publish("BTCUSDT", TF, at + TF.duration, publishable_candidate())
+
+    assert next(iter(signals.rows.values())).final_confidence == original
+
+    evidence = json.loads(transitions.refreshes[0].trigger_evidence)
+
+    assert evidence["dedup_key"] == published.dedup_key
+
+
+@pytest.mark.asyncio
+async def test_a_duplicate_that_also_fails_another_check_is_suppressed_not_merged() -> None:
+    """A merge is only for a candidate that would otherwise have published.
+
+    §10.3 merges the re-detection because it is the *same setup, still
+    valid*. One that also had a stale feed in its evidence chain is not that
+    -- it would have been refused on a free key too, and appending it to a
+    live signal would hand that signal evidence §15.3(2) just rejected.
+    """
+    signals = FakeSignals()
+    transitions = FakeTransitions()
+
+    svc, repo = service(
+        **bullish_setup(),
+        signals=signals,
+        incidents=FakeIncidents(),
+        transitions=transitions,
+    )
+
+    at = BASE + TF.duration * 10
+
+    await svc._publish("BTCUSDT", TF, at, publishable_candidate())
+
+    stale = replace(publishable_candidate(), stale_context=True)
+
+    await svc._publish("BTCUSDT", TF, at + TF.duration, stale)
+
+    assert transitions.refreshes == []
+
     suppressed = [
         json.loads(r.payload)
         for r in repo.appended.values()
         if r.event_type.startswith("SIGNAL_SUPPRESSED_")
     ]
 
-    assert suppressed == [{"reasons": ["DUPLICATE_KEY"]}]
+    assert suppressed == [{"reasons": ["STALE_FEEDS", "DUPLICATE_KEY"]}]
+
+
+@pytest.mark.asyncio
+async def test_a_resolved_signal_frees_its_key_before_the_ttl_lapses() -> None:
+    """§10.3 holds a key for a *live* signal, and §12's terminal states end that.
+
+    Without the state check the key would stay held for the rest of the TTL
+    after the signal hit its target -- muting a genuinely new setup on the
+    same zone for up to eighteen candles, and doing it silently.
+    """
+    signals = FakeSignals()
+    transitions = FakeTransitions()
+
+    svc, _ = service(
+        **bullish_setup(),
+        signals=signals,
+        incidents=FakeIncidents(),
+        transitions=transitions,
+    )
+
+    at = BASE + TF.duration * 10
+
+    await svc._publish("BTCUSDT", TF, at, publishable_candidate())
+
+    published = next(iter(signals.rows.values()))
+
+    await transitions.append(
+        SignalTransitionRecord(
+            transition_id="resolved",
+            signal_id=published.signal_id,
+            from_state="PUBLISHED",
+            to_state="SUCCESS",
+            at_candle_open_time=at + TF.duration,
+            recorded_at=at + TF.duration,
+            stress_test=False,
+            refresh=False,
+            trigger_evidence="{}",
+        )
+    )
+
+    # Still well inside H4's 18-candle TTL.
+    await svc._publish("BTCUSDT", TF, at + TF.duration * 2, publishable_candidate())
+
+    assert len(signals.rows) == 2
+    assert transitions.refreshes == []
 
 
 @pytest.mark.asyncio

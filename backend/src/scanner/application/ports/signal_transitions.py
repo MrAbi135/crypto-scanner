@@ -24,6 +24,11 @@ class SignalTransitionRecord:
     at_candle_open_time: datetime
     recorded_at: datetime
     stress_test: bool
+
+    # §10.3's merge: a second candidate on a live key appends its evidence
+    # here instead of publishing. Also `from_state == to_state` -- a
+    # refresh is news about the signal, not a move.
+    refresh: bool
     trigger_evidence: str
 
 

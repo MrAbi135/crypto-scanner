@@ -40,6 +40,7 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityTransitionRecord,
 )
 from scanner.application.ports.param_sets import ParamSetRecord
+from scanner.application.ports.signal_transitions import SignalTransitionRecord
 from scanner.application.ports.signals import SignalRecord
 from scanner.domain.ict import MAX_ZONES
 from scanner.infrastructure.persistence.database import build_session_factory
@@ -63,6 +64,9 @@ from scanner.infrastructure.persistence.liquidity_detection_repositories import 
 )
 from scanner.infrastructure.persistence.param_set_repository import PgParamSetRepository
 from scanner.infrastructure.persistence.signal_repository import PgSignalRepository
+from scanner.infrastructure.persistence.signal_transition_repository import (
+    PgSignalTransitionRepository,
+)
 from scanner.shared import Timeframe
 
 pytestmark = pytest.mark.integration
@@ -1028,3 +1032,91 @@ async def test_an_entry_band_of_zero_width_is_refused(engine) -> None:
         await repo.append(
             replace(signal("sig-flat"), entry_proximal=Decimal(100), entry_distal=Decimal(100))
         )
+
+
+def transition(
+    transition_id: str,
+    *,
+    signal_id: str = "sig-1",
+    from_state: str = "PUBLISHED",
+    to_state: str = "ACTIVE",
+    at: datetime = T0,
+    stress_test: bool = False,
+    refresh: bool = False,
+) -> SignalTransitionRecord:
+    return SignalTransitionRecord(
+        transition_id=transition_id,
+        signal_id=signal_id,
+        from_state=from_state,
+        to_state=to_state,
+        at_candle_open_time=at,
+        recorded_at=T0,
+        stress_test=stress_test,
+        refresh=refresh,
+        trigger_evidence="{}",
+    )
+
+
+async def test_a_verdict_and_a_refresh_on_one_candle_both_land(engine) -> None:
+    """Migration 017's widened key, against the constraint that enforces it.
+
+    T18 was unique on (signal, candle) because §12 monitors once per closed
+    candle. §10.3's refresh is written by the *detector* on that same closed
+    candle, so under the old key one of the two facts was dropped by
+    `ON CONFLICT DO NOTHING` -- silently, and with no way to tell which.
+    """
+    sessions = build_session_factory(engine)
+
+    await PgSignalRepository(sessions).append(signal("sig-1"))
+
+    repo = PgSignalTransitionRepository(sessions)
+
+    assert await repo.append(transition("t-verdict"))
+    assert await repo.append(transition("t-refresh", refresh=True, to_state="PUBLISHED"))
+
+    # And the old rule still holds inside each kind.
+    assert not await repo.append(transition("t-verdict-again"))
+    assert not await repo.append(transition("t-refresh-again", refresh=True, to_state="PUBLISHED"))
+
+
+async def test_a_refresh_cannot_resurrect_a_resolved_signal(engine) -> None:
+    """The reason `current_state` filters refresh rows instead of ordering them.
+
+    A refresh carries `from_state == to_state`, so it looks inert. But it
+    lands on the same candle as the monitor's verdict, and the tie-break
+    between two rows on one candle is `transition_id` -- a sha256. A signal
+    that resolved on the candle it was re-detected would read back as live
+    about half the time, and which half would depend on a hash.
+    """
+    sessions = build_session_factory(engine)
+
+    await PgSignalRepository(sessions).append(signal("sig-2"))
+
+    repo = PgSignalTransitionRepository(sessions)
+
+    await repo.append(transition("t-1", signal_id="sig-2", to_state="ACTIVE"))
+    await repo.append(
+        transition(
+            "t-2",
+            signal_id="sig-2",
+            from_state="ACTIVE",
+            to_state="SUCCESS",
+            at=T0 + timedelta(hours=1),
+        )
+    )
+    # The detector re-detects on the very candle the signal resolved.
+    await repo.append(
+        transition(
+            "t-3",
+            signal_id="sig-2",
+            from_state="ACTIVE",
+            to_state="ACTIVE",
+            at=T0 + timedelta(hours=1),
+            refresh=True,
+        )
+    )
+
+    assert await repo.current_state("sig-2") == "SUCCESS"
+    # Scoped to this signal: the module shares one database, and the point is
+    # that a resolved signal leaves the live set, not that the set is empty.
+    assert "sig-2" not in await repo.list_live("BTCUSDT", TF.value)
