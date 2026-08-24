@@ -8,10 +8,24 @@ from scanner.domain.lifecycle.payload import (
     SuppressionReason,
     publication_checks,
 )
+from scanner.domain.lifecycle.state import (
+    TERMINAL_STATES,
+    Candle,
+    Observation,
+    SignalState,
+    may_transition,
+    observe,
+)
 
 __all__ = [
+    "TERMINAL_STATES",
+    "Candle",
+    "Observation",
     "PublicationDecision",
     "SignalPayload",
+    "SignalState",
     "SuppressionReason",
+    "may_transition",
+    "observe",
     "publication_checks",
 ]
