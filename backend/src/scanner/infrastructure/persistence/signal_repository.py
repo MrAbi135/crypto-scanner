@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from datetime import datetime
+
+from sqlalchemy import select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -98,3 +100,58 @@ class PgSignalRepository:
             row = await session.get(SignalRow, signal_id)
 
         return _record(row) if row is not None else None
+
+    async def recent(
+        self,
+        *,
+        limit: int,
+        symbol: str | None = None,
+        timeframe: Timeframe | None = None,
+    ) -> tuple[SignalRecord, ...]:
+        stmt = select(SignalRow).order_by(
+            SignalRow.published_at.desc(),
+            # A tie-break the index already orders on, so two signals
+            # published on the same close come back in a stable order rather
+            # than whatever the plan happened to produce.
+            SignalRow.signal_id.desc(),
+        )
+
+        if symbol is not None:
+            stmt = stmt.where(SignalRow.symbol == symbol)
+
+        if timeframe is not None:
+            stmt = stmt.where(SignalRow.timeframe == timeframe.value)
+
+        async with self._sessions() as session:
+            rows = (await session.execute(stmt.limit(limit))).scalars().all()
+
+        return tuple(_record(row) for row in rows)
+
+    async def scan(self, *, batch: int = 500) -> list[SignalRecord]:
+        """Every signal, oldest first, by keyset rather than OFFSET.
+
+        OFFSET re-reads and discards the rows it skips, so a full audit would
+        cost O(n^2) on a table that only grows. The cursor is the same
+        (published_at, signal_id) pair the ordering uses, which is unique
+        because `signal_id` is the primary key.
+        """
+        found: list[SignalRecord] = []
+        cursor: tuple[datetime, str] | None = None
+
+        while True:
+            stmt = select(SignalRow).order_by(
+                SignalRow.published_at.asc(),
+                SignalRow.signal_id.asc(),
+            )
+
+            if cursor is not None:
+                stmt = stmt.where(tuple_(SignalRow.published_at, SignalRow.signal_id) > cursor)
+
+            async with self._sessions() as session:
+                rows = (await session.execute(stmt.limit(batch))).scalars().all()
+
+            if not rows:
+                return found
+
+            found.extend(_record(row) for row in rows)
+            cursor = (rows[-1].published_at, rows[-1].signal_id)

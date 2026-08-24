@@ -25,6 +25,7 @@ from scanner.application.marketdata import (
 )
 from scanner.application.marketdata.warmth import ENGINE_TIMEFRAMES, assess_all
 from scanner.application.ranking import RankingSnapshotService
+from scanner.application.signal_audit import verify_seals
 from scanner.config import (
     get_settings,
     load_ingest_settings,
@@ -43,6 +44,10 @@ from scanner.infrastructure.persistence.repositories import (
     PgSymbolRepository,
 )
 from scanner.infrastructure.persistence.setup_repository import PgSetupRepository
+from scanner.infrastructure.persistence.signal_repository import PgSignalRepository
+from scanner.infrastructure.persistence.signal_transition_repository import (
+    PgSignalTransitionRepository,
+)
 from scanner.infrastructure.redis.client import build_redis
 from scanner.interfaces.cli.main import build_parser
 from scanner.runtime.wiring.detection import build_detection_pipeline
@@ -526,6 +531,92 @@ async def _run_rank_snapshot(
         await engine.dispose()
 
 
+async def _run_signals_tail(
+    args: argparse.Namespace,
+) -> int:
+    """The published record as an operator reads it: newest first, with state.
+
+    The state comes from T18 rather than a column on T17, one query per row.
+    That is N+1, and deliberately so at a default limit of 20 -- the
+    alternative is a window function over the whole transition history to
+    save nineteen index lookups on a command a human runs by hand.
+    """
+    settings = get_settings("engine")
+
+    engine = build_engine(settings.db_dsn)
+
+    try:
+        sessions = build_session_factory(engine)
+
+        signals = PgSignalRepository(sessions)
+        transitions = PgSignalTransitionRepository(sessions)
+
+        rows = await signals.recent(
+            limit=args.limit,
+            symbol=args.symbol,
+            timeframe=args.timeframe,
+        )
+
+        # Printed even when empty, and saying so. A silent command makes "no
+        # signals published" and "wrong database" look identical, which is
+        # the question this is usually run to answer.
+        print(f"signals: {len(rows)} (limit={args.limit})")
+
+        for row in rows:
+            state = await transitions.current_state(row.signal_id) or "NO HISTORY"
+
+            print(
+                f"{row.published_at.isoformat()}  {row.symbol:<12} "
+                f"{row.timeframe.value:<4} {row.direction:<4} {row.archetype:<3} "
+                f"{row.grade:<1} conf={row.final_confidence:<6} "
+                f"entry={row.entry_proximal}/{row.entry_distal} "
+                f"inval={row.invalidation_level} {state}"
+            )
+
+        return 0
+    finally:
+        await engine.dispose()
+
+
+async def _run_signals_verify_hashes(
+    args: argparse.Namespace,
+) -> int:
+    """§15.3(5)'s seals, recomputed.
+
+    Exits non-zero on any failure. This is meant to run from the backup cycle
+    -- DDD says T17 is "checksum-verified in every backup cycle" -- and a
+    verification that reports a problem on stdout and exits 0 is one nobody
+    finds out about.
+    """
+    settings = get_settings("engine")
+
+    engine = build_engine(settings.db_dsn)
+
+    try:
+        report = await verify_seals(PgSignalRepository(build_session_factory(engine)))
+
+        print(f"verify-hashes: checked={report.checked} failures={len(report.failures)}")
+
+        for failure in report.failures:
+            print(
+                f"  {failure.signal_id}: {failure.reason} "
+                f"recorded={failure.recorded[:16]}... "
+                f"recomputed={failure.recomputed[:16]}..."
+            )
+
+        if not report.intact:
+            return 1
+
+        # Said out loud, because "checked=0 failures=0" also prints a clean
+        # line and means something entirely different.
+        if report.checked == 0:
+            print("verify-hashes: no signals on this database -- nothing was verified")
+
+        return 0
+    finally:
+        await engine.dispose()
+
+
 _HANDLERS: dict[
     str,
     Callable[
@@ -548,6 +639,15 @@ async def _dispatch(
             return await _run_rank_snapshot(args)
 
         raise ValueError(f"unknown rank command: {args.rank_command}")
+
+    if args.command == "signals":
+        if args.signals_command == "tail":
+            return await _run_signals_tail(args)
+
+        if args.signals_command == "verify-hashes":
+            return await _run_signals_verify_hashes(args)
+
+        raise ValueError(f"unknown signals command: {args.signals_command}")
 
     if args.command == "engine":
         if args.engine_command == "run":
