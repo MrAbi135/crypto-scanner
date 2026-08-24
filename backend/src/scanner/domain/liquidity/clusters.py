@@ -24,21 +24,26 @@ from __future__ import annotations
 from collections.abc import Sequence
 from decimal import Decimal
 
+from scanner.domain.common import TOLERANCE_ATR
 from scanner.domain.liquidity.model import (
     EqualLevelCluster,
     LiquiditySide,
 )
 from scanner.domain.structure import SwingKind, SwingPoint, swing_window
 
-EPSILON_ATR = Decimal("0.05")
+# §4.3's gap bounds, named rather than left as call defaults so the
+# parameter registry can read them. A doctrine parameter that lives only
+# in a signature cannot be checked against Appendix A by anything.
+EQ_MIN_GAP = 3
+EQ_MAX_GAP = 100
 
 
 def detect_equal_level_clusters(
     swings: Sequence[SwingPoint],
     *,
     atrs: Sequence[Decimal | None],
-    min_gap: int = 3,
-    max_gap: int = 100,
+    min_gap: int = EQ_MIN_GAP,
+    max_gap: int = EQ_MAX_GAP,
     min_depth_atr: Decimal = Decimal("0.5"),
 ) -> tuple[EqualLevelCluster, ...]:
     """Detect deterministic EQH/EQL chains from confirmed swings.
@@ -146,7 +151,7 @@ def _cluster_side(
             if atr is None:
                 break
 
-            if abs(current.price - previous.price) > EPSILON_ATR * atr:
+            if abs(current.price - previous.price) > TOLERANCE_ATR * atr:
                 break
 
             if not _has_required_depth(
