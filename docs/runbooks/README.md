@@ -16,6 +16,7 @@ Every runbook states, in order:
 | Runbook | Purpose | Owning sprint |
 |---|---|---|
 | [backfill.md](backfill.md) | Fill/repair the historical candle record for one series | S1 |
+| [deploy-p1b.md](deploy-p1b.md) | Move staging from `008` to `013` and onto the current build | P1b |
 | _staging-provision.md_ | Provision + harden the staging host | S0.3 (planned) |
 | _feed-incidents.md_ | Diagnose and recover the live ingest feed | S2 (planned) |
 | _secret-rotation.md_ | Quarterly secret rotation procedure | S21 (planned) |
