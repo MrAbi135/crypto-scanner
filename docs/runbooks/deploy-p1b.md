@@ -194,11 +194,13 @@ keeping up; see `debugging.md`.
 
 | Signal | Healthy | What it means otherwise |
 |---|---|---|
-| `alembic_version` | `013_param_set` | Migration rolled back; database is still on `008` and safe. Read the alembic error before retrying. |
+| `alembic_version` | `018_append_only_guards` | Migration rolled back; database is still on `008` and safe. Read the alembic error before retrying. |
 | interaction rows | ~1.2 M | Unchanged ⇒ the rebuild did not run. Check the duplicate query before concluding anything. |
 | duplicate triples | `0` | Non-zero ⇒ the unique index is missing; stop and investigate before starting the engine. |
 | container restarts | `0` | Any restart ⇒ read that container's logs before restarting anything. |
 | `ParameterSetMismatchError` | absent | Present ⇒ working as designed. Fix the parameter set, do not bypass. |
+| `ImmutabilityGuardsMissingError` | absent | Present ⇒ the append-only triggers are missing or disabled on this database. Do **not** bypass; see the section below. |
+| `immutability_grant_layer_absent` | present, for now | Expected until the least-privilege role below exists. Its absence would mean the engine is no longer the table owner — good, and worth confirming deliberately. |
 | stream `pending` | falls to ~0 | Stays high ⇒ engine behind; do not stop it, watch first. |
 
 ## Escalation
@@ -218,3 +220,58 @@ on rollback. Verify with `df -h`, then reclaim before retrying.
 **Anything ambiguous.** Stop and write down what you saw. This host holds the
 only 72 h of real detection data the project has; an hour spent reading is
 cheaper than restoring it.
+
+
+## Least-privilege role — the layer the code cannot install
+
+DDD asks for three layers on `detection.signals`, `signal_transitions`, and
+`signal_outcomes`: *"(a) no UPDATE grants to the application role on these
+tables, (b) trigger-guard rejecting UPDATE/DELETE (defense in depth), (c) hash
+chains/payload hashes for tamper evidence"*.
+
+**(b) and (c) are in force.** Migration 018 installs the triggers and the
+engine verifies them against the live catalog at every boot — it refuses to
+start if they are missing or disabled.
+
+**(a) is not, and cannot be closed from inside the application.** The engine
+connects as `scanner`, which owns those tables. An owner's privileges cannot be
+meaningfully revoked from itself, and a superuser ignores grants entirely. So
+every boot logs `immutability_grant_layer_absent`, and that warning is honest:
+two of the three layers are doing work.
+
+Closing it needs a second role and a second secret, which is a deployment
+decision rather than a code change. The SQL, for whoever makes it:
+
+```sql
+-- As the owner (`scanner`), once per database.
+CREATE ROLE scanner_app LOGIN PASSWORD :'app_password';
+
+GRANT USAGE ON SCHEMA detection, market, ops TO scanner_app;
+GRANT SELECT, INSERT, UPDATE, DELETE
+  ON ALL TABLES IN SCHEMA detection, market, ops TO scanner_app;
+
+-- The point of the exercise: the crown jewels are insert-and-read only.
+REVOKE UPDATE, DELETE, TRUNCATE ON
+  detection.signals,
+  detection.signal_transitions,
+  detection.signal_outcomes
+FROM scanner_app;
+
+-- Tables added later inherit the broad grant, so re-run the REVOKE above
+-- whenever a new immutable table appears. Default privileges cannot express
+-- "everything except these three".
+ALTER DEFAULT PRIVILEGES IN SCHEMA detection, market, ops
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO scanner_app;
+```
+
+Then point the **application** at `scanner_app` and leave **migrations** running
+as `scanner`: alembic needs DDL, and the whole arrangement collapses if the
+process that publishes signals is also the one that can drop the triggers.
+
+Order matters on the switch — migrate first, then restart the app on the new
+credential. Reversing it starts an engine that cannot create the tables it is
+about to write to.
+
+After the switch, `immutability_grant_layer_absent` should stop appearing in
+the engine logs. If it still does, the app is still connecting as the owner and
+nothing has changed but the password.
