@@ -824,3 +824,86 @@ async def test_the_same_algo_version_may_carry_two_parameter_sets(engine) -> Non
 
     assert first is not None and first.checksum == "c" * 64
     assert second is not None and second.checksum == "d" * 64
+
+
+async def test_the_rebuilt_interaction_table_kept_its_shape(engine) -> None:
+    """Migration 011 drops the table and builds a new one in its place.
+
+    `CREATE TABLE ... (LIKE ... INCLUDING CONSTRAINTS)` carries the columns,
+    the NOT NULLs and the kind check; the indexes are created explicitly
+    afterwards so they keep their canonical names. Neither half is obvious
+    from reading the migration, and a rebuild that quietly dropped a NOT NULL
+    or renamed an index would pass every test that only inserts valid rows.
+
+    The original migration deleted in place instead. Planned against the soak
+    VM it came out as two sequential scans of 24.7 million rows with two
+    sorts, and a DELETE reclaims nothing -- the 15 GB table would have kept
+    15 GB of dead tuples on a host with 23 GB free.
+    """
+    async with engine.connect() as conn:
+        indexes = {
+            row[0]
+            for row in (
+                await conn.execute(
+                    text(
+                        "SELECT indexname FROM pg_indexes "
+                        "WHERE schemaname='detection' "
+                        "AND tablename='ict_zone_interactions'"
+                    )
+                )
+            ).all()
+        }
+
+        not_null = {
+            row[0]
+            for row in (
+                await conn.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema='detection' "
+                        "AND table_name='ict_zone_interactions' "
+                        "AND is_nullable='NO'"
+                    )
+                )
+            ).all()
+        }
+
+        checks = {
+            row[0]
+            for row in (
+                await conn.execute(
+                    text(
+                        "SELECT conname FROM pg_constraint "
+                        "WHERE conrelid='detection.ict_zone_interactions'::regclass "
+                        "AND contype='c'"
+                    )
+                )
+            ).all()
+        }
+
+    assert indexes == {
+        "pk_ict_zone_interactions",
+        "ix_ict_zone_interactions_context_time",
+        "ix_ict_zone_interactions_zone_time",
+        "uq_ict_zone_interactions_identity",
+    }
+
+    # Every column: the table has no nullable ones, and a rebuild is exactly
+    # where that would be lost.
+    assert not_null == {
+        "interaction_id",
+        "zone_id",
+        "symbol",
+        "timeframe",
+        "zone_type",
+        "kind",
+        "observed_at",
+        "candle_index",
+        "penetration_depth",
+        "close_price",
+        "rejection_wick",
+        "close_through",
+        "evidence",
+    }
+
+    assert "ck_ict_zone_interactions_kind" in checks
