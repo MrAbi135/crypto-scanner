@@ -40,6 +40,7 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityTransitionRecord,
 )
 from scanner.application.ports.param_sets import ParamSetRecord
+from scanner.application.ports.signals import SignalRecord
 from scanner.domain.ict import MAX_ZONES
 from scanner.infrastructure.persistence.database import build_session_factory
 from scanner.infrastructure.persistence.detection_repositories import (
@@ -61,6 +62,7 @@ from scanner.infrastructure.persistence.liquidity_detection_repositories import 
     PgLiquidityTransitionRepository,
 )
 from scanner.infrastructure.persistence.param_set_repository import PgParamSetRepository
+from scanner.infrastructure.persistence.signal_repository import PgSignalRepository
 from scanner.shared import Timeframe
 
 pytestmark = pytest.mark.integration
@@ -907,3 +909,122 @@ async def test_the_rebuilt_interaction_table_kept_its_shape(engine) -> None:
     }
 
     assert "ck_ict_zone_interactions_kind" in checks
+
+
+# --------------------------------------------------------------------------
+# T17 signals — the crown jewel (DDD T17, SLS §12, §15)
+# --------------------------------------------------------------------------
+
+
+def signal(
+    signal_id: str,
+    *,
+    dedup_key: str = "BTCUSDT|H1|UP|A4|104.00:100.00",
+    published_at: datetime = T0,
+    grade: str = "A",
+) -> SignalRecord:
+    return SignalRecord(
+        signal_id=signal_id,
+        setup_id="setup-1",
+        symbol="BTCUSDT",
+        timeframe=TF,
+        direction="UP",
+        archetype="A4",
+        grade=grade,
+        final_confidence=Decimal(82),
+        entry_proximal=Decimal(104),
+        entry_distal=Decimal(100),
+        invalidation_level=Decimal(98),
+        target_bands='[{"low":"112","high":"114"}]',
+        published_at=published_at,
+        ttl_candles=24,
+        algo_version="s8-test",
+        param_set_version="2026.08.24.2",
+        payload='{"symbol":"BTCUSDT"}',
+        payload_hash="a" * 64,
+        dedup_key=dedup_key,
+    )
+
+
+async def test_a_signal_round_trips_and_a_second_write_is_refused(engine) -> None:
+    """T17 is insert-once — Constitution §45.5 makes it constitutional.
+
+    `ON CONFLICT DO NOTHING` rather than an upsert, so a second write on the
+    same id reports False and changes nothing. An upsert would let a replay
+    silently replace a published record, which is the one thing a crown-jewel
+    table must not allow.
+    """
+    repo = PgSignalRepository(build_session_factory(engine))
+
+    assert await repo.append(signal("sig-1"))
+    assert not await repo.append(replace(signal("sig-1"), payload_hash="b" * 64))
+
+    found = await repo.get("sig-1")
+
+    assert found is not None
+    assert found.payload_hash == "a" * 64
+
+
+async def test_the_dedup_lookup_returns_the_most_recent(engine) -> None:
+    """§15.3(4) asks whether the key is clear, and only the newest can answer.
+
+    Whether that one is still inside its TTL is §12.5's arithmetic and belongs
+    to the caller -- a query that tried to decide it would need the timeframe
+    ladder in SQL.
+    """
+    repo = PgSignalRepository(build_session_factory(engine))
+    dedup = "ETHUSDT|H1|UP|A4|50.00:48.00"
+
+    await repo.append(signal("sig-old", dedup_key=dedup, published_at=T0))
+    await repo.append(signal("sig-new", dedup_key=dedup, published_at=T0 + timedelta(hours=5)))
+
+    latest = await repo.latest_for_dedup_key(dedup)
+
+    assert latest is not None
+    assert latest.signal_id == "sig-new"
+
+    assert await repo.latest_for_dedup_key("no-such-key") is None
+
+
+async def test_the_same_key_may_be_published_twice_over_time(engine) -> None:
+    """The dedup index is deliberately not unique.
+
+    T17's index requirements ask for a "unique partial on dedup_key for active
+    window", and there is no column to predicate that on: §12's state lives in
+    T18 and T17 has no UPDATE surface. A unique index without the predicate
+    would forbid ever re-publishing a setup on the same zone, which §10.3
+    never says -- it says a signal matching an *ACTIVE* one is merged.
+    """
+    repo = PgSignalRepository(build_session_factory(engine))
+    dedup = "SOLUSDT|H1|UP|A3|20.00:19.00"
+
+    assert await repo.append(signal("sig-a", dedup_key=dedup, published_at=T0))
+    assert await repo.append(signal("sig-b", dedup_key=dedup, published_at=T0 + timedelta(days=30)))
+
+
+async def test_the_grade_check_refuses_an_unpublishable_band(engine) -> None:
+    """§9.4 has three bands and §8.6 will not publish below the lowest floor.
+
+    A row graded outside S/A/B is a signal that should never have been
+    written, and the table says so rather than storing it for someone to
+    discover in a statistics query.
+    """
+    repo = PgSignalRepository(build_session_factory(engine))
+
+    with pytest.raises(Exception, match="ck_signals_grade"):
+        await repo.append(signal("sig-bad-grade", grade="C"))
+
+
+async def test_an_entry_band_of_zero_width_is_refused(engine) -> None:
+    """§15.3(1): "entry != invalidation side".
+
+    Proximal and distal are oriented by direction, so equality is the one
+    thing both directions forbid -- a band with no width has no mid to measure
+    R from.
+    """
+    repo = PgSignalRepository(build_session_factory(engine))
+
+    with pytest.raises(Exception, match="ck_signals_entry_band"):
+        await repo.append(
+            replace(signal("sig-flat"), entry_proximal=Decimal(100), entry_distal=Decimal(100))
+        )
