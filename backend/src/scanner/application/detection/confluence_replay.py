@@ -1121,9 +1121,7 @@ class ConfluenceReplayService:
 
         await self._transitions.append(
             SignalTransitionRecord(
-                transition_id=_transition_id(
-                    blocker.signal.signal_id, event_at, refresh=True
-                ),
+                transition_id=_transition_id(blocker.signal.signal_id, event_at, refresh=True),
                 signal_id=blocker.signal.signal_id,
                 # A refresh is news about the signal, not a move, so it sits
                 # where the signal already is -- the same shape §12.3 uses for
