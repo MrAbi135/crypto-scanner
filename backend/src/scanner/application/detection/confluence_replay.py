@@ -58,7 +58,13 @@ from scanner.application.ports.repositories import (
     TradeAggregateRepository,
 )
 from scanner.application.ports.setups import SetupRecord, SetupRepository
-from scanner.domain.common import Candle, TradeAggregate, wilder_atr, wilder_atr_series
+from scanner.domain.common import (
+    TOLERANCE_ATR,
+    Candle,
+    TradeAggregate,
+    wilder_atr,
+    wilder_atr_series,
+)
 from scanner.domain.common.rvol import median, relative_volume
 from scanner.domain.confluence import (
     Adjustment,
@@ -128,7 +134,6 @@ CONFLUENCE_ALGO_VERSION = "s8-confluence-v20"
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
 # extreme rather than some level near it.
-_EPSILON_ATR = Decimal("0.05")
 
 G5_DISPLACEMENT_WINDOW = 3
 
@@ -1172,7 +1177,7 @@ def _swept_a_range_extreme(
     if pd is None or atr is None or atr <= 0:
         return False
 
-    tolerance = _EPSILON_ATR * atr
+    tolerance = TOLERANCE_ATR * atr
 
     return any(
         sweep.reference_level is not None

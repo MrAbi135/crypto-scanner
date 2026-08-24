@@ -12,6 +12,11 @@ from scanner.domain.liquidity.model import PoolState
 # still transitions, it is simply not part of the map that gets published.
 MAX_POOLS = 40
 
+# §4.2: pools expire past `P.liquidity.pool_max_age = 500` closed candles.
+# Named for the same reason as §4.3's gaps: a parameter that exists only as
+# a call default is invisible to the registry that checks Appendix A.
+POOL_MAX_AGE = 500
+
 _TERMINAL_STATES = {
     PoolState.SWEPT,
     PoolState.BROKEN,
@@ -51,7 +56,7 @@ class PoolStateMachine:
 def should_expire_pool(
     *,
     age_candles: int,
-    max_age: int = 500,
+    max_age: int = POOL_MAX_AGE,
 ) -> bool:
     if age_candles < 0:
         raise ValueError("age_candles must be non-negative")

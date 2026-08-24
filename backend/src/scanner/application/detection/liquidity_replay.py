@@ -26,6 +26,7 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityTransitionRepository,
 )
 from scanner.domain.common import (
+    TOLERANCE_ATR,
     Candle,
     detection_is_warm,
     quantise_derived,
@@ -61,7 +62,6 @@ from scanner.shared import Timeframe
 LIQUIDITY_ALGO_VERSION = "s5-v7"
 
 _ATR_PERIOD = 14
-_EPSILON_ATR = Decimal("0.05")
 _SWEEP_SCAN_ATR = Decimal("3")
 _STOPHUNT_WINDOW = 3  # SLS §4.7 P.liquidity.stophunt_window
 
@@ -186,7 +186,7 @@ class LiquidityReplayService:
         # at each pool's confirmation: the question the rule asks is whether
         # two levels are one price zone *in the current map*.
         newest_atr = atrs[-1] if atrs else None
-        epsilon = _EPSILON_ATR * (newest_atr or Decimal(0))
+        epsilon = TOLERANCE_ATR * (newest_atr or Decimal(0))
 
         levels = _LevelMap(await self._pools.list_active(symbol, timeframe))
 
@@ -606,7 +606,7 @@ class LiquidityReplayService:
                 index += 1
                 continue
 
-            epsilon = _EPSILON_ATR * atr
+            epsilon = TOLERANCE_ATR * atr
 
             sweep = detect_single_candle_sweep(
                 candle,
