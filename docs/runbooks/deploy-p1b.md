@@ -2,11 +2,17 @@
 
 ## Purpose
 
-Move the staging host from `008_outbox_events` to `013_param_set` and onto the
-current build, without losing candles and without filling the disk.
+Move the staging host from `008_outbox_events` to `018_append_only_guards`
+and onto the current build, without losing candles and without filling the
+disk.
 
-This is not a routine deploy. **Five migrations run at once**, one of them
-rebuilds a 15 GB table, and the host has 23 GB free.
+This is not a routine deploy. **Ten migrations run at once**, one of them
+rebuilds a 17 GB table, and the host has 22 GB free.
+
+*Numbers re-measured 2026-08-24 before the deploy. The first draft of this
+runbook said 15 GB and 23 GB; the table grew while the soak ran, which is the
+reason step 1 exists and the reason it says to write the numbers down rather
+than trust the ones printed here.*
 
 ## Before you start — read this
 
@@ -37,8 +43,9 @@ no closes. Neither is in this runbook.
 | Key | `ssh -i <key path>` — the key file is never opened or copied |
 | Compose | `/home/ubuntu/crypto-scanner/ops/compose/docker-compose.dev.yml` |
 | Current revision | `008_outbox_events` |
-| Pending | `009_trade_aggregates`, `010_wash_risk`, `011_interaction_identity`, `012_setups`, `013_param_set` |
+| Pending | `009_trade_aggregates`, `010_wash_risk`, `011_interaction_identity`, `012_setups`, `013_param_set`, `014_signals`, `015_signal_transitions`, `016_signal_outcomes`, `017_transition_refresh`, `018_append_only_guards` |
 | Free disk needed | **≥ 20 GB** before step 4 |
+| Cost of the ten | 011 is the whole cost. 014–018 create empty tables and triggers and are effectively free. |
 
 Set these once per session:
 
@@ -60,7 +67,10 @@ $PSQL -tAc "select pg_size_pretty(pg_database_size('scanner'))"
 df -h / | tail -1
 ```
 
-Expected: `008_outbox_events`, ~24.7M rows and rising, ~23 GB free.
+Expected: `008_outbox_events`, ~27M rows and rising, ~22 GB free.
+
+Measured 2026-08-24T10:0x Z: `008_outbox_events`, **27,013,345** rows, table
+17 GB, database 18 GB, **22 GB free**.
 
 **Write these down.** Step 9 compares against them, and "about the same" is
 not a comparison.
@@ -112,19 +122,81 @@ $PSQL -c "VACUUM (ANALYZE) detection.ict_zone_interactions"
 df -h / | tail -1
 ```
 
-### 5. Apply the migrations
+### 5. Pull, rebuild `api`, then apply the migrations
+
+**Order matters, and the first draft of this runbook had it wrong.** Alembic
+runs *inside the api image*, and `docker compose run` does not rebuild — so an
+unrebuilt image migrates only as far as the revisions it happens to contain,
+and reports success. On 2026-08-24 the host was still on the `#62` build,
+eleven revisions behind the repo.
 
 ```bash
-time $DC run --rm -e SCANNER_DB_DSN="postgresql+asyncpg://scanner:scanner@db:5432/scanner" \
-  api alembic upgrade head
+git fetch origin && git checkout main && git reset --hard origin/main
+$DC build api
 ```
 
-Alembic wraps the whole upgrade in one transaction, so **009 through 013 are
-atomic together**: any failure rolls all five back and leaves the database on
+Confirm the versions directory holds what you expect before continuing:
+
+```bash
+ls backend/src/scanner/infrastructure/persistence/alembic/versions/ | tail -8
+```
+
+Then, **inside `tmux` or `screen`**:
+
+```bash
+time $DC run --rm api alembic upgrade head
+```
+
+Not optional. The rebuild runs long enough that an ssh drop is likely, and on
+2026-08-24 one happened. The container survived and the migration completed —
+`docker compose run` without `-d` leaves the container running when its client
+dies — but you lose the output, the timing, and the exit code, and the
+temptation is then to start a second one. Do not: check
+`docker ps | grep api-run-` and `pg_stat_activity` first.
+
+**No `-e SCANNER_DB_DSN`.** The earlier draft passed one with a literal
+`scanner:scanner` password. The real credential is in `ops/env/dev.env`, which
+compose already loads via `env_file`; the override fails with
+`InvalidPasswordError` in about three seconds. Harmless — nothing runs — but it
+reads as a database fault and is not one.
+
+**Do not pipe the command through `tail`.** The pipeline's exit status is
+`tail`'s, so a failed migration reports success. Redirect to a file instead.
+
+Alembic wraps the whole upgrade in one transaction, so **009 through 018 are
+atomic together**: any failure rolls all ten back and leaves the database on
 `008` with the original table intact. There is no half-migrated state to
 repair.
 
-Expect this to take minutes, not seconds — 011 sorts 24.7 M rows.
+**Measured 2026-08-24: 62 minutes.** 011 dedups 27 M rows on two ARM OCPUs.
+Budget an hour and a half; do not interrupt it, because a killed migration
+rolls back and the time is spent for nothing.
+
+Watch `df` while it runs, and know what you are looking at. The `DISTINCT ON`
+sorts the whole table, and the sort spills to
+`$PGDATA/base/pgsql_tmp` — **12 GB of it here, on a 17 GB table**. That space
+looks exactly like the new table filling up and is not: it comes back when the
+sort finishes. Tell them apart directly rather than guessing from `df`:
+
+```bash
+docker exec -i scanner-dev-db-1 du -sh /var/lib/postgresql/data/base/pgsql_tmp
+docker exec -i scanner-dev-db-1 du -sh /var/lib/postgresql/data/pg_wal
+```
+
+WAL is bounded by `max_wal_size` (1 GB here) and is never the problem. When the
+wait event turns to `IO=BufFileRead` the spill phase is over and the disk stops
+falling — that is the moment the risk passes.
+
+**The failure modes are not equal.** A migration that runs out of temp space
+aborts, rolls back, returns the space, and leaves the database on `008` — the
+runbook's designed outcome. A *root filesystem* that fills takes the database
+and ingest down with it. If free space approaches ~2.5 GB, terminate the
+backend yourself rather than letting the filesystem decide:
+
+```bash
+$PSQL -tAc "select pg_terminate_backend(pid) from pg_stat_activity
+            where query like '%ict_zone_interactions_rebuilt%' and pid <> pg_backend_pid()"
+```
 
 ### 6. Confirm the migration did what it claims
 
@@ -139,18 +211,20 @@ df -h / | tail -1
 
 Expected:
 
-* revision `013_param_set`;
-* row count down by roughly **20×** — around 1.2 M, not 24 M;
+* revision `018_append_only_guards`;
+* row count down by roughly **20×** — measured 2026-08-24: 27,013,345 → **942,281**, a 28.7× reduction;
 * duplicate triples: **0**;
-* database materially smaller, free disk materially larger.
+* database materially smaller, free disk materially larger — measured: 18 GB → **2.1 GB**, and 22 GB free → **38 GB**.
 
 A row count that barely moved means the rebuild kept everything, and the
 duplicate query is what proves it either way. Do not accept the count alone.
 
-### 7. Rebuild the images and start
+### 7. Rebuild the remaining images and start
+
+`api` was rebuilt in step 5; the other three still carry the old build.
 
 ```bash
-$DC build engine worker api ingest
+$DC build engine worker ingest
 $DC up -d
 $DC ps
 ```
@@ -163,6 +237,11 @@ Expected: six containers, all `healthy` within a minute or two.
 $PSQL -tAF '|' -c "select engine, version, param_set_version, left(checksum,12), deployed_at
                    from detection.algo_versions order by deployed_at desc limit 5"
 ```
+
+The engine also verifies the append-only guards at boot now (migration 018).
+`ImmutabilityGuardsMissingError` at start-up means the triggers are missing or
+disabled on this database — that is the check working. Do not bypass it; see
+the least-privilege section below.
 
 Expected: at least one row with a non-null checksum and today's timestamp.
 
@@ -277,3 +356,45 @@ about to write to.
 After the switch, `immutability_grant_layer_absent` should stop appearing in
 the engine logs. If it still does, the app is still connecting as the owner and
 nothing has changed but the password.
+
+
+## Step 10 — label the build before the soak
+
+`SCANNER_RELEASE` in `ops/env/dev.env` stamps every log line and the
+`scanner_process_info` metric. It read `soak` for the whole of the first soak,
+which is precisely why that soak could not be told apart from anything else
+afterwards — the question "was this the build that ran 72 h?" had no answer in
+the data.
+
+Set it to something that names the build, before the clock starts:
+
+```bash
+sed -i "s|^SCANNER_RELEASE=.*|SCANNER_RELEASE=p1b-$(git rev-parse --short HEAD)|" ops/env/dev.env
+$DC up -d --force-recreate engine worker ingest api
+```
+
+Then record T0 and check it took:
+
+```bash
+date -u +%Y-%m-%dT%H:%M:%SZ > ~/soak_t0.txt
+$DC exec -T engine python -c "import urllib.request;   print([l for l in urllib.request.urlopen('http://localhost:8002/internal/metrics',timeout=5).read().decode().splitlines() if l.startswith('scanner_process_info')][0])"
+```
+
+`curl` is not in the image — it is read-only and slim. Use `python` as above.
+
+### The consumer group after a recreate looks alarming and is not
+
+`XINFO CONSUMERS` will show several consumers, the newest holding the whole
+pending batch with a large `idle`. That reads as "a dead consumer stranded 32
+closes". Check before believing it:
+
+```bash
+docker inspect --format "{{.Id}}" scanner-dev-engine-1 | cut -c1-12
+$DC exec -T redis redis-cli XINFO CONSUMERS scanner:stream:candle-closed engine | paste - - - - - - - -
+```
+
+The consumer name is `engine-$HOSTNAME`, and `$HOSTNAME` is the container id.
+If the id matches the pending consumer, that batch is *in flight*, not
+stranded — the engine simply does not talk to Redis while it works through
+thirty-odd closes at twenty seconds each. What matters is that the **dead**
+consumers show `pending 0`. On 2026-08-24 they did.
