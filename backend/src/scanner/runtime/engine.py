@@ -30,6 +30,9 @@ from scanner.application.ports.event_stream import CANDLE_STREAM
 from scanner.config import get_settings
 from scanner.config.processes import EngineSettings
 from scanner.infrastructure.clock import SystemClock
+from scanner.infrastructure.observability.detection_metrics import (
+    PrometheusDetectionMetrics,
+)
 from scanner.infrastructure.persistence.database import (
     build_engine,
     build_session_factory,
@@ -229,10 +232,17 @@ def main() -> None:
             sls_reference="Appendix A",
         )
 
+        # SLS §14's targets, measured continuously. The collector is built
+        # here and only here: the CLI's `engine run` shares this builder, and
+        # a replay over stored candles must not land in the funnel ratio §14
+        # watches for doctrine drift.
+        metrics = PrometheusDetectionMetrics()
+
         pipeline = build_detection_pipeline(
             sessions,
             redis_client,
             clock,
+            metrics,
         )
 
         name = _consumer_name()
@@ -240,7 +250,7 @@ def main() -> None:
         task = asyncio.create_task(
             _consume_forever(
                 RedisEventStreamConsumer(redis_client),
-                CandleCloseConsumer(TrailingWindowRunner(pipeline)),
+                CandleCloseConsumer(TrailingWindowRunner(pipeline, metrics=metrics)),
                 name,
             )
         )

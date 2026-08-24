@@ -22,11 +22,13 @@ while looking perfectly healthy.
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 
 import structlog
 
 from scanner.application.detection.pipeline import DetectionPipeline
+from scanner.application.ports.metrics import DetectionMetrics, NullMetrics
 from scanner.domain.common.warmup import DETECTION_MIN_CANDLES
 from scanner.shared import Timeframe
 
@@ -43,6 +45,7 @@ class TrailingWindowRunner:
         pipeline: DetectionPipeline,
         *,
         window_candles: int = DEFAULT_WINDOW_CANDLES,
+        metrics: DetectionMetrics | None = None,
     ) -> None:
         if window_candles <= DETECTION_MIN_CANDLES:
             raise ValueError(
@@ -52,6 +55,7 @@ class TrailingWindowRunner:
 
         self._pipeline = pipeline
         self._window = window_candles
+        self._metrics = metrics or NullMetrics()
 
     async def run(
         self,
@@ -67,7 +71,21 @@ class TrailingWindowRunner:
         end = open_time + step
         start = open_time - step * self._window
 
+        # SLS §14: "Candle close -> all detectors evaluated (per symbol-TF)
+        # <= 2 s". Timed around the pipeline and nothing else, so the number
+        # is the work rather than the consumer's dispatch overhead.
+        #
+        # `perf_counter` rather than the injected clock: this is a duration,
+        # and a wall clock that steps -- NTP, a leap second, a VM resuming --
+        # produces a negative or absurd one. The clock exists for timestamps
+        # that have to agree with stored data; this one does not.
+        started = time.perf_counter()
+
         report = await self._pipeline.run(symbol, timeframe, start, end)
+
+        elapsed = time.perf_counter() - started
+
+        self._metrics.observe_pass(elapsed, symbol=symbol, timeframe=timeframe.value)
 
         log.info(
             "detection_pass_completed",
@@ -80,4 +98,5 @@ class TrailingWindowRunner:
             trend=report.structure_shift.trend_state,
             pools_upserted=report.liquidity.pools_upserted,
             sweeps=report.liquidity.sweeps,
+            elapsed_seconds=round(elapsed, 3),
         )

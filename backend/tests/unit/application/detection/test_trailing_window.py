@@ -77,3 +77,51 @@ def test_a_window_that_cannot_clear_the_warm_up_gate_is_refused() -> None:
 
 def test_the_default_window_clears_the_gate_with_room() -> None:
     assert DEFAULT_WINDOW_CANDLES > DETECTION_MIN_CANDLES
+
+
+class RecordingMetrics:
+    def __init__(self) -> None:
+        self.passes: list[tuple[float, str, str]] = []
+
+    def observe_pass(self, seconds: float, *, symbol: str, timeframe: str) -> None:
+        self.passes.append((seconds, symbol, timeframe))
+
+    def record_publication(self, outcome: str, *, timeframe: str) -> None:
+        raise AssertionError("the runner does not decide publications")
+
+
+@pytest.mark.asyncio
+async def test_the_pass_is_timed_and_reported() -> None:
+    """SLS §14: "Candle close -> all detectors evaluated (per symbol-TF) <= 2 s".
+
+    Measured continuously per the doctrine, which until now it was not -- the
+    runner logged what the pass found and never how long it took.
+    """
+    metrics = RecordingMetrics()
+
+    await TrailingWindowRunner(RecordingPipeline(), metrics=metrics).run(
+        "BTCUSDT", Timeframe.H1, CLOSE
+    )
+
+    assert len(metrics.passes) == 1
+
+    seconds, symbol, timeframe = metrics.passes[0]
+
+    assert (symbol, timeframe) == ("BTCUSDT", "H1")
+    # A monotonic duration. `perf_counter` cannot go backwards; a wall clock
+    # stepped by NTP or a resuming VM can, and would report a negative pass.
+    assert seconds >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_a_runner_with_no_metrics_still_runs() -> None:
+    """The default is `NullMetrics`, not a required collaborator.
+
+    `engine run` and the golden harness build runners without one, and a
+    metrics call must never be what takes a detection pass down.
+    """
+    pipeline = RecordingPipeline()
+
+    await TrailingWindowRunner(pipeline).run("BTCUSDT", Timeframe.H1, CLOSE)
+
+    assert len(pipeline.windows) == 1

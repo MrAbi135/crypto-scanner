@@ -1,0 +1,120 @@
+# SLS §14's binding maxima, now that something emits them.
+#
+# §14 says these are "measured continuously, regressions block release". They
+# were not measured at all until the detection collectors existed — the
+# registry these rules read was empty of anything this system produces.
+#
+# Thresholds are §14's own numbers. Where a rule is deliberately looser than
+# the doctrine, the comment says why: an alert that fires constantly is an
+# alert that gets silenced, and a silenced §14 is worse than an unwritten one.
+groups:
+  - name: detection-performance
+    rules:
+      # §14: "Candle close → all detectors evaluated (per symbol-TF) ≤ 2 s".
+      # Alerting on the p95 rather than any single pass: one slow pass is a
+      # busy host, a slow p95 over fifteen minutes is the engine.
+      - alert: DetectionPassSlow
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, timeframe) (rate(scanner_detection_pass_seconds_bucket[15m]))
+          ) > 2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Detection pass p95 over the SLS §14 target"
+          description: >-
+            {{ $labels.timeframe }} p95 is {{ $value | printf "%.1f" }}s against
+            a 2s target. The backlog grows whenever a pass costs more than the
+            interval between closes.
+
+      # §14's p99 ceiling for the full cycle. Separate rule and separate
+      # severity: the 2s target being missed is a regression, 60s is the point
+      # at which the engine cannot keep up.
+      - alert: DetectionPassOverCycleCeiling
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le, timeframe) (rate(scanner_detection_pass_seconds_bucket[15m]))
+          ) > 60
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Detection pass p99 over the SLS §14 cycle ceiling"
+          description: >-
+            {{ $labels.timeframe }} p99 is {{ $value | printf "%.0f" }}s. At this
+            rate closes arrive faster than they are processed and the stream
+            backlog only grows.
+
+  - name: detection-doctrine-drift
+    rules:
+      # §14: "Candidate→published funnel ratio | Monitored; alert on ±50%
+      # day-over-day shift (doctrine drift detector)".
+      #
+      # `refreshed` is excluded from the denominator on purpose. A refresh is
+      # the same setup seen again, not a fresh candidate — counting it would
+      # make one setup held for forty candles read as a collapsed publish rate.
+      #
+      # The 6h window rather than §14's literal day-over-day: a 24h rate needs
+      # 48h of history before it says anything, and the doctrine's concern is
+      # a shift in behaviour, which shows up sooner.
+      - alert: PublicationRatioShift
+        expr: |
+          (
+            sum(rate(scanner_detection_publications_total{outcome="published"}[6h]))
+            /
+            clamp_min(
+              sum(rate(scanner_detection_publications_total{outcome!="refreshed"}[6h])),
+              0.0001
+            )
+          )
+          /
+          clamp_min(
+            (
+              sum(rate(scanner_detection_publications_total{outcome="published"}[6h] offset 1d))
+              /
+              clamp_min(
+                sum(rate(
+                  scanner_detection_publications_total{outcome!="refreshed"}[6h] offset 1d
+                )),
+                0.0001
+              )
+            ),
+            0.0001
+          )
+          > 1.5
+          or
+          (
+            sum(rate(scanner_detection_publications_total{outcome="published"}[6h]))
+            /
+            clamp_min(
+              sum(rate(scanner_detection_publications_total{outcome!="refreshed"}[6h])),
+              0.0001
+            )
+          )
+          /
+          clamp_min(
+            (
+              sum(rate(scanner_detection_publications_total{outcome="published"}[6h] offset 1d))
+              /
+              clamp_min(
+                sum(rate(
+                  scanner_detection_publications_total{outcome!="refreshed"}[6h] offset 1d
+                )),
+                0.0001
+              )
+            ),
+            0.0001
+          )
+          < 0.5
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Candidate→published ratio shifted more than ±50% (SLS §14)"
+          description: >-
+            The publication rate is {{ $value | printf "%.2f" }}× yesterday's at
+            the same hour. Either the market changed or the doctrine did; check
+            which suppression reason moved before assuming the first.

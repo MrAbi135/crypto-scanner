@@ -34,6 +34,7 @@ from scanner.application.detection.structure_shift_replay import (
     StructureShiftReplayService,
 )
 from scanner.application.ports import Clock
+from scanner.application.ports.metrics import DetectionMetrics
 from scanner.infrastructure.persistence.detection_repositories import (
     PgEngineEventRepository,
 )
@@ -75,7 +76,14 @@ def build_detection_pipeline(
     sessions: async_sessionmaker[AsyncSession],
     redis_client: aioredis.Redis,
     clock: Clock,
+    metrics: DetectionMetrics | None = None,
 ) -> DetectionPipeline:
+    """Optional metrics so `engine run` and the golden harness stay collector-free.
+
+    A replay over stored candles that incremented the live funnel counters
+    would put backfill decisions into the ratio §14 watches for doctrine
+    drift, and the drift it detected would be someone re-running a month.
+    """
     candles = PgCandleRepository(sessions, clock)
     events = PgEngineEventRepository(sessions)
     evidence = PgIctEvidenceRepository(sessions)
@@ -171,6 +179,7 @@ def build_detection_pipeline(
             signals=PgSignalRepository(sessions),
             incidents=PgIncidentRepository(sessions),
             transitions=PgSignalTransitionRepository(sessions),
+            metrics=metrics,
         ),
         monitor=SignalMonitorService(
             candles,

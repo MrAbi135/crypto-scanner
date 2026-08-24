@@ -202,6 +202,8 @@ keeping up; see `debugging.md`.
 | `ImmutabilityGuardsMissingError` | absent | Present ⇒ the append-only triggers are missing or disabled on this database. Do **not** bypass; see the section below. |
 | `immutability_grant_layer_absent` | present, for now | Expected until the least-privilege role below exists. Its absence would mean the engine is no longer the table owner — good, and worth confirming deliberately. |
 | stream `pending` | falls to ~0 | Stays high ⇒ engine behind; do not stop it, watch first. |
+| `scanner_detection_pass_seconds` | present, p95 ≤ 2 s | Absent ⇒ the engine is not emitting; the metric is new in this build, so on a rollback it disappears legitimately. Present and slow ⇒ read `DetectionPassSlow` before touching anything. |
+| `scanner_process_info` | one series per process | Absent ⇒ `bootstrap` did not run on that process. |
 
 ## Escalation
 

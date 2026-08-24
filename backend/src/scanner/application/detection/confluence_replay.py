@@ -55,6 +55,7 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRecord,
     LiquidityPoolRepository,
 )
+from scanner.application.ports.metrics import DetectionMetrics, NullMetrics
 from scanner.application.ports.repositories import (
     IncidentRepository,
     SymbolRepository,
@@ -323,6 +324,7 @@ class ConfluenceReplayService:
         algo_version: str = CONFLUENCE_ALGO_VERSION,
         setups: SetupRepository | None = None,
         signals: SignalRepository | None = None,
+        metrics: DetectionMetrics | None = None,
         incidents: IncidentRepository | None = None,
         transitions: SignalTransitionRepository | None = None,
     ) -> None:
@@ -340,6 +342,7 @@ class ConfluenceReplayService:
         self._algo_version = algo_version
         self._setups = setups
         self._signals = signals
+        self._metrics = metrics or NullMetrics()
         self._incidents = incidents
         self._transitions = transitions
 
@@ -937,6 +940,13 @@ class ConfluenceReplayService:
         )
 
         if merged:
+            # Counted apart from both `published` and the suppression
+            # reasons. §14 watches the candidate-to-published ratio for
+            # doctrine drift, and a refresh is neither -- folding it into
+            # suppressions would make a symbol that simply held one setup for
+            # forty candles look like forty rejected candidates.
+            self._metrics.record_publication("refreshed", timeframe=timeframe.value)
+
             return
 
         if not decision.published:
@@ -965,6 +975,9 @@ class ConfluenceReplayService:
                     created_at=self._clock.now(),
                 )
             )
+
+            for reason in decision.reasons:
+                self._metrics.record_publication(reason.value, timeframe=timeframe.value)
 
             return
 
@@ -1028,6 +1041,8 @@ class ConfluenceReplayService:
                     ),
                 )
             )
+
+        self._metrics.record_publication("published", timeframe=timeframe.value)
 
     async def _feeds_clean(self, symbol: str, candidate: SetupCandidate) -> bool:
         """§15.3(2): "all feeds fresh at publish moment; no DEGRADED input in
