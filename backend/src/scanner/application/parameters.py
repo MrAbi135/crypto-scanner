@@ -12,9 +12,10 @@ this week -- writing this registry is what turned up the fourth, and all
 four now resolve to one constant.
 
 **Absence is recorded, not defaulted.** A parameter the code does not
-implement carries `implemented=None` and says why. §3.4's `idle_candles` is
-the current example: the doctrine's second route into RANGING does not exist
-in the source, and writing 100 here would assert that it does.
+implement carries `implemented=None` and says why -- writing the doctrine's
+default there would assert an implementation that is not present, and the
+checksum would then certify it. There are none at the moment: §3.4's
+`idle_candles` was the last, and building this registry is what surfaced it.
 
 It lives in `application` rather than `domain` because it reads from every
 engine, and `domain.common` is the leaf they all depend on -- import-linter
@@ -64,14 +65,18 @@ from scanner.domain.momentum.phases import (
 )
 from scanner.domain.momentum.score import WARMUP_CANDLES
 from scanner.domain.ranking import TTL_CANDLES
-from scanner.domain.structure import FAILED_BREAK_CANDLES, swing_window
+from scanner.domain.structure import (
+    FAILED_BREAK_CANDLES,
+    IDLE_CANDLES,
+    swing_window,
+)
 from scanner.domain.structure.model import SwingStrength
 from scanner.domain.volume import SPIKE_FLOOR_QUOTE
 
 # Bumped by hand whenever any value below changes. SLS Appendix A: "Every
 # parameter change increments `param_set_version` and requires golden-dataset
 # re-validation." The checksum is what catches forgetting to.
-PARAM_SET_VERSION = "2026.08.24.1"
+PARAM_SET_VERSION = "2026.08.24.2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,14 +122,7 @@ def _mapped() -> tuple[Parameter, ...]:
             swing_window(SwingStrength.EXTERNAL),
         ),
         _p("P.structure.failed_break_candles", "3.5", 3, FAILED_BREAK_CANDLES),
-        _absent(
-            "P.structure.idle_candles",
-            "3.4",
-            100,
-            "§3.4's second route into RANGING -- closed inside the range without an "
-            "external BOS for 100 candles -- is not implemented. No constant and no "
-            "check exists; the trend state machine only moves on CHoCH and MSS.",
-        ),
+        _p("P.structure.idle_candles", "3.4", 100, IDLE_CANDLES),
         _p("P.liquidity.pool_max_age", "4.2", 500, POOL_MAX_AGE),
         _p("P.liquidity.eq_min_gap", "4.3", 3, EQ_MIN_GAP),
         _p("P.liquidity.eq_max_gap", "4.3", 100, EQ_MAX_GAP),

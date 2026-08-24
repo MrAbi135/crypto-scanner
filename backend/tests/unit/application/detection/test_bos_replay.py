@@ -118,7 +118,7 @@ async def test_a_close_through_a_swing_high_is_a_bos_once_trend_is_bullish() -> 
     candles = [candle(i, "125") for i in range(21)] + [candle(21, "135")]
     events = FakeEventRepository()
 
-    inserted = await build_service(events, candles)._replay_bos(
+    inserted, _ = await build_service(events, candles)._replay_bos(
         symbol=SYMBOL,
         timeframe=Timeframe.H1,
         candles=candles,
@@ -162,7 +162,7 @@ async def test_an_outside_bar_closing_bearish_does_not_break_upward() -> None:
     candles = [candle(i, "125") for i in range(21)] + [body_candle(21, "150", "132", low="95")]
     events = FakeEventRepository()
 
-    inserted = await build_service(events, candles)._replay_bos(
+    inserted, _ = await build_service(events, candles)._replay_bos(
         symbol=SYMBOL,
         timeframe=Timeframe.H1,
         candles=candles,
@@ -185,7 +185,7 @@ async def test_an_outside_bar_closing_bullish_still_breaks_upward() -> None:
     candles = [candle(i, "125") for i in range(21)] + [body_candle(21, "125", "132", low="95")]
     events = FakeEventRepository()
 
-    inserted = await build_service(events, candles)._replay_bos(
+    inserted, _ = await build_service(events, candles)._replay_bos(
         symbol=SYMBOL,
         timeframe=Timeframe.H1,
         candles=candles,
@@ -218,7 +218,7 @@ async def test_an_ordinary_bearish_candle_through_the_level_still_breaks() -> No
     candles = [candle(i, "125") for i in range(21)] + [body_candle(21, "140", "132", low="131")]
     events = FakeEventRepository()
 
-    inserted = await build_service(events, candles)._replay_bos(
+    inserted, _ = await build_service(events, candles)._replay_bos(
         symbol=SYMBOL,
         timeframe=Timeframe.H1,
         candles=candles,
@@ -260,7 +260,7 @@ async def test_a_level_price_already_left_behind_is_consumed_without_a_break() -
     ]
     events = FakeEventRepository()
 
-    inserted = await build_service(events, candles)._replay_bos(
+    inserted, _ = await build_service(events, candles)._replay_bos(
         symbol=SYMBOL,
         timeframe=Timeframe.H1,
         candles=candles,
@@ -292,7 +292,7 @@ async def test_no_bos_while_structure_is_ranging() -> None:
     candles = [candle(i, "125") for i in range(11)] + [candle(11, "200")]
     events = FakeEventRepository()
 
-    inserted = await build_service(events, candles)._replay_bos(
+    inserted, _ = await build_service(events, candles)._replay_bos(
         symbol=SYMBOL,
         timeframe=Timeframe.H1,
         candles=candles,
@@ -315,7 +315,7 @@ async def test_a_swing_cannot_break_before_it_has_confirmed() -> None:
     candles = [candle(i, "125") for i in range(19)] + [candle(19, "135")]
     events = FakeEventRepository()
 
-    inserted = await build_service(events, candles)._replay_bos(
+    inserted, _ = await build_service(events, candles)._replay_bos(
         symbol=SYMBOL,
         timeframe=Timeframe.H1,
         candles=candles,

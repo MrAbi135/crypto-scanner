@@ -160,7 +160,7 @@
           "id": "3.4-idle-ranging",
           "rule": "closed inside the range without external BOS for 100 candles gives RANGING",
           "status": "pending",
-          "blocked_on": "needs a 100-candle run after a confirmed range"
+          "blocked_on": "the rule is implemented now (it was not when this was first listed as needing a dataset). A case needs 100 quiet candles inside a confirmed bracket after a trend, on top of the 300-candle warm-up -- a 400-candle series, not yet written."
         },
         {
           "id": "3.4-shift-is-mss-only",
