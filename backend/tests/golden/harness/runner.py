@@ -44,6 +44,7 @@ from tests.golden.harness.memory import (
     InMemoryLiquidityPoolRepository,
     InMemoryLiquidityStateStore,
     InMemoryLiquidityTransitionRepository,
+    InMemorySetupRepository,
     InMemorySymbolRepository,
     InMemoryTradeAggregateRepository,
 )
@@ -152,6 +153,7 @@ async def _run_confluence(dataset: GoldenDataset) -> dict[str, Any]:
     pools = InMemoryLiquidityPoolRepository()
     pool_transitions = InMemoryLiquidityTransitionRepository()
     interactions = InMemoryIctZoneInteractionRepository()
+    setups = InMemorySetupRepository()
 
     evidence = InMemoryIctEvidenceRepository(events, pool_transitions)
 
@@ -211,6 +213,7 @@ async def _run_confluence(dataset: GoldenDataset) -> dict[str, Any]:
             shift_state,
             shift_algo_version=STRUCTURE_SHIFT_ALGO_VERSION,
             algo_version=dataset.algo_version,
+            setups=setups,
         ),
     )
 
@@ -233,6 +236,27 @@ async def _run_confluence(dataset: GoldenDataset) -> dict[str, Any]:
             "unreachable": list(confluence.unreachable),
             "events_inserted": confluence.events_inserted,
         },
+        # T16, so the modelled record is asserted and not only the in-memory
+        # candidate object. The row is written *from* the candidate and there
+        # is code in between; the two can disagree.
+        "setups": [
+            {
+                "symbol": row.symbol,
+                "direction": row.direction,
+                "archetype": row.archetype,
+                "base_confidence": row.base_confidence,
+                "final_confidence": row.final_confidence,
+                "floor_passed": row.floor_passed,
+                "gate_results": row.gate_results,
+                "factor_scores": row.factor_scores,
+                "adjustments": row.adjustments,
+                "evidence": row.evidence,
+            }
+            for row in sorted(
+                setups.rows.values(),
+                key=lambda r: (r.symbol, r.direction, r.evaluated_at),
+            )
+        ],
         "candidates": [
             {
                 "direction": candidate.direction,

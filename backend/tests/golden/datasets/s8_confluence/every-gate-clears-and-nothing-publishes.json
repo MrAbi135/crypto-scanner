@@ -1,0 +1,418 @@
+{
+  "dataset_id": "s8-every-gate-clears-and-nothing-publishes",
+  "engine": "confluence",
+  "sls_sections": [
+    "8.2",
+    "8.3",
+    "8.5",
+    "8.6"
+  ],
+  "sls_rules": [
+    "8.2-all-gates-required",
+    "8.3-every-factor-scored",
+    "8.6-no-archetype-no-publication",
+    "8.5-base-plus-adjustments-floored"
+  ],
+  "description": "The first series to clear \u00a78.2 in either direction. Every factor scores, and the candidate is still withheld for want of an archetype.",
+  "labelling_rationale": "The candles of s5-the-range-extreme-pool-is-external-liquidity, scored by the whole pipeline instead of the Liquidity Engine alone. They were built for 4.2(c) and turn out to be the only series in the repository that clears 8.2.\n\nThat mattered more than it sounds. Every confluence case before this one failed gates -- the quiet market fails G2 and G4, and so does every structure and ICT series re-run through the pipeline. A gate battery that could *never* pass would have looked exactly the same, and nothing in the suite would have said so. This is the affirmative half of 8.2's 'a candidate must pass all six gates'.\n\nThe UP direction clears every gate: the trend is BULLISH so G2 is satisfied trend-following, the deep pullback leaves price inside the lower half of the dealing range for G3, the FVG left behind by the decline sits at price for G4, and no opposing sweep-reclaim or failed break stands against it for G5. G1 is the 300-candle warm-up and G6 the absent wash-risk tag.\n\nThe DOWN direction fails G2 and G3 in the same window, which is the contrast that makes the pass meaningful: the same candles, the same instant, and the gates still discriminate by direction rather than waving both through.\n\nAll six factors carry a score -- F1 15, F2 5.92, F3 65, F4 50, F5 32, F6 50. 8.3 says each is 'a sum of enumerated evidence contributions', and `base_confidence` refuses a missing factor outright rather than reading absence as zero, so six numbers here is the assertion that every input was reachable. F6 is the neutral 50 because the rung above H4 is D1 and no D1 state exists in this window, which the record states in `unreachable` rather than leaving to be guessed.\n\nWeighted, that is a base confidence of 41. It is not published, and the reason is not the floor: `archetype` is null. 8.6 says 'every publishable setup must match exactly one archetype', so a candidate matching none cannot publish whatever its confidence, and 41 would not have cleared the lowest floor of 70 anyway.\n\nSo the case pins the shape 8.6 calls the quality-over-quantity mechanism: the candidate is evaluated, scored, recorded -- and withheld. A pipeline that published this would be wrong, and so would one that discarded it, because 8.6 keeps below-floor candidates as calibration data.\n\nThe T16 row is asserted beside the candidate, because the row is written *from* the candidate and there is code in between. It carries the arithmetic the candidate object does not: a base of 36.6875 from 8.4's weighted sum, one 8.5 synergy bonus of +5 for the zone stack, neither cap bound, and 41.6875 floored to a final 41. 8.5 floors rather than rounds -- 8.7 carries 95.25 to a published 95 -- and rounding up would let a setup reach a grade band it did not make.",
+  "labelled_by": "drafted by Claude Opus 5 2026-08-23 from SLS 8.2/8.3/8.6; PENDING DEVELOPER VERIFICATION -- the candles are those of a series already signed off on 2026-08-23",
+  "labelled_at": "2026-08-23",
+  "algo_version": "s5-v3",
+  "symbol": "GOLDENGATE",
+  "timeframe": "H4",
+  "filler": {
+    "count": 253,
+    "open": "22",
+    "high": "23",
+    "low": "21",
+    "close": "22"
+  },
+  "candles": [
+    {
+      "open_time": "2026-02-16T04:00:00+00:00",
+      "open": "22",
+      "high": "23",
+      "low": "21",
+      "close": "22"
+    },
+    {
+      "open_time": "2026-02-16T08:00:00+00:00",
+      "open": "20",
+      "high": "21",
+      "low": "19",
+      "close": "20"
+    },
+    {
+      "open_time": "2026-02-16T12:00:00+00:00",
+      "open": "18",
+      "high": "19",
+      "low": "17",
+      "close": "18"
+    },
+    {
+      "open_time": "2026-02-16T16:00:00+00:00",
+      "open": "16",
+      "high": "17",
+      "low": "15",
+      "close": "16"
+    },
+    {
+      "open_time": "2026-02-16T20:00:00+00:00",
+      "open": "14",
+      "high": "15",
+      "low": "13",
+      "close": "14"
+    },
+    {
+      "open_time": "2026-02-17T00:00:00+00:00",
+      "open": "12",
+      "high": "13",
+      "low": "11",
+      "close": "12"
+    },
+    {
+      "open_time": "2026-02-17T04:00:00+00:00",
+      "open": "15",
+      "high": "16",
+      "low": "14",
+      "close": "15"
+    },
+    {
+      "open_time": "2026-02-17T08:00:00+00:00",
+      "open": "18",
+      "high": "19",
+      "low": "17",
+      "close": "18"
+    },
+    {
+      "open_time": "2026-02-17T12:00:00+00:00",
+      "open": "21",
+      "high": "22",
+      "low": "20",
+      "close": "21"
+    },
+    {
+      "open_time": "2026-02-17T16:00:00+00:00",
+      "open": "24",
+      "high": "25",
+      "low": "23",
+      "close": "24"
+    },
+    {
+      "open_time": "2026-02-17T20:00:00+00:00",
+      "open": "27",
+      "high": "28",
+      "low": "26",
+      "close": "27"
+    },
+    {
+      "open_time": "2026-02-18T00:00:00+00:00",
+      "open": "30",
+      "high": "31",
+      "low": "29",
+      "close": "30"
+    },
+    {
+      "open_time": "2026-02-18T04:00:00+00:00",
+      "open": "28",
+      "high": "29",
+      "low": "27",
+      "close": "28"
+    },
+    {
+      "open_time": "2026-02-18T08:00:00+00:00",
+      "open": "26",
+      "high": "27",
+      "low": "25",
+      "close": "26"
+    },
+    {
+      "open_time": "2026-02-18T12:00:00+00:00",
+      "open": "24",
+      "high": "25",
+      "low": "23",
+      "close": "24"
+    },
+    {
+      "open_time": "2026-02-18T16:00:00+00:00",
+      "open": "22",
+      "high": "23",
+      "low": "21",
+      "close": "22"
+    },
+    {
+      "open_time": "2026-02-18T20:00:00+00:00",
+      "open": "20",
+      "high": "21",
+      "low": "19",
+      "close": "20"
+    },
+    {
+      "open_time": "2026-02-19T00:00:00+00:00",
+      "open": "18",
+      "high": "19",
+      "low": "17",
+      "close": "18"
+    },
+    {
+      "open_time": "2026-02-19T04:00:00+00:00",
+      "open": "23",
+      "high": "24",
+      "low": "22",
+      "close": "23"
+    },
+    {
+      "open_time": "2026-02-19T08:00:00+00:00",
+      "open": "28",
+      "high": "29",
+      "low": "27",
+      "close": "28"
+    },
+    {
+      "open_time": "2026-02-19T12:00:00+00:00",
+      "open": "33",
+      "high": "34",
+      "low": "32",
+      "close": "33"
+    },
+    {
+      "open_time": "2026-02-19T16:00:00+00:00",
+      "open": "38",
+      "high": "39",
+      "low": "37",
+      "close": "38"
+    },
+    {
+      "open_time": "2026-02-19T20:00:00+00:00",
+      "open": "43",
+      "high": "44",
+      "low": "42",
+      "close": "43"
+    },
+    {
+      "open_time": "2026-02-20T00:00:00+00:00",
+      "open": "48",
+      "high": "49",
+      "low": "47",
+      "close": "48"
+    },
+    {
+      "open_time": "2026-02-20T04:00:00+00:00",
+      "open": "46",
+      "high": "47",
+      "low": "45",
+      "close": "46"
+    },
+    {
+      "open_time": "2026-02-20T08:00:00+00:00",
+      "open": "44",
+      "high": "45",
+      "low": "43",
+      "close": "44"
+    },
+    {
+      "open_time": "2026-02-20T12:00:00+00:00",
+      "open": "42",
+      "high": "43",
+      "low": "41",
+      "close": "42"
+    },
+    {
+      "open_time": "2026-02-20T16:00:00+00:00",
+      "open": "40",
+      "high": "41",
+      "low": "39",
+      "close": "40"
+    },
+    {
+      "open_time": "2026-02-20T20:00:00+00:00",
+      "open": "38",
+      "high": "39",
+      "low": "37",
+      "close": "38"
+    },
+    {
+      "open_time": "2026-02-21T00:00:00+00:00",
+      "open": "36",
+      "high": "37",
+      "low": "35",
+      "close": "36"
+    },
+    {
+      "open_time": "2026-02-21T04:00:00+00:00",
+      "open": "41",
+      "high": "42",
+      "low": "40",
+      "close": "41"
+    },
+    {
+      "open_time": "2026-02-21T08:00:00+00:00",
+      "open": "46",
+      "high": "47",
+      "low": "45",
+      "close": "46"
+    },
+    {
+      "open_time": "2026-02-21T12:00:00+00:00",
+      "open": "51",
+      "high": "52",
+      "low": "50",
+      "close": "51"
+    },
+    {
+      "open_time": "2026-02-21T16:00:00+00:00",
+      "open": "56",
+      "high": "57",
+      "low": "55",
+      "close": "56"
+    },
+    {
+      "open_time": "2026-02-21T20:00:00+00:00",
+      "open": "61",
+      "high": "62",
+      "low": "60",
+      "close": "61"
+    },
+    {
+      "open_time": "2026-02-22T00:00:00+00:00",
+      "open": "66",
+      "high": "67",
+      "low": "65",
+      "close": "66"
+    },
+    {
+      "open_time": "2026-02-22T04:00:00+00:00",
+      "open": "58",
+      "high": "59",
+      "low": "57",
+      "close": "58"
+    },
+    {
+      "open_time": "2026-02-22T08:00:00+00:00",
+      "open": "50",
+      "high": "51",
+      "low": "49",
+      "close": "50"
+    },
+    {
+      "open_time": "2026-02-22T12:00:00+00:00",
+      "open": "42",
+      "high": "43",
+      "low": "41",
+      "close": "42"
+    },
+    {
+      "open_time": "2026-02-22T16:00:00+00:00",
+      "open": "34",
+      "high": "35",
+      "low": "33",
+      "close": "34"
+    },
+    {
+      "open_time": "2026-02-22T20:00:00+00:00",
+      "open": "26",
+      "high": "27",
+      "low": "25",
+      "close": "26"
+    },
+    {
+      "open_time": "2026-02-23T00:00:00+00:00",
+      "open": "20",
+      "high": "21",
+      "low": "19",
+      "close": "20"
+    },
+    {
+      "open_time": "2026-02-23T04:00:00+00:00",
+      "open": "24",
+      "high": "25",
+      "low": "23",
+      "close": "24"
+    },
+    {
+      "open_time": "2026-02-23T08:00:00+00:00",
+      "open": "28",
+      "high": "29",
+      "low": "27",
+      "close": "28"
+    },
+    {
+      "open_time": "2026-02-23T12:00:00+00:00",
+      "open": "32",
+      "high": "33",
+      "low": "31",
+      "close": "32"
+    },
+    {
+      "open_time": "2026-02-23T16:00:00+00:00",
+      "open": "36",
+      "high": "37",
+      "low": "35",
+      "close": "36"
+    },
+    {
+      "open_time": "2026-02-23T20:00:00+00:00",
+      "open": "40",
+      "high": "41",
+      "low": "39",
+      "close": "40"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "trend_state": "BULLISH",
+      "htf_state": null,
+      "unreachable": [
+        "htf_state"
+      ],
+      "events_inserted": 1
+    },
+    "setups": [
+      {
+        "symbol": "GOLDENGATE",
+        "direction": "UP",
+        "archetype": null,
+        "base_confidence": "36.68750000000000000000000000",
+        "final_confidence": "41",
+        "floor_passed": false,
+        "gate_results": "{\"failed\": [], \"passed\": true}",
+        "factor_scores": "{\"F1\": \"15\", \"F2\": \"5.916666666666666666666666668\", \"F3\": \"65\", \"F4\": \"50\", \"F5\": \"32\", \"F6\": \"50\"}",
+        "adjustments": "{\"applied\": [{\"code\": \"zone_stack\", \"points\": \"5\"}], \"penalty\": \"0\", \"penalty_capped\": false, \"synergy\": \"5\", \"synergy_capped\": false}",
+        "evidence": "{\"attribution\": {\"F1\": [{\"code\": \"clean_record\", \"evidence_id\": null, \"points\": \"15\"}], \"F2\": [{\"code\": \"target_pool\", \"evidence_id\": null, \"points\": \"5.916666666666666666666666668\"}], \"F5\": [{\"code\": \"acceleration\", \"evidence_id\": null, \"points\": \"12\"}, {\"code\": \"no_exhaustion\", \"evidence_id\": null, \"points\": \"20\"}], \"F6\": [{\"code\": \"htf_ranging\", \"evidence_id\": null, \"points\": \"50\"}]}, \"grade\": null, \"unreachable_inputs\": [\"htf_state\"], \"zone_id\": \"93d9def7c798515bde942ede46120368096801cbea98220b509853c08c81e792\"}"
+      }
+    ],
+    "candidates": [
+      {
+        "direction": "UP",
+        "gates_passed": true,
+        "failed_gates": [],
+        "confidence": "41",
+        "grade": null,
+        "archetype": null,
+        "publishable": false,
+        "factors": {
+          "F1": "15",
+          "F2": "5.916666666666666666666666668",
+          "F3": "65",
+          "F4": "50",
+          "F5": "32",
+          "F6": "50"
+        }
+      },
+      {
+        "direction": "DOWN",
+        "gates_passed": false,
+        "failed_gates": [
+          "G2",
+          "G3"
+        ],
+        "confidence": null,
+        "grade": null,
+        "archetype": null,
+        "publishable": false,
+        "factors": {}
+      }
+    ]
+  }
+}
