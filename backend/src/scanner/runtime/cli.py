@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
+import os
 import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -18,6 +20,7 @@ from datetime import UTC, datetime
 
 import httpx
 
+from scanner.application.identity import AccountService, PasswordPolicyError
 from scanner.application.marketdata import (
     BackfillService,
     SymbolSyncService,
@@ -37,6 +40,10 @@ from scanner.infrastructure.exchanges.binance import (
 from scanner.infrastructure.persistence.database import (
     build_engine,
     build_session_factory,
+)
+from scanner.infrastructure.persistence.identity_repositories import (
+    PgTenantRepository,
+    PgUserRepository,
 )
 from scanner.infrastructure.persistence.repositories import (
     PgCandleRepository,
@@ -617,6 +624,82 @@ async def _run_signals_verify_hashes(
         await engine.dispose()
 
 
+async def _run_users_create(
+    args: argparse.Namespace,
+) -> int:
+    """Provision an account.
+
+    Stands in for §18.1's `POST /auth/register`, which "triggers verification
+    email" and cannot be built or tested until a transactional email provider
+    exists. For a single-operator instance this is the honest path: a real
+    account, created deliberately, with the same hashing the endpoint will use.
+    """
+    password = os.environ.get(args.password_env)
+
+    if not password:
+        # Prompted rather than defaulted. A generated password printed to a
+        # terminal ends up in scrollback and in nobody's password manager.
+        password = getpass.getpass("new password (not echoed): ")
+
+    settings = get_settings("api")
+
+    engine = build_engine(settings.db_dsn)
+
+    try:
+        sessions = build_session_factory(engine)
+
+        service = AccountService(
+            PgUserRepository(sessions),
+            PgTenantRepository(sessions),
+        )
+
+        try:
+            user = await service.create(args.email, password, now=SystemClock().now())
+        except PasswordPolicyError as refused:
+            print(f"users create: refused -- {refused}")
+
+            return 2
+
+        if user is None:
+            # Not "created" and not a crash: the address already has an
+            # account. Exiting non-zero so a provisioning script cannot read
+            # this as success.
+            print(f"users create: {args.email} already has an account")
+
+            return 1
+
+        print(f"users create: {user.email} ({user.user_id}) role={user.role}")
+
+        return 0
+    finally:
+        await engine.dispose()
+
+
+async def _run_users_list(
+    args: argparse.Namespace,
+) -> int:
+    """Accounts on this database. No hashes, ever."""
+    settings = get_settings("api")
+
+    engine = build_engine(settings.db_dsn)
+
+    try:
+        sessions = build_session_factory(engine)
+
+        rows = await PgUserRepository(sessions).list_all()
+
+        print(f"users: {len(rows)}")
+
+        for row in rows:
+            state = "active" if row.can_authenticate else f"{row.status.lower()}/deleted"
+
+            print(f"{row.user_id}  {row.email:<40} {row.role:<10} {state}")
+
+        return 0
+    finally:
+        await engine.dispose()
+
+
 _HANDLERS: dict[
     str,
     Callable[
@@ -639,6 +722,15 @@ async def _dispatch(
             return await _run_rank_snapshot(args)
 
         raise ValueError(f"unknown rank command: {args.rank_command}")
+
+    if args.command == "users":
+        if args.users_command == "create":
+            return await _run_users_create(args)
+
+        if args.users_command == "list":
+            return await _run_users_list(args)
+
+        raise ValueError(f"unknown users command: {args.users_command}")
 
     if args.command == "signals":
         if args.signals_command == "tail":
