@@ -32,6 +32,10 @@ import pytest
 pytest.importorskip("testcontainers")
 from sqlalchemy import text
 
+from scanner.application.immutability_verification import (
+    ImmutabilityGuardsMissingError,
+    verify_immutability_guards,
+)
 from scanner.application.ports.detection import EngineEventRecord
 from scanner.application.ports.ict_zone_interactions import IctZoneInteractionRecord
 from scanner.application.ports.ict_zones import IctZoneRecord, IctZoneTransitionRecord
@@ -57,6 +61,9 @@ from scanner.infrastructure.persistence.ict_zone_interaction_repository import (
 from scanner.infrastructure.persistence.ict_zone_repositories import (
     PgIctZoneRepository,
     PgIctZoneTransitionRepository,
+)
+from scanner.infrastructure.persistence.immutability_inspector import (
+    PgImmutabilityInspector,
 )
 from scanner.infrastructure.persistence.liquidity_detection_repositories import (
     PgLiquidityPoolRepository,
@@ -1120,3 +1127,118 @@ async def test_a_refresh_cannot_resurrect_a_resolved_signal(engine) -> None:
     # Scoped to this signal: the module shares one database, and the point is
     # that a resolved signal leaves the live set, not that the set is empty.
     assert "sig-2" not in await repo.list_live("BTCUSDT", TF.value)
+
+
+@pytest.mark.parametrize(
+    "table",
+    ["signals", "signal_transitions", "signal_outcomes"],
+)
+async def test_the_guarded_tables_refuse_update_and_delete(engine, table: str) -> None:
+    """DDD principle 1: "No UPDATE/DELETE path exists at any privilege level
+    used by the application."
+
+    Before migration 018 this was a property of the repositories -- they had
+    no update method -- which is a promise about code, not about data. The
+    connection here is the database owner, the same role the application
+    uses, and it is refused.
+    """
+    async with engine.begin() as conn:
+        with pytest.raises(Exception, match="append_only_violation"):
+            await conn.execute(text(f"UPDATE detection.{table} SET signal_id = signal_id"))
+
+    async with engine.begin() as conn:
+        with pytest.raises(Exception, match="append_only_violation"):
+            await conn.execute(text(f"DELETE FROM detection.{table}"))
+
+
+@pytest.mark.parametrize(
+    "table",
+    ["signals", "signal_transitions", "signal_outcomes"],
+)
+async def test_the_guarded_tables_refuse_truncate(engine, table: str) -> None:
+    """TRUNCATE is a separate event class, and the guard has to say so.
+
+    A table carrying only the UPDATE/DELETE trigger can still be emptied in
+    one statement, with the guard present and every existence check green.
+
+    `CASCADE` deliberately. A plain `TRUNCATE detection.signals` is refused by
+    the foreign key from `signal_transitions` before any trigger fires -- so
+    the first version of this test passed on T17 without the guard existing
+    at all, and would have kept passing if the trigger were dropped. The
+    cascade removes the foreign key from the answer and leaves the guard as
+    the only thing that can refuse.
+    """
+    async with engine.begin() as conn:
+        with pytest.raises(Exception, match="append_only_violation"):
+            await conn.execute(text(f"TRUNCATE detection.{table} CASCADE"))
+
+
+async def test_a_delete_matching_nothing_is_still_refused(engine) -> None:
+    """The guards are statement-level for this reason.
+
+    A row-level trigger never fires on a statement that matches no rows, so
+    `DELETE ... WHERE false` would report success and leave a caller believing
+    it had a delete path. It does not.
+    """
+    async with engine.begin() as conn:
+        with pytest.raises(Exception, match="append_only_violation"):
+            await conn.execute(
+                text("DELETE FROM detection.signals WHERE signal_id = 'no-such-signal'")
+            )
+
+
+async def test_the_guards_do_not_block_the_insert_path(engine) -> None:
+    """The tables are entirely made of inserts, and those still work.
+
+    Worth pinning: a guard written `BEFORE INSERT OR UPDATE OR DELETE` would
+    pass every rejection test above and stop the engine from publishing
+    anything at all.
+    """
+    repo = PgSignalRepository(build_session_factory(engine))
+
+    assert await repo.append(signal("sig-guard-insert"))
+
+
+async def test_the_boot_check_reads_the_live_catalog(engine) -> None:
+    """The check is against this database, not against the migration history.
+
+    A restore from an older dump has the same alembic version stamped on it
+    and none of the triggers -- which is exactly the case a migration-version
+    check would call healthy.
+    """
+    inspector = PgImmutabilityInspector(build_session_factory(engine))
+
+    report = await verify_immutability_guards(inspector)
+
+    assert report.guarded == ("signals", "signal_transitions", "signal_outcomes")
+    # The compose stack connects as the database owner, so DDD's grant layer
+    # is decorative here and the check says so rather than implying three
+    # layers are in force.
+    assert report.role_bypasses_grants
+
+
+async def test_a_disabled_trigger_is_not_a_guard(engine) -> None:
+    """`tgenabled = 'D'`, which an existence check reads as present.
+
+    This is the failure the boot check exists for: an emergency
+    `DISABLE TRIGGER` that nobody re-enabled leaves the catalog looking
+    complete while every write path is open again.
+    """
+    inspector = PgImmutabilityInspector(build_session_factory(engine))
+
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("ALTER TABLE detection.signals DISABLE TRIGGER trg_signals_append_only")
+        )
+
+    try:
+        with pytest.raises(ImmutabilityGuardsMissingError, match=r"signals \(1/2\)"):
+            await verify_immutability_guards(inspector)
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("ALTER TABLE detection.signals ENABLE TRIGGER trg_signals_append_only")
+            )
+
+    # Restored, so the rest of the module still runs against a guarded schema.
+    assert (await verify_immutability_guards(inspector)).guarded

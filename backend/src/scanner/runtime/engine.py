@@ -23,6 +23,7 @@ from starlette.applications import Starlette
 from scanner.application.detection.candle_close_consumer import CandleCloseConsumer
 from scanner.application.detection.confluence_replay import CONFLUENCE_ALGO_VERSION
 from scanner.application.detection.trailing_window import TrailingWindowRunner
+from scanner.application.immutability_verification import verify_immutability_guards
 from scanner.application.param_set_verification import verify_parameter_set
 from scanner.application.ports.event_consumer import CANDLE_GROUP
 from scanner.application.ports.event_stream import CANDLE_STREAM
@@ -32,6 +33,9 @@ from scanner.infrastructure.clock import SystemClock
 from scanner.infrastructure.persistence.database import (
     build_engine,
     build_session_factory,
+)
+from scanner.infrastructure.persistence.immutability_inspector import (
+    PgImmutabilityInspector,
 )
 from scanner.infrastructure.persistence.param_set_repository import (
     PgParamSetRepository,
@@ -193,6 +197,24 @@ def main() -> None:
 
         sessions = build_session_factory(db)
         clock = SystemClock()
+
+        # DDD principle 1, before anything can publish: the signal record
+        # "cannot be edited by anyone -- including us". Checked against the
+        # live catalog rather than the migration history, because a restore
+        # from an older dump carries the same alembic version and none of the
+        # triggers.
+        guards = await verify_immutability_guards(PgImmutabilityInspector(sessions))
+
+        if guards.role_bypasses_grants:
+            # DDD's layer (a), which cannot be closed from in here: the
+            # process connects as the owner of the guarded tables, so grants
+            # are not a restraint on it. Logged every boot rather than left
+            # implicit -- three layers were specified and two are in force.
+            log.warning(
+                "immutability_grant_layer_absent",
+                guarded=guards.guarded,
+                remedy="docs/runbooks/deploy-p1b.md#least-privilege-role",
+            )
 
         # TAD §14, before anything is built that could score with the wrong
         # numbers: "param-set checksum mismatch => engine refuses to score".
