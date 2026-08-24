@@ -23,6 +23,7 @@ from scanner.application.detection.participation_replay import (
     ParticipationReplayService,
 )
 from scanner.application.detection.pipeline import DetectionPipeline
+from scanner.application.detection.signal_monitor import SignalMonitorService
 from scanner.application.detection.state import (
     SHIFT_NAMESPACE,
     EngineStateManager,
@@ -167,5 +168,11 @@ def build_detection_pipeline(
             signals=PgSignalRepository(sessions),
             incidents=PgIncidentRepository(sessions),
             transitions=PgSignalTransitionRepository(sessions),
+        ),
+        monitor=SignalMonitorService(
+            candles,
+            PgSignalRepository(sessions),
+            PgSignalTransitionRepository(sessions),
+            clock,
         ),
     )
