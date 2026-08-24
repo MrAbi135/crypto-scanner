@@ -38,6 +38,7 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRecord,
     LiquidityTransitionRecord,
 )
+from scanner.domain.ict import MAX_ZONES
 from scanner.infrastructure.persistence.database import build_session_factory
 from scanner.infrastructure.persistence.detection_repositories import (
     PgEngineEventRepository,
@@ -81,6 +82,7 @@ def zone(
     band_low: Decimal = Decimal("100"),
     band_high: Decimal = Decimal("102"),
     created_index: int = 10,
+    created_at: datetime = T0,
     evidence: str = '{"v":1}',
 ) -> IctZoneRecord:
     return IctZoneRecord(
@@ -97,8 +99,8 @@ def zone(
         refined_high=Decimal("101.5"),
         created_index=created_index,
         confirmed_index=created_index + 1,
-        created_at=T0,
-        updated_at=T0,
+        created_at=created_at,
+        updated_at=created_at,
         parent_zone_id=None,
         dealing_range_id=None,
         stale_context=False,
@@ -252,19 +254,88 @@ async def test_list_live_excludes_terminal_zones_and_sorts_deterministically(
     repo = PgIctZoneRepository(build_session_factory(engine))
     symbol = "ZLIST"
 
-    await repo.upsert(zone("z-a", symbol=symbol, created_index=1, zone_type="OB"))
-    await repo.upsert(zone("z-b", symbol=symbol, created_index=3, zone_type="FVG"))
-    await repo.upsert(zone("z-c", symbol=symbol, created_index=3, zone_type="BPR"))
-    await repo.upsert(zone("z-dead", symbol=symbol, created_index=9))
+    await repo.upsert(zone("z-a", symbol=symbol, created_at=T0, zone_type="OB"))
+    await repo.upsert(
+        zone("z-b", symbol=symbol, created_at=T0 + timedelta(hours=2), zone_type="FVG")
+    )
+    await repo.upsert(
+        zone("z-c", symbol=symbol, created_at=T0 + timedelta(hours=2), zone_type="BPR")
+    )
+    await repo.upsert(zone("z-dead", symbol=symbol, created_at=T0 + timedelta(hours=9)))
     assert await repo.transition(
         "z-dead", from_state="FRESH", to_state="INVALIDATED", updated_at=T0
     )
 
     live = await repo.list_live(symbol, TF)
 
-    # created_index DESC, then zone_type ASC, then zone_id ASC.
+    # created_at DESC, then zone_type ASC, then zone_id ASC.
     assert [z.zone_id for z in live] == ["z-c", "z-b", "z-a"]
     assert all(z.state not in TERMINAL_ZONE_STATES for z in live)
+
+
+async def test_list_live_orders_by_real_time_not_the_window_offset(engine) -> None:
+    """`created_index` is the offset inside the window that detected the zone.
+
+    Two zones found in different windows carry offsets that cannot be compared
+    -- the window slides, and the offset is frozen at detection. Ordering the
+    live set by it sorted zones by an accident of when the engine happened to
+    look, and once §5.1's bound truncates that order it stops being cosmetic:
+    it decides which zones §8 is allowed to see.
+
+    Here the older zone carries the *higher* offset, which is the ordinary
+    case for anything detected near a window's right edge and then left behind.
+    """
+    repo = PgIctZoneRepository(build_session_factory(engine))
+    symbol = "ZORDER"
+
+    await repo.upsert(
+        zone("z-old", symbol=symbol, created_index=499, created_at=T0, zone_type="OB")
+    )
+    await repo.upsert(
+        zone(
+            "z-new",
+            symbol=symbol,
+            created_index=12,
+            created_at=T0 + timedelta(days=1),
+            zone_type="OB",
+        )
+    )
+
+    live = await repo.list_live(symbol, TF)
+
+    assert [z.zone_id for z in live] == ["z-new", "z-old"]
+
+
+async def test_list_live_is_bounded_at_max_zones(engine) -> None:
+    """§5.1: "zone set bounded at P.ict.max_zones = 60 per symbol-TF".
+
+    Nothing bounded it. On the soak VM one symbol-TF carried 9,463 live zones
+    against a stated 60, and every confluence pass read all of them to pick a
+    best zone -- so G4 was choosing from a set 158 times larger than the
+    doctrine allows it to consider.
+
+    The newest survive, because §5.1 says to evict the oldest.
+    """
+    repo = PgIctZoneRepository(build_session_factory(engine))
+    symbol = "ZBOUND"
+
+    for i in range(MAX_ZONES + 15):
+        await repo.upsert(
+            zone(
+                f"z-{i:03d}",
+                symbol=symbol,
+                created_at=T0 + timedelta(hours=i),
+                zone_type="OB",
+            )
+        )
+
+    live = await repo.list_live(symbol, TF)
+
+    assert len(live) == MAX_ZONES
+
+    # The fifteen oldest are the ones gone.
+    assert live[0].zone_id == f"z-{MAX_ZONES + 14:03d}"
+    assert live[-1].zone_id == "z-015"
 
 
 async def test_list_live_is_scoped_to_symbol_and_timeframe(engine) -> None:

@@ -15,6 +15,7 @@ from scanner.application.ports.ict_zones import (
     IctZoneRecord,
     IctZoneTransitionRecord,
 )
+from scanner.domain.ict import MAX_ZONES
 from scanner.infrastructure.persistence.ict_zone_models import (
     IctZoneRow,
     IctZoneTransitionRow,
@@ -119,11 +120,22 @@ class PgIctZoneRepository:
                     IctZoneRow.timeframe == timeframe.value,
                     ~IctZoneRow.state.in_(_TERMINAL_STATES),
                 )
+                # `created_at`, not `created_index`. The index is the zone's
+                # offset inside whichever 500-candle window first detected it,
+                # frozen there while the window slides on -- so ordering the
+                # live set by it sorted zones from different windows against
+                # each other by an accident of when the engine looked. That
+                # matters far more now than it did as a display order, because
+                # the limit below decides which zones §8 gets to see at all.
                 .order_by(
-                    IctZoneRow.created_index.desc(),
+                    IctZoneRow.created_at.desc(),
                     IctZoneRow.zone_type.asc(),
                     IctZoneRow.zone_id.asc(),
                 )
+                # §5.1's bound. Applied in the query rather than after it:
+                # BTCUSDT M5 carries 9,463 live zones on the soak VM against a
+                # stated 60, and every confluence pass read all of them.
+                .limit(MAX_ZONES)
             )
 
             rows = result.scalars().all()

@@ -10,6 +10,17 @@ from scanner.domain.ict.model import (
     ZoneState,
 )
 
+# §5.1 Performance: "zone set bounded at `P.ict.max_zones = 60` per symbol-TF
+# (evict oldest EXPIRED first)". The bound is on the set the engine carries
+# forward and scores against, the same reading §4.2's `MAX_POOLS` takes for the
+# resting map -- a zone outside the newest 60 still exists and still
+# transitions, it is simply not part of what §8 considers.
+#
+# "EXPIRED first" costs nothing to honour: every terminal state is already
+# outside the live set, so eviction reaches the living only once the dead are
+# gone, which is what the clause asks for.
+MAX_ZONES = 60
+
 _ZONE_TERMINAL = {
     ZoneState.INVALIDATED,
     ZoneState.EXPIRED,
