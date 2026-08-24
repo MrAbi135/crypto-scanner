@@ -65,6 +65,7 @@ from scanner.domain.ict.pd import (
     evaluate_pd_context,
 )
 from scanner.domain.ict.state import (
+    MAX_ZONES,
     TERMINAL_ZONE_STATES,
     FvgStateMachine,
     IfvgStateMachine,
@@ -72,6 +73,7 @@ from scanner.domain.ict.state import (
 )
 
 __all__ = [
+    "MAX_ZONES",
     "TERMINAL_ZONE_STATES",
     "BalancedPriceRange",
     "BreakerBlock",

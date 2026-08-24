@@ -36,6 +36,7 @@ from scanner.application.ports.liquidity_detection import (
 )
 from scanner.application.ports.setups import SetupRecord
 from scanner.domain.common import Candle, TradeAggregate
+from scanner.domain.ict import MAX_ZONES
 from scanner.domain.volume import WashRiskState
 from scanner.shared import Timeframe
 
@@ -329,11 +330,17 @@ class InMemoryIctZoneRepository:
             and zone.state not in _TERMINAL_ZONE_STATES
         ]
 
+        # Mirrors the SQL: §5.1's bound, and `created_at` rather than the
+        # window-local `created_index` the order used to key on.
         return tuple(
             sorted(
                 matching,
-                key=lambda zone: (-zone.created_index, zone.zone_type, zone.zone_id),
-            )
+                key=lambda zone: (
+                    -zone.created_at.timestamp(),
+                    zone.zone_type,
+                    zone.zone_id,
+                ),
+            )[:MAX_ZONES]
         )
 
     async def transition(
