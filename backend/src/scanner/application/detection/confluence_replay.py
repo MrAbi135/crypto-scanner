@@ -29,6 +29,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from scanner.application.detection.orchestrator import build_event_key
+from scanner.application.detection.signal_monitor import _transition_id
 from scanner.application.detection.state import EngineStateManager
 from scanner.application.detection.structure_events import (
     is_classification,
@@ -60,6 +61,10 @@ from scanner.application.ports.repositories import (
     TradeAggregateRepository,
 )
 from scanner.application.ports.setups import SetupRecord, SetupRepository
+from scanner.application.ports.signal_transitions import (
+    SignalTransitionRecord,
+    SignalTransitionRepository,
+)
 from scanner.application.ports.signals import SignalRecord, SignalRepository
 from scanner.domain.common import (
     TOLERANCE_ATR,
@@ -104,7 +109,7 @@ from scanner.domain.ict import (
     detect_displacement,
     evaluate_pd_context,
 )
-from scanner.domain.lifecycle import SignalPayload, publication_checks
+from scanner.domain.lifecycle import SignalPayload, SignalState, publication_checks
 from scanner.domain.liquidity import SWEEP_SETUP_EXPIRY_CANDLES
 from scanner.domain.momentum import (
     Leg,
@@ -138,7 +143,7 @@ from scanner.domain.volume import (
 )
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v21"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v22"
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -313,6 +318,7 @@ class ConfluenceReplayService:
         setups: SetupRepository | None = None,
         signals: SignalRepository | None = None,
         incidents: IncidentRepository | None = None,
+        transitions: SignalTransitionRepository | None = None,
     ) -> None:
         self._candles = candles
         self._events = events
@@ -329,6 +335,7 @@ class ConfluenceReplayService:
         self._setups = setups
         self._signals = signals
         self._incidents = incidents
+        self._transitions = transitions
 
     async def run(
         self,
@@ -932,22 +939,20 @@ class ConfluenceReplayService:
 
         levels = payload.levels
 
+        # One id for both: §12.1 creates the signal from the setup, and a
+        # separate identifier would only invite the two to drift.
+        signal_id = _setup_id(
+            symbol,
+            timeframe,
+            candidate.direction,
+            event_at,
+            self._algo_version,
+        )
+
         await self._signals.append(
             SignalRecord(
-                signal_id=_setup_id(
-                    symbol,
-                    timeframe,
-                    candidate.direction,
-                    event_at,
-                    self._algo_version,
-                ),
-                setup_id=_setup_id(
-                    symbol,
-                    timeframe,
-                    candidate.direction,
-                    event_at,
-                    self._algo_version,
-                ),
+                signal_id=signal_id,
+                setup_id=signal_id,
                 symbol=symbol,
                 timeframe=timeframe,
                 direction=candidate.direction,
@@ -969,6 +974,28 @@ class ConfluenceReplayService:
                 dedup_key=payload.dedup_key(),
             )
         )
+
+        # §12's first two edges, recorded together. A published signal with no
+        # transition row is invisible to §12.3's monitor -- `list_live` reads
+        # the latest transition, and a signal that never had one is never
+        # watched. Writing it here rather than leaving it to the monitor keeps
+        # the two facts in one place: the row exists because the signal
+        # published, and it says so.
+        if self._transitions is not None:
+            await self._transitions.append(
+                SignalTransitionRecord(
+                    transition_id=_transition_id(signal_id, event_at),
+                    signal_id=signal_id,
+                    from_state=SignalState.DETECTED.value,
+                    to_state=SignalState.PUBLISHED.value,
+                    at_candle_open_time=event_at,
+                    recorded_at=self._clock.now(),
+                    stress_test=False,
+                    trigger_evidence=json.dumps(
+                        {"reason": "publication checks passed"}, sort_keys=True
+                    ),
+                )
+            )
 
     async def _feeds_clean(self, symbol: str, candidate: SetupCandidate) -> bool:
         """§15.3(2): "all feeds fresh at publish moment; no DEGRADED input in
