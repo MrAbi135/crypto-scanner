@@ -47,6 +47,9 @@ from scanner.infrastructure.persistence.signal_repository import PgSignalReposit
 from scanner.infrastructure.persistence.signal_transition_repository import (
     PgSignalTransitionRepository,
 )
+from scanner.infrastructure.persistence.track_record_repository import (
+    PgTrackRecordRepository,
+)
 from scanner.interfaces.api.app import ENTITLEMENTS_ENFORCED, build_read_api
 from scanner.runtime.wiring.bootstrap import bootstrap
 from scanner.runtime.wiring.health import mount_health, run_asgi
@@ -95,6 +98,7 @@ def build_api_app(settings: ApiSettings) -> FastAPI:
         signals=PgSignalRepository(db),
         signal_transitions=PgSignalTransitionRepository(db),
         outcomes=PgSignalOutcomeRepository(db),
+        track_record=PgTrackRecordRepository(db),
     )
 
     @asynccontextmanager

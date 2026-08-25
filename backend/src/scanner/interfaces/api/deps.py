@@ -14,6 +14,8 @@ from scanner.application.ports.sessions import SessionRepository
 from scanner.application.ports.signal_outcomes import SignalOutcomeRepository
 from scanner.application.ports.signal_transitions import SignalTransitionRepository
 from scanner.application.ports.signals import SignalRepository
+from scanner.application.ports.track_record import TrackRecordRepository
+from scanner.interfaces.api.query import CursorCodec
 
 
 def get_candles(request: Request) -> CandleRepository:
@@ -68,3 +70,11 @@ def get_signal_transitions(request: Request) -> SignalTransitionRepository:
 
 def get_outcomes(request: Request) -> SignalOutcomeRepository:
     return request.app.state.outcomes  # type: ignore[no-any-return]
+
+
+def get_track_record(request: Request) -> TrackRecordRepository:
+    return request.app.state.track_record  # type: ignore[no-any-return]
+
+
+def get_cursors(request: Request) -> CursorCodec:
+    return request.app.state.cursors  # type: ignore[no-any-return]

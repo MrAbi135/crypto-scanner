@@ -22,7 +22,7 @@ why the detail row carries the state rather than leaving a client to infer
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -33,15 +33,32 @@ from scanner.application.ports import Clock
 from scanner.application.ports.signal_outcomes import SignalOutcomeRepository
 from scanner.application.ports.signal_transitions import SignalTransitionRepository
 from scanner.application.ports.signals import SignalRecord, SignalRepository
+from scanner.application.ports.track_record import (
+    ArchivedSignal,
+    HistoryFilters,
+    TrackRecordRepository,
+)
 from scanner.application.signal_audit import reseal
 from scanner.interfaces.api.deps import (
     get_clock,
+    get_cursors,
     get_outcomes,
     get_signal_transitions,
     get_signals,
+    get_track_record,
 )
 from scanner.interfaces.api.envelope import Freshness, Versions, success
-from scanner.interfaces.api.errors import not_found
+from scanner.interfaces.api.errors import not_found, semantic_rejection
+from scanner.interfaces.api.query import (
+    CursorCodec,
+    Filter,
+    FilterOp,
+    QueryRejectedError,
+    SortKey,
+    parse_filters,
+    parse_limit,
+    parse_sort,
+)
 from scanner.interfaces.api.security import CurrentUser, require_user
 
 router = APIRouter(prefix="/api/v1/signals", tags=["signals"])
@@ -101,6 +118,188 @@ def _summary(signal: SignalRecord, state: str | None) -> dict[str, Any]:
             "param_set_version": signal.param_set_version,
         },
     }
+
+
+# §18.8's history filters, as §9's closed set. Every value the endpoint will
+# accept, and nothing else — an unknown one is a 422 rather than a filter
+# quietly not applied.
+#
+# Vocabulary is SLS's verbatim, which §9 requires: `archetype`, `grade`,
+# `timeframe`, `direction` are the doctrine's own words, not an API dialect.
+HISTORY_FILTERS: dict[str, frozenset[FilterOp]] = {
+    "outcome": frozenset({FilterOp.EQ, FilterOp.IN}),
+    "archetype": frozenset({FilterOp.EQ, FilterOp.IN}),
+    "grade": frozenset({FilterOp.EQ, FilterOp.IN}),
+    "timeframe": frozenset({FilterOp.EQ, FilterOp.IN}),
+    "symbol_id": frozenset({FilterOp.EQ, FilterOp.IN}),
+    "algo_version": frozenset({FilterOp.EQ, FilterOp.IN}),
+    "published_at": frozenset({FilterOp.GTE, FilterOp.LTE}),
+}
+
+# §8 wants "a documented default sort" and a total order. Newest first, with
+# the id breaking ties, is the same key the cursor carries — a page boundary
+# between two signals published on one close would otherwise lose one of them.
+HISTORY_SORT = (SortKey("published_at", descending=True), SortKey("signal_id", descending=True))
+
+
+@router.get("/history")
+async def signal_history(
+    request: Request,
+    _: Annotated[CurrentUser, Depends(require_user)],
+    archive: Annotated[TrackRecordRepository, Depends(get_track_record)],
+    cursors: Annotated[CursorCodec, Depends(get_cursors)],
+    clock: Annotated[Clock, Depends(get_clock)],
+) -> dict[str, Any]:
+    """§18.8's immutable archive (PRD FC-10.1).
+
+    **Declared before `/{signal_id}`** — FastAPI matches in declaration order,
+    and the path row would otherwise swallow "history" as a signal id and
+    answer 404. The same trap waits for `/statistics`.
+
+    **"Free tier: full access — honesty never paywalled" (§18.8).** There is no
+    entitlement check here and there will not be one: the track record is the
+    platform's claim about itself, and a paywalled failure rate is a curated
+    one.
+
+    Rejected sorts, unknown filters and bad limits all raise
+    `QueryRejectedError`, which the app-level handler turns into §7's 422. The
+    endpoint does not catch them, because catching would mean deciding again
+    what the grammar already decided.
+    """
+    params = dict(request.query_params)
+
+    limit = parse_limit(params.get("limit"))
+    filters = parse_filters(params, allowed=HISTORY_FILTERS)
+
+    # Sortable, but only on the documented key: a second ordering would need a
+    # second cursor shape, and §8 requires the walk to be stable under
+    # concurrent inserts in whichever order it is walking.
+    parse_sort(
+        params.get("sort"),
+        allowed=frozenset({"published_at"}),
+        default=HISTORY_SORT,
+    )
+
+    raw_cursor = params.get("cursor")
+    after = cursors.decode(raw_cursor, now=clock.now()) if raw_cursor else None
+
+    if raw_cursor and after is None:
+        # Expired, tampered or malformed — the codec does not distinguish, and
+        # neither does this. Refused rather than silently restarted at page
+        # one, which would make a paginating client loop forever without ever
+        # reporting an error.
+        raise semantic_rejection(request, "cursor is invalid or expired", field="cursor")
+
+    page = await archive.history(_filters(filters), limit=limit, after=after)
+
+    rows = [_archived_row(row) for row in page.rows]
+
+    return success(
+        rows,
+        generated_at=clock.now(),
+        freshness=Freshness(
+            state="RECORDED",
+            observed_at=page.rows[0].signal.published_at if page.rows else None,
+        ),
+        page={
+            "count": len(rows),
+            "has_more": page.next_position is not None,
+            "next_cursor": (
+                cursors.encode(page.next_position, now=clock.now())
+                if page.next_position is not None
+                else None
+            ),
+        },
+    )
+
+
+def _filters(parsed: tuple[Filter, ...]) -> HistoryFilters:
+    """§9's parsed grammar into the port's shape.
+
+    `published_at` arrives as `gte`/`lte` and becomes a half-open range: the
+    upper bound is exclusive in the repository, so `lte` is read as "before the
+    start of", which is what a caller giving a date means.
+    """
+    values: dict[str, tuple[str, ...]] = {}
+    published_from: datetime | None = None
+    published_to: datetime | None = None
+
+    for item in parsed:
+        if item.field == "published_at":
+            parsed_at = _timestamp(item.values[0], field=str(item.op.value))
+
+            if item.op is FilterOp.GTE:
+                published_from = parsed_at
+            else:
+                published_to = parsed_at
+
+            continue
+
+        values[item.field] = values.get(item.field, ()) + item.values
+
+    return HistoryFilters(
+        outcomes=values.get("outcome", ()),
+        archetypes=values.get("archetype", ()),
+        grades=values.get("grade", ()),
+        timeframes=values.get("timeframe", ()),
+        symbols=values.get("symbol_id", ()),
+        algo_versions=values.get("algo_version", ()),
+        published_from=published_from,
+        published_to=published_to,
+    )
+
+
+def _timestamp(raw: str, *, field: str) -> datetime:
+    """An ISO timestamp, or §7's 422.
+
+    Naive input is read as UTC rather than refused: the platform is UTC
+    throughout (§0), and rejecting `2026-08-24` would make the common case the
+    awkward one. Attached explicitly, though — comparing a naive value against
+    a `timestamptz` column is the kind of thing that works until a row lands
+    near midnight.
+    """
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        raise QueryRejectedError(
+            f"published_at must be an ISO timestamp: {raw}",
+            field=f"filter[published_at][{field}]",
+        ) from None
+
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def _archived_row(row: ArchivedSignal) -> dict[str, Any]:
+    """One archive row: the signal, and what became of it.
+
+    The outcome fields are absent while a signal is live rather than null —
+    §18.8 promises "signals[] + outcomes (MFE/MAE R, elapsed)", and a null MFE
+    beside a real one invites a client to chart it as zero.
+    """
+    data = _summary(row.signal, None)
+
+    # The lifecycle state is not read here. It would be one T18 query per row,
+    # and for the archive the outcome *is* the state — a resolved signal's
+    # `outcome` says more than "SUCCESS" would as a state string, and a live
+    # one is live.
+    data.pop("lifecycle_state")
+
+    if row.outcome is None:
+        return data
+
+    data["outcome"] = {
+        "outcome": row.outcome,
+        "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
+        "elapsed_candles": row.elapsed_candles,
+        "mfe_r": str(row.mfe_r) if row.mfe_r is not None else None,
+        "mae_r": str(row.mae_r) if row.mae_r is not None else None,
+        # PRD FC-10.1: "Delisting-expired signals excluded from quality stats
+        # but present in archive". Carried so a reader of the archive can see
+        # which rows the statistics row will not be counting.
+        "excluded_from_stats": row.excluded_from_stats,
+    }
+
+    return data
 
 
 @router.get("/{signal_id}")

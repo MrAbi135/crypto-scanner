@@ -177,6 +177,11 @@ class EmptySignals:
     async def list_live(self, symbol, timeframe):
         return ()
 
+    async def history(self, filters, *, limit, after=None):
+        from scanner.application.ports.track_record import HistoryPage
+
+        return HistoryPage(rows=(), next_position=None)
+
 
 def identity(users: FakeUsers | None = None) -> dict:
     """Every collaborator `build_read_api` requires, as kwargs."""
@@ -192,6 +197,7 @@ def identity(users: FakeUsers | None = None) -> dict:
         "signals": EmptySignals(),
         "signal_transitions": EmptySignals(),
         "outcomes": EmptySignals(),
+        "track_record": EmptySignals(),
     }
 
 

@@ -108,6 +108,56 @@ class FakeTransitions:
         return self.rows
 
 
+class FakeArchive:
+    """§18.8's archive, in memory.
+
+    Applies the filters itself rather than returning everything: a fake that
+    ignored them would let an endpoint that forgot to pass them through pass
+    its tests.
+    """
+
+    def __init__(self, rows=()) -> None:
+        self.rows = tuple(rows)
+        self.seen_filters = None
+        self.seen_after = None
+
+    async def history(self, filters, *, limit, after=None):
+        from scanner.application.ports.track_record import HistoryPage
+
+        self.seen_filters = filters
+        self.seen_after = after
+
+        kept = [
+            row
+            for row in self.rows
+            if (not filters.grades or row.signal.grade in filters.grades)
+            and (not filters.archetypes or row.signal.archetype in filters.archetypes)
+            and (not filters.outcomes or row.outcome in filters.outcomes)
+            and (
+                filters.published_from is None or row.signal.published_at >= filters.published_from
+            )
+            and (filters.published_to is None or row.signal.published_at < filters.published_to)
+        ]
+
+        if after is not None:
+            kept = [r for r in kept if r.signal.signal_id < after["signal_id"]]
+
+        page = kept[:limit]
+        more = len(kept) > limit
+
+        return HistoryPage(
+            rows=tuple(page),
+            next_position=(
+                {
+                    "published_at": page[-1].signal.published_at.isoformat(),
+                    "signal_id": page[-1].signal.signal_id,
+                }
+                if more and page
+                else None
+            ),
+        )
+
+
 class FakeOutcomes:
     def __init__(self, row: SignalOutcomeRecord | None = None) -> None:
         self.row = row
@@ -140,7 +190,7 @@ def transition(
     )
 
 
-def build(*, signals=None, transitions=None, outcomes=None) -> TestClient:
+def build(*, signals=None, transitions=None, outcomes=None, archive=None) -> TestClient:
     store = FakeSessionStore()
 
     app = build_read_api(
@@ -156,6 +206,7 @@ def build(*, signals=None, transitions=None, outcomes=None) -> TestClient:
         signals=signals or FakeSignals(),
         signal_transitions=transitions or FakeTransitions(),
         outcomes=outcomes or FakeOutcomes(),
+        track_record=archive or FakeArchive(),
     )
 
     return TestClient(app)
@@ -378,3 +429,187 @@ def test_an_empty_history_reports_no_observation_time() -> None:
 
     assert body["page"]["count"] == 0
     assert body["meta"]["freshness"].get("observed_at") is None
+
+
+# ------------------------------------------------------------------- history
+
+
+def archived(
+    signal_id: str,
+    *,
+    hour: int,
+    grade: str = "A",
+    archetype: str = "A4",
+    outcome: str | None = None,
+    excluded: bool = False,
+):
+    from scanner.application.ports.track_record import ArchivedSignal
+
+    row = signal()
+    row = type(row)(
+        **{
+            **{f: getattr(row, f) for f in row.__slots__},
+            "signal_id": signal_id,
+            "grade": grade,
+            "archetype": archetype,
+            "published_at": PUBLISHED.replace(hour=hour),
+        }
+    )
+
+    if outcome is None:
+        return ArchivedSignal(signal=row)
+
+    return ArchivedSignal(
+        signal=row,
+        outcome=outcome,
+        resolved_at=PUBLISHED.replace(hour=hour + 1),
+        elapsed_candles=4,
+        mfe_r=Decimal("1.50"),
+        mae_r=Decimal("0.40"),
+        excluded_from_stats=excluded,
+    )
+
+
+def test_the_archive_holds_live_and_resolved_signals_alike() -> None:
+    """The archive is every published signal, not the closed ones.
+
+    An inner join would quietly turn "the archive" into "the trades that
+    finished", which is the flattering half.
+    """
+    rows = [
+        archived("s-2", hour=10, outcome="SUCCESS"),
+        archived("s-1", hour=9),
+    ]
+
+    body = build(archive=FakeArchive(rows)).get("/api/v1/signals/history", headers=AUTH).json()
+
+    assert body["page"]["count"] == 2
+    assert body["data"][0]["outcome"]["outcome"] == "SUCCESS"
+    # Live: the key is absent, not null-with-a-shape. A null MFE beside a real
+    # one invites a client to chart it as zero.
+    assert "outcome" not in body["data"][1]
+
+
+def test_an_archived_outcome_says_whether_statistics_will_count_it() -> None:
+    """PRD FC-10.1: "Delisting-expired signals excluded from quality stats but
+    present in archive"."""
+
+    rows = [archived("s-1", hour=9, outcome="EXPIRED_ACTIVE", excluded=True)]
+
+    body = build(archive=FakeArchive(rows)).get("/api/v1/signals/history", headers=AUTH).json()
+
+    assert body["data"][0]["outcome"]["excluded_from_stats"] is True
+
+
+def test_the_history_filters_reach_the_repository() -> None:
+    """A filter parsed and not passed on is the same lie §9 forbids.
+
+    Asserted against what the repository was handed, not against the rows that
+    came back — a fake that filtered correctly would hide an endpoint that
+    dropped the filters on the floor.
+    """
+    archive = FakeArchive([archived("s-1", hour=9, grade="A")])
+
+    build(archive=archive).get(
+        "/api/v1/signals/history",
+        params={
+            "filter[grade][in]": "A,S",
+            "filter[archetype]": "A4",
+            "filter[published_at][gte]": "2026-08-24T00:00:00+00:00",
+            "filter[published_at][lte]": "2026-08-26",
+        },
+        headers=AUTH,
+    )
+
+    seen = archive.seen_filters
+
+    assert seen.grades == ("A", "S")
+    assert seen.archetypes == ("A4",)
+    assert seen.published_from == datetime(2026, 8, 24, tzinfo=UTC)
+    # A bare date is read as UTC midnight rather than refused: the platform is
+    # UTC throughout, and rejecting the common form would make it the awkward
+    # one.
+    assert seen.published_to == datetime(2026, 8, 26, tzinfo=UTC)
+
+
+def test_an_unknown_history_filter_is_a_422() -> None:
+    response = build().get(
+        "/api/v1/signals/history",
+        params={"filter[colour]": "red"},
+        headers=AUTH,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "SEMANTIC_REJECTION"
+
+
+def test_a_non_iso_date_filter_names_the_parameter_that_was_wrong() -> None:
+    response = build().get(
+        "/api/v1/signals/history",
+        params={"filter[published_at][gte]": "last tuesday"},
+        headers=AUTH,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["details"][0]["field"] == "filter[published_at][gte]"
+
+
+def test_the_page_carries_a_cursor_only_when_there_is_more() -> None:
+    rows = [archived(f"s-{i}", hour=9) for i in range(5)]
+
+    client = build(archive=FakeArchive(rows))
+
+    full = client.get("/api/v1/signals/history", params={"limit": "2"}, headers=AUTH).json()
+
+    assert full["page"]["has_more"] is True
+    assert full["page"]["next_cursor"]
+
+    last = client.get("/api/v1/signals/history", params={"limit": "50"}, headers=AUTH).json()
+
+    assert last["page"]["has_more"] is False
+    assert last["page"]["next_cursor"] is None
+
+
+def test_a_cursor_round_trips_through_the_endpoint() -> None:
+    rows = [archived(f"s-{i}", hour=9) for i in range(5)]
+
+    archive = FakeArchive(rows)
+    client = build(archive=archive)
+
+    first = client.get("/api/v1/signals/history", params={"limit": "2"}, headers=AUTH).json()
+
+    client.get(
+        "/api/v1/signals/history",
+        params={"limit": "2", "cursor": first["page"]["next_cursor"]},
+        headers=AUTH,
+    )
+
+    # The repository was handed the decoded position, not the opaque string.
+    assert archive.seen_after["signal_id"] == first["data"][-1]["signal_id"]
+
+
+def test_an_invalid_cursor_is_refused_rather_than_silently_restarted() -> None:
+    """Restarting at page one would make a paginating client loop forever
+    without ever reporting an error."""
+
+    response = build().get(
+        "/api/v1/signals/history",
+        params={"cursor": "not-a-real-cursor"},
+        headers=AUTH,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["details"][0]["field"] == "cursor"
+
+
+def test_the_history_row_is_matched_before_the_signal_id_row() -> None:
+    """FastAPI matches in declaration order.
+
+    Declared after `/{signal_id}`, "history" would be swallowed as an id and
+    answer 404 — and the same trap waits for `/statistics`.
+    """
+    assert build().get("/api/v1/signals/history", headers=AUTH).status_code == 200
+
+
+def test_history_needs_a_token_like_everything_else() -> None:
+    assert build().get("/api/v1/signals/history").status_code == 401
