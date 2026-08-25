@@ -44,6 +44,7 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityTransitionRecord,
 )
 from scanner.application.ports.param_sets import ParamSetRecord
+from scanner.application.ports.signal_outcomes import SignalOutcomeRecord
 from scanner.application.ports.signal_transitions import SignalTransitionRecord
 from scanner.application.ports.signals import SignalRecord
 from scanner.application.signal_audit import reseal, verify_seals
@@ -71,6 +72,9 @@ from scanner.infrastructure.persistence.liquidity_detection_repositories import 
     PgLiquidityTransitionRepository,
 )
 from scanner.infrastructure.persistence.param_set_repository import PgParamSetRepository
+from scanner.infrastructure.persistence.signal_outcome_repository import (
+    PgSignalOutcomeRepository,
+)
 from scanner.infrastructure.persistence.signal_repository import PgSignalRepository
 from scanner.infrastructure.persistence.signal_transition_repository import (
     PgSignalTransitionRepository,
@@ -1434,3 +1438,211 @@ async def test_reading_transitions_survives_more_ids_than_postgres_takes_paramet
     # distinguishing "no transitions" from "not asked for".
     assert len(found) == len(ids)
     assert found[ids[0]] == ()
+
+
+# ------------------------------------------------- SLS 18.8's archive (S11)
+
+
+def archived_signal(
+    signal_id: str,
+    *,
+    published_at: datetime,
+    grade: str = "A",
+    archetype: str = "A4",
+    symbol: str = "ARCHUSDT",
+):
+    return replace(
+        signal(signal_id),
+        symbol=symbol,
+        grade=grade,
+        archetype=archetype,
+        published_at=published_at,
+        dedup_key=f"{symbol}|H1|UP|{archetype}|{signal_id}",
+    )
+
+
+async def seeded_archive(engine):
+    """Five signals over five hours, two of them resolved."""
+    from scanner.infrastructure.persistence.track_record_repository import (
+        PgTrackRecordRepository,
+    )
+
+    sessions = build_session_factory(engine)
+    signals = PgSignalRepository(sessions)
+    outcomes = PgSignalOutcomeRepository(sessions)
+
+    base = datetime(2030, 1, 1, tzinfo=UTC)
+
+    for i in range(5):
+        await signals.append(
+            archived_signal(
+                f"arch-{i}",
+                published_at=base + timedelta(hours=i),
+                grade="S" if i % 2 else "A",
+            )
+        )
+
+    await outcomes.append(
+        SignalOutcomeRecord(
+            signal_id="arch-0",
+            outcome="SUCCESS",
+            resolved_at=base + timedelta(hours=6),
+            elapsed_candles=5,
+            mfe_r=Decimal("2.10"),
+            mae_r=Decimal("0.30"),
+            excluded_from_stats=False,
+            resolution_evidence="{}",
+        )
+    )
+    await outcomes.append(
+        SignalOutcomeRecord(
+            signal_id="arch-1",
+            outcome="EXPIRED_ACTIVE",
+            resolved_at=base + timedelta(hours=7),
+            elapsed_candles=18,
+            mfe_r=Decimal("0.40"),
+            mae_r=Decimal("0.90"),
+            # PRD FC-10.1's delisting case: in the archive, out of the stats.
+            excluded_from_stats=True,
+            resolution_evidence="{}",
+        )
+    )
+
+    return PgTrackRecordRepository(sessions), base
+
+
+async def test_the_archive_returns_live_and_resolved_signals_together(engine) -> None:
+    """A LEFT JOIN, not an inner one.
+
+    An inner join would turn "every published signal" into "the ones that
+    finished" — the flattering half, and silently.
+    """
+    from scanner.application.ports.track_record import HistoryFilters
+
+    archive, _ = await seeded_archive(engine)
+
+    page = await archive.history(
+        HistoryFilters(symbols=("ARCHUSDT",)),
+        limit=50,
+    )
+
+    ids = [r.signal.signal_id for r in page.rows]
+
+    # Newest first, all five present.
+    assert ids == ["arch-4", "arch-3", "arch-2", "arch-1", "arch-0"]
+
+    resolved = {r.signal.signal_id: r for r in page.rows if r.outcome is not None}
+
+    assert set(resolved) == {"arch-0", "arch-1"}
+    assert resolved["arch-0"].mfe_r == Decimal("2.10")
+    assert resolved["arch-1"].excluded_from_stats is True
+
+
+async def test_the_archive_filters_narrow(engine) -> None:
+    from scanner.application.ports.track_record import HistoryFilters
+
+    archive, base = await seeded_archive(engine)
+
+    by_grade = await archive.history(HistoryFilters(symbols=("ARCHUSDT",), grades=("S",)), limit=50)
+
+    assert [r.signal.signal_id for r in by_grade.rows] == ["arch-3", "arch-1"]
+
+    by_outcome = await archive.history(
+        HistoryFilters(symbols=("ARCHUSDT",), outcomes=("SUCCESS",)), limit=50
+    )
+
+    assert [r.signal.signal_id for r in by_outcome.rows] == ["arch-0"]
+
+    # Half-open: `published_to` is exclusive, so arch-2 at base+2h is out.
+    ranged = await archive.history(
+        HistoryFilters(
+            symbols=("ARCHUSDT",),
+            published_from=base,
+            published_to=base + timedelta(hours=2),
+        ),
+        limit=50,
+    )
+
+    assert [r.signal.signal_id for r in ranged.rows] == ["arch-1", "arch-0"]
+
+
+async def test_the_archive_pages_without_skipping_or_repeating(engine) -> None:
+    """§8: "a paginated walk never skips or duplicates under concurrent
+    inserts".
+
+    Walked two at a time, which is where an off-by-one on the cursor shows.
+    """
+    from scanner.application.ports.track_record import HistoryFilters
+
+    archive, _ = await seeded_archive(engine)
+
+    seen: list[str] = []
+    after = None
+
+    for _ in range(10):
+        page = await archive.history(HistoryFilters(symbols=("ARCHUSDT",)), limit=2, after=after)
+
+        seen.extend(r.signal.signal_id for r in page.rows)
+
+        if page.next_position is None:
+            break
+
+        after = page.next_position
+
+    assert seen == ["arch-4", "arch-3", "arch-2", "arch-1", "arch-0"]
+    assert len(set(seen)) == len(seen)
+
+
+async def test_two_signals_on_one_timestamp_do_not_straddle_a_page(engine) -> None:
+    """The cursor is the (published_at, signal_id) pair, not the timestamp.
+
+    On a timestamp alone, two signals published on the same close land either
+    side of a page boundary and one of them is lost — silently, and only for
+    the pair.
+    """
+    from scanner.application.ports.track_record import HistoryFilters
+
+    sessions = build_session_factory(engine)
+    signals = PgSignalRepository(sessions)
+
+    from scanner.infrastructure.persistence.track_record_repository import (
+        PgTrackRecordRepository,
+    )
+
+    at = datetime(2031, 1, 1, tzinfo=UTC)
+
+    for name in ("tie-a", "tie-b", "tie-c"):
+        await signals.append(archived_signal(name, published_at=at, symbol="TIEUSDT"))
+
+    archive = PgTrackRecordRepository(sessions)
+
+    seen: list[str] = []
+    after = None
+
+    for _ in range(5):
+        page = await archive.history(HistoryFilters(symbols=("TIEUSDT",)), limit=1, after=after)
+
+        seen.extend(r.signal.signal_id for r in page.rows)
+
+        if page.next_position is None:
+            break
+
+        after = page.next_position
+
+    assert sorted(seen) == ["tie-a", "tie-b", "tie-c"]
+
+
+async def test_a_cursor_that_does_not_name_this_ordering_starts_from_the_top(engine) -> None:
+    """A client bug, answered with page one rather than a 500."""
+
+    from scanner.application.ports.track_record import HistoryFilters
+
+    archive, _ = await seeded_archive(engine)
+
+    page = await archive.history(
+        HistoryFilters(symbols=("ARCHUSDT",)),
+        limit=2,
+        after={"nonsense": "yes"},
+    )
+
+    assert [r.signal.signal_id for r in page.rows] == ["arch-4", "arch-3"]
