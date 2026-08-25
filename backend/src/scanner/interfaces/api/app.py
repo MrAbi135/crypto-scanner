@@ -5,30 +5,36 @@ stays `DESIGNED` (§15) -- the spec being frozen and complete does not oblige
 implementing it in one pass, but it does forbid inventing rows that are not in
 it.
 
-## The unauthenticated deviation, stated plainly
+## Authentication, as of S10-minimal
 
-Every row implemented here is marked 🔑 in the spec, several with `tf:{tf}`
-entitlements. Identity is S10-S12 and does not exist yet.
+The tripwire this module used to carry — `allow_unauthenticated=True`, refusing
+to build otherwise — is gone, because the thing it was standing in for now
+exists. Every read row requires a bearer token from §18.1's login.
 
-Two options were available: invent a placeholder auth now and unpick it later,
-or ship without and make exposure impossible by accident. The second is chosen,
-because a placeholder that "works" is exactly the kind of thing that survives
-to production.
+What is *not* here is entitlements. TAD §21 layers authentication, tenant
+scoping, entitlements and RBAC; S10-minimal builds the first and leaves the
+rest. A token proves who is calling; nothing yet decides what their plan
+permits, because there are no plans. Every authenticated caller sees
+everything, and that is correct for a single-operator instance and wrong the
+moment there are two.
 
-So `build_read_api` refuses to construct unless the caller passes
-`allow_unauthenticated=True`, which the api process only does after checking
-that the deployment is not production. The guard is a tripwire, not security:
-the real control is that this API is not routed publicly until S12.
+`ENTITLEMENTS_ENFORCED = False` says so in code rather than in a comment, so
+the check that lands with plans has something to flip and a test has something
+to assert against.
 """
 
 from __future__ import annotations
 
 from fastapi import FastAPI
 
+from scanner.application.identity import AccountService, SessionService
+from scanner.application.identity.tokens import AccessTokens
 from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.ict_evidence import IctEvidenceRepository
 from scanner.application.ports.ict_zones import IctZoneRepository
 from scanner.application.ports.liquidity_detection import LiquidityPoolRepository
+from scanner.application.ports.sessions import SessionRepository
+from scanner.interfaces.api.auth import router as auth_router
 from scanner.interfaces.api.coins import router as coins_router
 from scanner.interfaces.api.errors import install_error_handlers
 from scanner.interfaces.api.market import router as market_router
@@ -36,11 +42,20 @@ from scanner.interfaces.api.market import router as market_router
 # Kept in the code so a reader can see the subset at a glance, and so the
 # contract test can assert that nothing was quietly added.
 IMPLEMENTED_ROWS: tuple[str, ...] = (
+    "POST /api/v1/auth/login",
+    "POST /api/v1/auth/refresh",
+    "POST /api/v1/auth/logout",
+    "GET /api/v1/auth/sessions",
+    "DELETE /api/v1/auth/sessions/{session_id}",
     "GET /api/v1/market/candles",
     "GET /api/v1/coins/{symbol_id}/structure",
     "GET /api/v1/coins/{symbol_id}/zones",
     "GET /api/v1/coins/{symbol_id}/liquidity",
 )
+
+# TAD §21's third layer. False until plans exist; a route that consults it
+# today would be a check that cannot fail.
+ENTITLEMENTS_ENFORCED = False
 
 
 def build_read_api(
@@ -50,16 +65,18 @@ def build_read_api(
     zones: IctZoneRepository,
     pools: LiquidityPoolRepository,
     clock: Clock,
-    allow_unauthenticated: bool,
+    accounts: AccountService,
+    sessions: SessionService,
+    session_repository: SessionRepository,
+    access_tokens: AccessTokens,
 ) -> FastAPI:
-    if not allow_unauthenticated:
-        raise RuntimeError(
-            "the S10a read API has no authentication (API Spec marks these rows "
-            "as requiring it; identity lands in S10-S12). Refusing to build. "
-            "Pass allow_unauthenticated=True only for a deployment that is not "
-            "publicly routed."
-        )
+    """Assemble the API. Every identity collaborator is required.
 
+    None of these have defaults. A default would let a caller build an app
+    that looks authenticated and is not, which is precisely the failure the
+    removed `allow_unauthenticated` tripwire existed to prevent — and a
+    default is a quieter version of it.
+    """
     app = FastAPI(
         title="scanner-read-api",
         version="v1",
@@ -72,9 +89,14 @@ def build_read_api(
     app.state.zones = zones
     app.state.pools = pools
     app.state.clock = clock
+    app.state.accounts = accounts
+    app.state.sessions = sessions
+    app.state.session_repository = session_repository
+    app.state.access_tokens = access_tokens
 
     install_error_handlers(app)
 
+    app.include_router(auth_router)
     app.include_router(market_router)
     app.include_router(coins_router)
 

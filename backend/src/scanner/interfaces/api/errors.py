@@ -49,6 +49,33 @@ def bad_request(
     )
 
 
+def auth_required(
+    request: Request,
+    message: str,
+    *,
+    code: str = "AUTH_REQUIRED",
+) -> HTTPException:
+    """401 for every authentication failure.
+
+    §18.1 makes the shared code explicit for login — "deliberately same code,
+    no user-enumeration" — and the same reasoning covers a missing header, an
+    expired token and a bad signature: a caller who can tell them apart can
+    probe. `code` is overridable for exactly one case, §18.1's `TOKEN_REVOKED`
+    on refresh-family reuse, where the client must know to stop retrying.
+    """
+    return HTTPException(
+        status_code=401,
+        detail=error(
+            code,
+            message,
+            correlation_id=correlation_id(request),
+        ),
+        # RFC 6750: a 401 from a bearer-protected resource carries this.
+        # Without it a compliant client has no way to know what to present.
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 def not_found(request: Request, message: str) -> HTTPException:
     """404 is true absence only (§7) -- never used to mask an entitlement."""
     return HTTPException(
