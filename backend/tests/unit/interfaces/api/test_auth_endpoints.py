@@ -311,3 +311,78 @@ def test_revoking_your_own_session_works_and_drops_it_from_the_list() -> None:
 
     assert client.delete(f"/api/v1/auth/sessions/{session_id}", headers=auth).status_code == 204
     assert client.get("/api/v1/auth/sessions", headers=auth).json() == []
+
+
+def test_the_profile_row_is_the_bootstrap_call() -> None:
+    """§18.2 `GET /me` — the first request S13 makes after login."""
+
+    client, _, _, _ = build()
+
+    token = login(client).json()["access_token"]
+
+    body = client.get(
+        "/api/v1/me",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()
+
+    assert body["user_id"] == "u-1"
+    assert body["tenant_id"] == "default"
+    assert body["email"] == "ops@example.com"
+    assert body["role"] == "user"
+
+    # TAD §21's entitlement layer is not built. Said in the payload rather
+    # than left for a client to infer from a missing plan.
+    assert body["entitlements_enforced"] is False
+
+    # And absent, not empty: an empty capability list reads as "no
+    # capabilities", which a client would correctly render as a locked
+    # interface. A missing field is a question; an empty one is a wrong answer.
+    assert "capabilities" not in body
+    assert "plan" not in body
+
+
+def test_the_profile_is_read_back_rather_than_reflected_from_the_token() -> None:
+    """The token is a snapshot from up to fifteen minutes ago.
+
+    Showing a stale email after a change would be a small lie that is hard to
+    notice, so the row comes from the database.
+    """
+    from dataclasses import replace
+
+    client, _, _, users = build()
+
+    token = login(client).json()["access_token"]
+
+    users.rows["u-1"] = replace(users.rows["u-1"], email="moved@example.com")
+
+    body = client.get(
+        "/api/v1/me",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()
+
+    assert body["email"] == "moved@example.com"
+
+
+def test_a_token_for_a_deleted_account_gets_a_404_not_a_profile() -> None:
+    """An access token outlives a deletion by up to its fifteen minutes."""
+
+    from dataclasses import replace
+
+    client, _, _, users = build()
+
+    token = login(client).json()["access_token"]
+
+    users.rows["u-1"] = replace(users.rows["u-1"], deleted_at=NOW)
+
+    response = client.get(
+        "/api/v1/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_the_profile_row_needs_a_token() -> None:
+    client, _, _, _ = build()
+
+    assert client.get("/api/v1/me").status_code == 401
