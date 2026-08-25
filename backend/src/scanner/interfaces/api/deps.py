@@ -14,7 +14,10 @@ from scanner.application.ports.sessions import SessionRepository
 from scanner.application.ports.signal_outcomes import SignalOutcomeRepository
 from scanner.application.ports.signal_transitions import SignalTransitionRepository
 from scanner.application.ports.signals import SignalRepository
-from scanner.application.ports.track_record import TrackRecordRepository
+from scanner.application.ports.track_record import (
+    TrackRecordRepository,
+    TrackRecordStatistics,
+)
 from scanner.interfaces.api.query import CursorCodec
 
 
@@ -78,3 +81,13 @@ def get_track_record(request: Request) -> TrackRecordRepository:
 
 def get_cursors(request: Request) -> CursorCodec:
     return request.app.state.cursors  # type: ignore[no-any-return]
+
+
+def get_track_statistics(request: Request) -> TrackRecordStatistics:
+    """The same object as `get_track_record` in production.
+
+    Two dependencies over one instance because they are two protocols: the
+    archive read and the aggregate are separate contracts, and a test that
+    wants to fake one should not have to implement the other.
+    """
+    return request.app.state.track_statistics  # type: ignore[no-any-return]

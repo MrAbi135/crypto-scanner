@@ -84,6 +84,10 @@ def build_api_app(settings: ApiSettings) -> FastAPI:
     users = PgUserRepository(db)
     session_repository = PgSessionRepository(db)
 
+    # One object, two protocols: the archive read and the aggregate are
+    # separate contracts over the same tables.
+    archive = PgTrackRecordRepository(db)
+
     read_api = build_read_api(
         candles=PgCandleRepository(db, clock),
         evidence=PgIctEvidenceRepository(db),
@@ -98,7 +102,8 @@ def build_api_app(settings: ApiSettings) -> FastAPI:
         signals=PgSignalRepository(db),
         signal_transitions=PgSignalTransitionRepository(db),
         outcomes=PgSignalOutcomeRepository(db),
-        track_record=PgTrackRecordRepository(db),
+        track_record=archive,
+        track_statistics=archive,
     )
 
     @asynccontextmanager

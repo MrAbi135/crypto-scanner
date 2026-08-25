@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 from typing import Protocol
 
 from scanner.application.ports.signals import SignalRecord
@@ -84,5 +85,60 @@ class TrackRecordRepository(Protocol):
         the position is the full sort key rather than a timestamp: signals
         published on the same close would otherwise straddle a page boundary
         and one of them would be lost.
+        """
+        ...
+
+
+class GroupBy(str, Enum):
+    """§18.8's `group_by`: "archetype/grade/tf/version"."""
+
+    ARCHETYPE = "archetype"
+    GRADE = "grade"
+    TIMEFRAME = "timeframe"
+    # Grouping *by* version as well, which is not the same as segmenting by it.
+    # Segmentation always happens; this asks for version to be the only axis.
+    VERSION = "version"
+
+
+@dataclass(frozen=True, slots=True)
+class OutcomeCounts:
+    """One group's terminal counts, straight from the database.
+
+    Split by outcome rather than pre-aggregated into a rate, so the arithmetic
+    that decides what is rated and what is merely reported lives in
+    `domain/lifecycle/track_record.py` where it is testable without a
+    database — and so a new terminal state does not silently vanish into a
+    denominator.
+    """
+
+    algo_version: str
+    # The value of whatever axis was grouped on, or None when the axis *is*
+    # the version.
+    key: str | None
+    successes: int
+    failures: int
+    expired: int
+    invalidated: int
+
+
+class TrackRecordStatistics(Protocol):
+    async def outcome_counts(
+        self,
+        *,
+        group_by: GroupBy,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> tuple[OutcomeCounts, ...]:
+        """§18.8's aggregate: "per-group n, success/failed/expired".
+
+        **Version-segmented always** (§18.8's own note). Every returned group
+        carries its `algo_version` whatever axis was requested, because a hit
+        rate that mixes algorithm versions is the average of two different
+        scanners — and the number it produces describes neither.
+
+        **Excludes rows flagged `excluded_from_stats`** — PRD FC-10.1's
+        "Delisting-expired signals excluded from quality stats but present in
+        archive". The archive read does not apply this; the two are different
+        populations over the same table and that is the line between them.
         """
         ...

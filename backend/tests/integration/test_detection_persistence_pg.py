@@ -1646,3 +1646,187 @@ async def test_a_cursor_that_does_not_name_this_ordering_starts_from_the_top(eng
     )
 
     assert [r.signal.signal_id for r in page.rows] == ["arch-4", "arch-3"]
+
+
+async def seeded_statistics(engine):
+    """Two algo versions over one archetype, plus one delisting exclusion."""
+    from scanner.infrastructure.persistence.track_record_repository import (
+        PgTrackRecordRepository,
+    )
+
+    sessions = build_session_factory(engine)
+    signals = PgSignalRepository(sessions)
+    outcomes = PgSignalOutcomeRepository(sessions)
+
+    base = datetime(2032, 1, 1, tzinfo=UTC)
+
+    plan = [
+        # (id, version, archetype, outcome, excluded)
+        ("st-0", "v1", "A4", "SUCCESS", False),
+        ("st-1", "v1", "A4", "FAILED", False),
+        ("st-2", "v1", "A4", "EXPIRED_ACTIVE", False),
+        ("st-3", "v1", "A4", "INVALIDATED_EARLY", False),
+        # Same archetype, different version: must not merge with the above.
+        ("st-4", "v2", "A4", "SUCCESS", False),
+        ("st-5", "v2", "A4", "SUCCESS", False),
+        # Delisting-expired: in the archive, out of the statistics.
+        ("st-6", "v1", "A4", "EXPIRED_UNTOUCHED", True),
+        # A different archetype, so grouping has something to separate.
+        ("st-7", "v1", "A1", "SUCCESS", False),
+    ]
+
+    for i, (name, version, archetype, outcome, excluded) in enumerate(plan):
+        await signals.append(
+            replace(
+                archived_signal(
+                    name,
+                    published_at=base + timedelta(hours=i),
+                    archetype=archetype,
+                    symbol="STATUSDT",
+                ),
+                algo_version=version,
+            )
+        )
+        await outcomes.append(
+            SignalOutcomeRecord(
+                signal_id=name,
+                outcome=outcome,
+                resolved_at=base + timedelta(hours=i + 1),
+                elapsed_candles=3,
+                mfe_r=Decimal("1.00"),
+                mae_r=Decimal("0.50"),
+                excluded_from_stats=excluded,
+                resolution_evidence="{}",
+            )
+        )
+
+    # A live signal with no outcome at all: statistics is about what happened.
+    await signals.append(
+        replace(
+            archived_signal("st-live", published_at=base, symbol="STATUSDT"),
+            algo_version="v1",
+        )
+    )
+
+    return PgTrackRecordRepository(sessions), base
+
+
+async def test_statistics_segment_by_version_even_when_grouping_by_archetype(
+    engine,
+) -> None:
+    """§18.8: "Version-segmented always".
+
+    Merged, v1 and v2 would report 3 of 5. They are different scanners, and
+    that number describes neither.
+    """
+    from scanner.application.ports.track_record import GroupBy
+
+    archive, _ = await seeded_statistics(engine)
+
+    rows = [
+        r
+        for r in await archive.outcome_counts(group_by=GroupBy.ARCHETYPE)
+        if r.algo_version in {"v1", "v2"}
+    ]
+
+    by_key = {(r.algo_version, r.key): r for r in rows}
+
+    v1 = by_key[("v1", "A4")]
+
+    assert (v1.successes, v1.failures, v1.expired, v1.invalidated) == (1, 1, 1, 1)
+
+    v2 = by_key[("v2", "A4")]
+
+    assert (v2.successes, v2.failures) == (2, 0)
+
+    # The other archetype is its own row, not folded in.
+    assert by_key[("v1", "A1")].successes == 1
+
+
+async def test_delisting_expired_signals_are_excluded_from_statistics(engine) -> None:
+    """PRD FC-10.1: "excluded from quality stats but present in archive".
+
+    `st-6` is EXPIRED_UNTOUCHED and flagged. Counting it would make a venue
+    decision look like a target-selection failure.
+    """
+    from scanner.application.ports.track_record import GroupBy, HistoryFilters
+
+    archive, _ = await seeded_statistics(engine)
+
+    rows = {
+        (r.algo_version, r.key): r for r in await archive.outcome_counts(group_by=GroupBy.ARCHETYPE)
+    }
+
+    # One EXPIRED_ACTIVE counted, the flagged EXPIRED_UNTOUCHED not.
+    assert rows[("v1", "A4")].expired == 1
+
+    # And it is still in the archive.
+    page = await archive.history(HistoryFilters(symbols=("STATUSDT",)), limit=50)
+
+    archived_ids = {r.signal.signal_id for r in page.rows}
+
+    assert "st-6" in archived_ids
+
+
+async def test_a_live_signal_is_in_the_archive_and_not_in_the_statistics(
+    engine,
+) -> None:
+    """An inner join for statistics, a left join for the archive.
+
+    A signal that has not resolved has nothing to contribute to a record of
+    what happened.
+    """
+    from scanner.application.ports.track_record import GroupBy, HistoryFilters
+
+    archive, _ = await seeded_statistics(engine)
+
+    page = await archive.history(HistoryFilters(symbols=("STATUSDT",)), limit=50)
+
+    assert "st-live" in {r.signal.signal_id for r in page.rows}
+
+    rows = {
+        (r.algo_version, r.key): r for r in await archive.outcome_counts(group_by=GroupBy.ARCHETYPE)
+    }
+
+    # st-live shares v1/A4 with st-0..st-3; its presence would show up as a
+    # fifth resolution.
+    counted = rows[("v1", "A4")]
+
+    assert (counted.successes + counted.failures + counted.expired + counted.invalidated) == 4
+
+
+async def test_grouping_by_version_collapses_the_axis(engine) -> None:
+    from scanner.application.ports.track_record import GroupBy
+
+    archive, _ = await seeded_statistics(engine)
+
+    rows = {
+        r.algo_version: r
+        for r in await archive.outcome_counts(group_by=GroupBy.VERSION)
+        if r.algo_version in {"v1", "v2"}
+    }
+
+    assert rows["v1"].key is None
+    # v1 across both archetypes: two successes (st-0, st-7).
+    assert rows["v1"].successes == 2
+    assert rows["v2"].successes == 2
+
+
+async def test_the_window_narrows_the_statistics(engine) -> None:
+    from scanner.application.ports.track_record import GroupBy
+
+    archive, base = await seeded_statistics(engine)
+
+    rows = {
+        (r.algo_version, r.key): r
+        for r in await archive.outcome_counts(
+            group_by=GroupBy.ARCHETYPE,
+            since=base,
+            until=base + timedelta(hours=2),
+        )
+    }
+
+    # Only st-0 (SUCCESS) and st-1 (FAILED) were published in that window.
+    counted = rows[("v1", "A4")]
+
+    assert (counted.successes, counted.failures, counted.expired) == (1, 1, 0)

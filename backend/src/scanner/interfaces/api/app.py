@@ -37,7 +37,10 @@ from scanner.application.ports.sessions import SessionRepository
 from scanner.application.ports.signal_outcomes import SignalOutcomeRepository
 from scanner.application.ports.signal_transitions import SignalTransitionRepository
 from scanner.application.ports.signals import SignalRepository
-from scanner.application.ports.track_record import TrackRecordRepository
+from scanner.application.ports.track_record import (
+    TrackRecordRepository,
+    TrackRecordStatistics,
+)
 from scanner.interfaces.api.auth import router as auth_router
 from scanner.interfaces.api.coins import router as coins_router
 from scanner.interfaces.api.errors import install_error_handlers
@@ -56,6 +59,7 @@ IMPLEMENTED_ROWS: tuple[str, ...] = (
     "GET /api/v1/auth/sessions",
     "GET /api/v1/me",
     "GET /api/v1/signals/history",
+    "GET /api/v1/signals/statistics",
     "GET /api/v1/signals/{signal_id}",
     "GET /api/v1/signals/{signal_id}/evidence",
     "GET /api/v1/signals/{signal_id}/transitions",
@@ -86,6 +90,7 @@ def build_read_api(
     signal_transitions: SignalTransitionRepository,
     outcomes: SignalOutcomeRepository,
     track_record: TrackRecordRepository,
+    track_statistics: TrackRecordStatistics,
 ) -> FastAPI:
     """Assemble the API. Every identity collaborator is required.
 
@@ -114,6 +119,7 @@ def build_read_api(
     app.state.signal_transitions = signal_transitions
     app.state.outcomes = outcomes
     app.state.track_record = track_record
+    app.state.track_statistics = track_statistics
     # §8's cursors are signed with the same key as the access token and
     # domain-separated inside the codec, so no second secret is required.
     app.state.cursors = CursorCodec(access_tokens.secret)

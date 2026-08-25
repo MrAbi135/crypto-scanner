@@ -22,7 +22,7 @@ why the detail row carries the state rather than leaving a client to infer
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -35,10 +35,14 @@ from scanner.application.ports.signal_transitions import SignalTransitionReposit
 from scanner.application.ports.signals import SignalRecord, SignalRepository
 from scanner.application.ports.track_record import (
     ArchivedSignal,
+    GroupBy,
     HistoryFilters,
+    OutcomeCounts,
     TrackRecordRepository,
+    TrackRecordStatistics,
 )
 from scanner.application.signal_audit import reseal
+from scanner.domain.lifecycle.track_record import CONFIDENCE_LEVEL, GroupStats
 from scanner.interfaces.api.deps import (
     get_clock,
     get_cursors,
@@ -46,6 +50,7 @@ from scanner.interfaces.api.deps import (
     get_signal_transitions,
     get_signals,
     get_track_record,
+    get_track_statistics,
 )
 from scanner.interfaces.api.envelope import Freshness, Versions, success
 from scanner.interfaces.api.errors import not_found, semantic_rejection
@@ -300,6 +305,125 @@ def _archived_row(row: ArchivedSignal) -> dict[str, Any]:
     }
 
     return data
+
+
+# §18.8's `window`, as named spans rather than a free-form duration. A caller
+# asking for "90d" and getting 90 days is unambiguous; one asking for "3m"
+# means 90 or 92 days depending on which months, and a track record that moves
+# with the calendar is a track record nobody can reproduce.
+STATISTICS_WINDOWS: dict[str, timedelta | None] = {
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+    "90d": timedelta(days=90),
+    "365d": timedelta(days=365),
+    # The default. Constitution §28.6 makes the whole record the claim, so the
+    # unwindowed view is the honest starting point and the spans narrow from
+    # it.
+    "all": None,
+}
+
+
+@router.get("/statistics")
+async def signal_statistics(
+    request: Request,
+    _: Annotated[CurrentUser, Depends(require_user)],
+    stats: Annotated[TrackRecordStatistics, Depends(get_track_statistics)],
+    clock: Annotated[Clock, Depends(get_clock)],
+    group_by: Annotated[GroupBy, Query()] = GroupBy.ARCHETYPE,
+    window: Annotated[str, Query()] = "all",
+) -> dict[str, Any]:
+    """§18.8's aggregate track record.
+
+    **Declared before `/{signal_id}`**, for the reason `/history` is — see that
+    row.
+
+    **Version-segmented always.** §18.8 says so and it is not a formality: a
+    hit rate averaged over two algorithm versions is the average of two
+    different scanners, and the number describes neither. Every group carries
+    its `algo_version` whatever axis was asked for.
+
+    **Delisting-expired signals are excluded here and only here** (PRD
+    FC-10.1). They stay in the archive; a signal that expired because its
+    symbol was delisted says nothing about target selection, and counting it
+    would make a venue decision look like a scanner failure.
+    """
+    if window not in STATISTICS_WINDOWS:
+        raise semantic_rejection(
+            request,
+            f"unknown window: {window}. One of: {', '.join(STATISTICS_WINDOWS)}",
+            field="window",
+        )
+
+    now = clock.now()
+    span = STATISTICS_WINDOWS[window]
+
+    counts = await stats.outcome_counts(
+        group_by=group_by,
+        since=now - span if span is not None else None,
+    )
+
+    groups = [_group(row, group_by) for row in counts]
+
+    return success(
+        groups,
+        generated_at=now,
+        # The archive is append-only and every row in it is a recorded fact, so
+        # there is nothing here that can be stale in §2.12's sense. Stated
+        # rather than omitted: `freshness` is required precisely so no endpoint
+        # can quietly leave the question open.
+        freshness=Freshness(state="RECORDED", observed_at=now),
+        page={"count": len(groups), "has_more": False},
+    )
+
+
+def _group(row: OutcomeCounts, group_by: GroupBy) -> dict[str, Any]:
+    """One group's record: counts, then the rate, then how much it is worth."""
+
+    record = GroupStats(
+        successes=row.successes,
+        failures=row.failures,
+        expired=row.expired,
+        invalidated=row.invalidated,
+    )
+
+    rate = record.hit_rate
+
+    return {
+        "group_by": group_by.value,
+        # Null when the axis *is* the version — the value is already in
+        # `algo_version` and repeating it would invite a client to render the
+        # same string twice.
+        "key": row.key,
+        "algo_version": row.algo_version,
+        "counts": {
+            "resolved": record.resolved,
+            "success": record.successes,
+            "failed": record.failures,
+            # §12.4: reported, not rated. "A scanner that times out constantly
+            # has a target-selection problem — visible, not hidden."
+            "expired": record.expired,
+            "invalidated_early": record.invalidated,
+        },
+        "hit_rate": {
+            "rated": rate.rated,
+            # Null, never zero, when nothing was rated: zero is a claim from no
+            # evidence.
+            "rate_pct": str(rate.rate) if rate.rate is not None else None,
+            "confidence_interval": (
+                {
+                    "level": CONFIDENCE_LEVEL,
+                    "low_pct": str(rate.interval.low),
+                    "high_pct": str(rate.interval.high),
+                }
+                if rate.interval is not None
+                else None
+            ),
+            "sufficient_for_inference": rate.sufficient_for_inference,
+            # PRD FC-10.1's phrasing, carried in the payload so the honesty is
+            # not left to a renderer.
+            "label": rate.label,
+        },
+    }
 
 
 @router.get("/{signal_id}")
