@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from scanner.interfaces.api.envelope import error
+from scanner.interfaces.api.query import QueryRejectedError
 from scanner.shared.ids import new_ulid
 
 log = structlog.get_logger(__name__)
@@ -82,6 +83,35 @@ def auth_required(
     )
 
 
+def semantic_rejection(
+    request: Request,
+    message: str,
+    *,
+    field: str | None = None,
+) -> HTTPException:
+    """§7's 422 for a request that parsed and asked for something impossible.
+
+    §9 and §10 both end in this: an unknown filter field, an unsupported
+    operator, a sort on a rank-ordered collection. §12(4) asks for
+    "field-precise details", so the offending parameter travels with it —
+    without that a client sending six filters learns only that one of them was
+    wrong.
+    """
+    details = (
+        [{"field": field, "code": "SEMANTIC_REJECTION", "message": message}] if field else None
+    )
+
+    return HTTPException(
+        status_code=422,
+        detail=error(
+            "SEMANTIC_REJECTION",
+            message,
+            correlation_id=correlation_id(request),
+            details=details,
+        ),
+    )
+
+
 def not_found(request: Request, message: str) -> HTTPException:
     """404 is true absence only (§7) -- never used to mask an entitlement."""
     return HTTPException(
@@ -119,6 +149,19 @@ def install_error_handlers(app: FastAPI) -> None:
             content=payload,
             headers=exc.headers,
         )
+
+    @app.exception_handler(QueryRejectedError)
+    async def _bad_query(request: Request, exc: QueryRejectedError) -> JSONResponse:
+        """§9/§10 violations become 422s wherever they are raised.
+
+        Registered as a handler rather than caught per endpoint: the parsers
+        raise from inside a dependency, and an endpoint that forgot the
+        `try` would turn a caller's typo into a 500 — which reads as our bug
+        and hides theirs.
+        """
+        rejection = semantic_rejection(request, exc.message, field=exc.field)
+
+        return JSONResponse(status_code=422, content=rejection.detail)
 
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
