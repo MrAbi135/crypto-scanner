@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -158,6 +158,25 @@ class FakeArchive:
         )
 
 
+class FakeStatistics:
+    """§18.8's aggregate, in memory.
+
+    Returns whatever counts it was given and records the arguments, so a test
+    can assert what the endpoint asked for as well as what it rendered.
+    """
+
+    def __init__(self, rows=()) -> None:
+        self.rows = tuple(rows)
+        self.seen_group_by = None
+        self.seen_since = None
+
+    async def outcome_counts(self, *, group_by, since=None, until=None):
+        self.seen_group_by = group_by
+        self.seen_since = since
+
+        return self.rows
+
+
 class FakeOutcomes:
     def __init__(self, row: SignalOutcomeRecord | None = None) -> None:
         self.row = row
@@ -190,7 +209,7 @@ def transition(
     )
 
 
-def build(*, signals=None, transitions=None, outcomes=None, archive=None) -> TestClient:
+def build(*, signals=None, transitions=None, outcomes=None, archive=None, stats=None) -> TestClient:
     store = FakeSessionStore()
 
     app = build_read_api(
@@ -207,6 +226,7 @@ def build(*, signals=None, transitions=None, outcomes=None, archive=None) -> Tes
         signal_transitions=transitions or FakeTransitions(),
         outcomes=outcomes or FakeOutcomes(),
         track_record=archive or FakeArchive(),
+        track_statistics=stats or FakeStatistics(),
     )
 
     return TestClient(app)
@@ -613,3 +633,197 @@ def test_the_history_row_is_matched_before_the_signal_id_row() -> None:
 
 def test_history_needs_a_token_like_everything_else() -> None:
     assert build().get("/api/v1/signals/history").status_code == 401
+
+
+# ---------------------------------------------------------------- statistics
+
+
+def counts(
+    *,
+    version: str = "s8-v1",
+    key: str | None = "A4",
+    successes: int = 0,
+    failures: int = 0,
+    expired: int = 0,
+    invalidated: int = 0,
+):
+    from scanner.application.ports.track_record import OutcomeCounts
+
+    return OutcomeCounts(
+        algo_version=version,
+        key=key,
+        successes=successes,
+        failures=failures,
+        expired=expired,
+        invalidated=invalidated,
+    )
+
+
+def statistics(client, **params):
+    return client.get("/api/v1/signals/statistics", params=params, headers=AUTH).json()
+
+
+def test_a_group_reports_its_counts_its_rate_and_what_the_rate_is_worth() -> None:
+    rows = [counts(successes=30, failures=10, expired=5, invalidated=2)]
+
+    group = statistics(build(stats=FakeStatistics(rows)))["data"][0]
+
+    assert group["counts"] == {
+        "resolved": 47,
+        "success": 30,
+        "failed": 10,
+        "expired": 5,
+        "invalidated_early": 2,
+    }
+    assert group["hit_rate"]["rated"] == 40
+    assert group["hit_rate"]["rate_pct"] == "75.00"
+    assert group["hit_rate"]["sufficient_for_inference"] is True
+    assert group["hit_rate"]["label"] == "n=40"
+
+
+def test_expired_signals_are_reported_and_kept_out_of_the_rate() -> None:
+    """§12.4: "a scanner that times out constantly has a target-selection
+    problem — visible, not hidden"."""
+
+    rows = [counts(successes=4, failures=1, expired=95)]
+
+    group = statistics(build(stats=FakeStatistics(rows)))["data"][0]
+
+    assert group["counts"]["expired"] == 95
+    assert group["counts"]["resolved"] == 100
+    # Five rated, not a hundred.
+    assert group["hit_rate"]["rated"] == 5
+    assert group["hit_rate"]["rate_pct"] == "80.00"
+
+
+def test_a_small_sample_carries_its_interval_and_says_so() -> None:
+    """PRD FC-10.1: "n=14 — insufficient for inference"."""
+
+    rows = [counts(successes=10, failures=4)]
+
+    rate = statistics(build(stats=FakeStatistics(rows)))["data"][0]["hit_rate"]
+
+    assert rate["label"] == "n=14 — insufficient for inference"
+    assert rate["sufficient_for_inference"] is False
+    # The numbers are still returned: the flag is a label, not a gate.
+    assert rate["rate_pct"] == "71.43"
+    assert rate["confidence_interval"]["level"] == "95%"
+    assert float(rate["confidence_interval"]["low_pct"]) < 71.43
+    assert float(rate["confidence_interval"]["high_pct"]) > 71.43
+
+
+def test_an_unbroken_run_does_not_report_certainty() -> None:
+    """The reason the interval is Wilson's and not the textbook one."""
+
+    rows = [counts(successes=9)]
+
+    interval = statistics(build(stats=FakeStatistics(rows)))["data"][0]["hit_rate"][
+        "confidence_interval"
+    ]
+
+    assert interval["high_pct"] == "100.00"
+    assert float(interval["low_pct"]) < 80
+
+
+def test_a_group_with_nothing_rated_has_a_null_rate_not_a_zero() -> None:
+    """Zero is a claim from no evidence, and a client would chart it."""
+
+    rows = [counts(expired=12)]
+
+    rate = statistics(build(stats=FakeStatistics(rows)))["data"][0]["hit_rate"]
+
+    assert rate["rate_pct"] is None
+    assert rate["confidence_interval"] is None
+    assert rate["label"] == "n=0 — no rated outcomes yet"
+
+
+def test_every_group_carries_its_version_whatever_the_axis() -> None:
+    """§18.8: "Version-segmented always".
+
+    A hit rate averaged over two algorithm versions is the average of two
+    different scanners, and the number describes neither.
+    """
+    rows = [
+        counts(version="s8-v1", key="A4", successes=10, failures=10),
+        counts(version="s8-v2", key="A4", successes=18, failures=2),
+    ]
+
+    groups = statistics(build(stats=FakeStatistics(rows)), group_by="archetype")["data"]
+
+    assert [g["algo_version"] for g in groups] == ["s8-v1", "s8-v2"]
+    assert {g["key"] for g in groups} == {"A4"}
+    # Not merged into one 70% row.
+    assert [g["hit_rate"]["rate_pct"] for g in groups] == ["50.00", "90.00"]
+
+
+def test_grouping_by_version_leaves_the_key_null() -> None:
+    """The value is already in `algo_version`; repeating it would invite a
+    client to render the same string twice."""
+
+    rows = [counts(version="s8-v1", key=None, successes=5, failures=5)]
+
+    group = statistics(build(stats=FakeStatistics(rows)), group_by="version")["data"][0]
+
+    assert group["key"] is None
+    assert group["algo_version"] == "s8-v1"
+
+
+@pytest.mark.parametrize("axis", ["archetype", "grade", "timeframe", "version"])
+def test_every_documented_axis_is_accepted(axis: str) -> None:
+    stats = FakeStatistics()
+
+    statistics(build(stats=stats), group_by=axis)
+
+    assert stats.seen_group_by.value == axis
+
+
+def test_an_unknown_axis_is_refused() -> None:
+    response = build().get(
+        "/api/v1/signals/statistics",
+        params={"group_by": "colour"},
+        headers=AUTH,
+    )
+
+    assert response.status_code == 422
+
+
+def test_the_window_narrows_the_range_and_all_means_everything() -> None:
+    stats = FakeStatistics()
+    client = build(stats=stats)
+
+    statistics(client, window="30d")
+
+    assert stats.seen_since == NOW - timedelta(days=30)
+
+    statistics(client, window="all")
+
+    # The unwindowed view is the default and the honest starting point:
+    # Constitution §28.6 makes the whole record the claim.
+    assert stats.seen_since is None
+
+
+def test_an_unknown_window_is_refused_with_the_options_named() -> None:
+    """A free-form duration would let "3m" mean 90 or 92 days depending on the
+    calendar, and a track record that moves with the month is one nobody can
+    reproduce."""
+
+    response = build().get(
+        "/api/v1/signals/statistics",
+        params={"window": "3m"},
+        headers=AUTH,
+    )
+
+    assert response.status_code == 422
+
+    body = response.json()
+
+    assert body["error"]["details"][0]["field"] == "window"
+    assert "90d" in body["error"]["message"]
+
+
+def test_the_statistics_row_is_matched_before_the_signal_id_row() -> None:
+    assert build().get("/api/v1/signals/statistics", headers=AUTH).status_code == 200
+
+
+def test_statistics_needs_a_token() -> None:
+    assert build().get("/api/v1/signals/statistics").status_code == 401

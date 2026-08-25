@@ -182,6 +182,9 @@ class EmptySignals:
 
         return HistoryPage(rows=(), next_position=None)
 
+    async def outcome_counts(self, *, group_by, since=None, until=None):
+        return ()
+
 
 def identity(users: FakeUsers | None = None) -> dict:
     """Every collaborator `build_read_api` requires, as kwargs."""
@@ -198,6 +201,7 @@ def identity(users: FakeUsers | None = None) -> dict:
         "signal_transitions": EmptySignals(),
         "outcomes": EmptySignals(),
         "track_record": EmptySignals(),
+        "track_statistics": EmptySignals(),
     }
 
 

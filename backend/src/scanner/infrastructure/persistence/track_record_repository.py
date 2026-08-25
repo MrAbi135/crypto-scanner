@@ -5,14 +5,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Select, select, tuple_
+from sqlalchemy import Select, case, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.sql.elements import ColumnElement
 
 from scanner.application.ports.signals import SignalRecord
 from scanner.application.ports.track_record import (
     ArchivedSignal,
+    GroupBy,
     HistoryFilters,
     HistoryPage,
+    OutcomeCounts,
 )
 from scanner.infrastructure.persistence.signal_models import SignalRow
 from scanner.infrastructure.persistence.signal_outcome_models import SignalOutcomeRow
@@ -75,6 +78,95 @@ class PgTrackRecordRepository:
                 "signal_id": last.signal_id,
             },
         )
+
+    async def outcome_counts(
+        self,
+        *,
+        group_by: GroupBy,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> tuple[OutcomeCounts, ...]:
+        """One row per (algo_version, axis) pair.
+
+        `algo_version` is in the GROUP BY unconditionally — §18.8 says
+        "Version-segmented always", and a hit rate averaged across two
+        algorithm versions describes neither of them.
+
+        The counts are conditional sums rather than four queries: one pass over
+        the join, and the four numbers are guaranteed to be from the same
+        snapshot of the table.
+        """
+        axis = _AXIS[group_by]
+
+        columns = [SignalRow.algo_version]
+
+        if axis is not None:
+            columns.append(axis)
+
+        stmt = (
+            select(
+                *columns,
+                _count_where(SignalOutcomeRow.outcome == "SUCCESS").label("successes"),
+                _count_where(SignalOutcomeRow.outcome == "FAILED").label("failures"),
+                _count_where(
+                    SignalOutcomeRow.outcome.in_(("EXPIRED_ACTIVE", "EXPIRED_UNTOUCHED"))
+                ).label("expired"),
+                _count_where(SignalOutcomeRow.outcome == "INVALIDATED_EARLY").label("invalidated"),
+            )
+            # An inner join: a signal with no outcome has not resolved, and a
+            # statistics row is about what happened. The archive read is where
+            # live signals belong.
+            .join(
+                SignalOutcomeRow,
+                SignalOutcomeRow.signal_id == SignalRow.signal_id,
+            )
+            # PRD FC-10.1's delisting exclusion, applied here and nowhere else.
+            .where(SignalOutcomeRow.excluded_from_stats.is_(False))
+            .group_by(*columns)
+            .order_by(*columns)
+        )
+
+        if since is not None:
+            stmt = stmt.where(SignalRow.published_at >= since)
+
+        if until is not None:
+            stmt = stmt.where(SignalRow.published_at < until)
+
+        async with self._sessions() as session:
+            rows = (await session.execute(stmt)).all()
+
+        return tuple(
+            OutcomeCounts(
+                algo_version=row[0],
+                key=row[1] if axis is not None else None,
+                successes=row[-4],
+                failures=row[-3],
+                expired=row[-2],
+                invalidated=row[-1],
+            )
+            for row in rows
+        )
+
+
+# §18.8's four axes. `VERSION` maps to None because the version is already in
+# every group -- asking to group by it means "version alone", not "version
+# twice".
+_AXIS = {
+    GroupBy.ARCHETYPE: SignalRow.archetype,
+    GroupBy.GRADE: SignalRow.grade,
+    GroupBy.TIMEFRAME: SignalRow.timeframe,
+    GroupBy.VERSION: None,
+}
+
+
+def _count_where(condition: ColumnElement[bool]) -> Any:
+    """`count(*) filter (where ...)`, spelled portably.
+
+    A conditional sum rather than four separate queries: one pass, and the four
+    numbers cannot come from different snapshots of a table that is being
+    appended to while they are read.
+    """
+    return func.coalesce(func.sum(case((condition, 1), else_=0)), 0)
 
 
 def _apply(stmt: Select[Any], filters: HistoryFilters) -> Select[Any]:

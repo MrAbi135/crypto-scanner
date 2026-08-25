@@ -83,6 +83,7 @@ def build() -> tuple[TestClient, FakeClock, FakeSessionStore, FakeUsers]:
         signal_transitions=EmptySignals(),
         outcomes=EmptySignals(),
         track_record=EmptySignals(),
+        track_statistics=EmptySignals(),
     )
 
     return TestClient(app), clock, store, users
