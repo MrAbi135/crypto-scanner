@@ -32,6 +32,8 @@ def _set_required(mp: pytest.MonkeyPatch) -> None:
 def test_api_settings_typed(scanner_env: pytest.MonkeyPatch) -> None:
     _set_required(scanner_env)
     scanner_env.setenv("SCANNER_API_PORT", "8080")
+    # S10: no default, so every ApiSettings construction must supply one.
+    scanner_env.setenv("SCANNER_ACCESS_TOKEN_SECRET", "a-test-signing-secret-of-sufficient-length")
     settings = get_settings("api")
     assert isinstance(settings, ApiSettings)
     assert settings.api_port == 8080

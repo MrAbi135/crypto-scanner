@@ -18,8 +18,13 @@ from scanner.application.ports.liquidity_detection import LiquidityPoolRecord
 from scanner.interfaces.api.app import build_read_api
 from scanner.interfaces.api.envelope import NO_PARAM_SET
 from scanner.shared import Timeframe
+from tests.unit.interfaces.api.identity_fixtures import bearer, identity
 
+# Every read row is authenticated as of S10-minimal. Minted once at module
+# scope: driving `/auth/login` in each test would make every read test also
+# a test of Argon2.
 NOW = datetime(2026, 8, 17, 12, tzinfo=UTC)
+AUTH = bearer(now=NOW)
 
 
 class FakeClock:
@@ -80,7 +85,7 @@ def build(*, structure=(), liquidity=(), zones=(), pools=(), latest=None):
         zones=zone_repo,
         pools=FakePools(pools),
         clock=FakeClock(),
-        allow_unauthenticated=True,
+        **identity(),
     )
 
     return TestClient(app), evidence, zone_repo
@@ -177,6 +182,7 @@ def test_every_doctrine_row_declares_its_versions(path: str) -> None:
     body = client.get(
         f"/api/v1/coins/BTCUSDT/{path}",
         params={"timeframe": "H1"},
+        headers=AUTH,
     ).json()
 
     versions = body["meta"]["versions"]
@@ -201,6 +207,7 @@ def test_structure_returns_recorded_events_with_decoded_evidence() -> None:
     body = client.get(
         "/api/v1/coins/BTCUSDT/structure",
         params={"timeframe": "H1"},
+        headers=AUTH,
     ).json()
 
     assert body["page"]["count"] == 2
@@ -217,6 +224,7 @@ def test_the_structure_window_is_window_candles_back_from_the_anchor() -> None:
     client.get(
         "/api/v1/coins/BTCUSDT/structure",
         params={"timeframe": "H4", "window": 100},
+        headers=AUTH,
     )
 
     start, end = evidence.windows[0]
@@ -232,6 +240,7 @@ def test_zones_returns_live_zones_with_prices_as_strings() -> None:
     body = client.get(
         "/api/v1/coins/btcusdt/zones",
         params={"timeframe": "h1"},
+        headers=AUTH,
     ).json()
 
     row = body["data"][0]
@@ -257,6 +266,7 @@ def test_a_zone_with_unreadable_evidence_still_renders() -> None:
     row = client.get(
         "/api/v1/coins/BTCUSDT/zones",
         params={"timeframe": "H1"},
+        headers=AUTH,
     ).json()["data"][0]
 
     assert row["zone_id"] == "z1"
@@ -270,6 +280,7 @@ def test_liquidity_ships_strength_with_its_components() -> None:
     body = client.get(
         "/api/v1/coins/BTCUSDT/liquidity",
         params={"timeframe": "H1"},
+        headers=AUTH,
     ).json()
 
     strength = body["data"]["pools"][0]["strength"]
@@ -290,6 +301,7 @@ def test_only_sweeps_appear_under_sweeps() -> None:
     body = client.get(
         "/api/v1/coins/BTCUSDT/liquidity",
         params={"timeframe": "H1"},
+        headers=AUTH,
     ).json()
 
     sweeps = body["data"]["sweeps"]
@@ -306,6 +318,7 @@ def test_an_unknown_timeframe_is_refused_on_every_row(path: str) -> None:
     response = client.get(
         f"/api/v1/coins/BTCUSDT/{path}",
         params={"timeframe": "M3"},
+        headers=AUTH,
     )
 
     assert response.status_code == 400
@@ -329,7 +342,7 @@ def test_the_window_reaches_past_the_final_candles_close() -> None:
 
     client, evidence, _ = build(latest=last_open)
 
-    client.get("/api/v1/coins/GOLDENSWEEP/structure", params={"timeframe": "H1"})
+    client.get("/api/v1/coins/GOLDENSWEEP/structure", params={"timeframe": "H1"}, headers=AUTH)
 
     _, end = evidence.windows[0]
 

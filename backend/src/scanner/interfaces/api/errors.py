@@ -54,6 +54,7 @@ def auth_required(
     message: str,
     *,
     code: str = "AUTH_REQUIRED",
+    headers: dict[str, str] | None = None,
 ) -> HTTPException:
     """401 for every authentication failure.
 
@@ -72,7 +73,12 @@ def auth_required(
         ),
         # RFC 6750: a 401 from a bearer-protected resource carries this.
         # Without it a compliant client has no way to know what to present.
-        headers={"WWW-Authenticate": "Bearer"},
+        #
+        # `headers` is how the refresh row clears its cookie. Raising discards
+        # the injected `Response`, so anything set on it before the raise never
+        # reaches the client — a `delete_cookie` there looks correct and does
+        # nothing.
+        headers={"WWW-Authenticate": "Bearer", **(headers or {})},
     )
 
 
@@ -103,7 +109,16 @@ def install_error_handlers(app: FastAPI) -> None:
                 correlation_id=correlation_id(request),
             )
 
-        return JSONResponse(status_code=exc.status_code, content=payload)
+        # `exc.headers` carried through rather than dropped. RFC 6750 requires
+        # `WWW-Authenticate` on a 401 from a bearer-protected resource, and a
+        # handler that rebuilds the response without the headers silently
+        # removes it — the body still says AUTH_REQUIRED, so nothing looks
+        # wrong until a compliant client cannot work out what to present.
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=payload,
+            headers=exc.headers,
+        )
 
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:

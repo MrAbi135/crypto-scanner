@@ -15,6 +15,14 @@ from scanner.config.base import BaseProcessSettings
 class ApiSettings(BaseProcessSettings):
     api_port: int = Field(default=8000, gt=0, le=65535)
 
+    # Sprint S10: the HS256 key for §18.1 access tokens.
+    #
+    # No default, not even an empty string. A default would let the process
+    # start and issue tokens anyone could forge, and the symptom -- everything
+    # works -- is indistinguishable from correct operation. Missing it is a
+    # boot failure with the variable named in the message.
+    access_token_secret: str = Field(min_length=32)
+
 
 class IngestSettings(BaseProcessSettings):
     health_port: int = Field(default=8001, gt=0, le=65535)

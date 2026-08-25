@@ -25,7 +25,7 @@ to assert against.
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
 from scanner.application.identity import AccountService, SessionService
 from scanner.application.identity.tokens import AccessTokens
@@ -38,6 +38,7 @@ from scanner.interfaces.api.auth import router as auth_router
 from scanner.interfaces.api.coins import router as coins_router
 from scanner.interfaces.api.errors import install_error_handlers
 from scanner.interfaces.api.market import router as market_router
+from scanner.interfaces.api.security import require_user
 
 # Kept in the code so a reader can see the subset at a glance, and so the
 # contract test can assert that nothing was quietly added.
@@ -96,8 +97,17 @@ def build_read_api(
 
     install_error_handlers(app)
 
+    # The auth group is the way in, so it cannot require what it issues.
     app.include_router(auth_router)
-    app.include_router(market_router)
-    app.include_router(coins_router)
+
+    # Everything else is bearer-only, declared on the include rather than on
+    # each route. TAD §21 wants a policy declaration per route; per-router is
+    # the version that cannot be forgotten when a route is added, and
+    # `test_every_non_auth_route_requires_a_token` enumerates the app to prove
+    # no router escaped.
+    protected = [Depends(require_user)]
+
+    app.include_router(market_router, dependencies=protected)
+    app.include_router(coins_router, dependencies=protected)
 
     return app

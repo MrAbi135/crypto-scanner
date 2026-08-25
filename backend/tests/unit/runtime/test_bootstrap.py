@@ -13,6 +13,8 @@ def _settings(**overrides: object) -> ApiSettings:
         "env": "dev",
         "db_dsn": "postgresql+asyncpg://u:p@h:5432/d",
         "redis_url": "redis://h:6379/0",
+        # S10: ApiSettings has no default for this, deliberately.
+        "access_token_secret": "a-test-signing-secret-of-sufficient-length",
     }
     fields.update(overrides)
     return ApiSettings(**fields)  # type: ignore[arg-type]

@@ -19,6 +19,7 @@ def _settings() -> ApiSettings:
         env="dev",
         db_dsn="postgresql+asyncpg://u:p@127.0.0.1:1/db",
         redis_url="redis://127.0.0.1:1/0",
+        access_token_secret="a-test-signing-secret-of-sufficient-length",
     )
 
 

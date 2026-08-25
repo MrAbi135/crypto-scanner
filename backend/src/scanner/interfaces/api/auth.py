@@ -107,6 +107,25 @@ def _clear_refresh_cookie(response: Response, *, secure: bool) -> None:
     )
 
 
+def _clearing_header(*, secure: bool) -> dict[str, str]:
+    """The same `Set-Cookie`, as a header for a raised error.
+
+    Raising an `HTTPException` discards the injected `Response`, so a
+    `delete_cookie` on it before the raise reads as correct and reaches
+    nobody. Every refresh failure has to clear the cookie — otherwise the
+    client keeps replaying a dead token, and on the reuse path each replay is
+    another alarm about a family that is already revoked.
+
+    Serialised by Starlette rather than hand-formatted, so the attributes
+    cannot drift from `_clear_refresh_cookie`\'s.
+    """
+    scratch = Response()
+
+    _clear_refresh_cookie(scratch, secure=secure)
+
+    return {"set-cookie": scratch.headers["set-cookie"]}
+
+
 def _tokens(
     user: UserRecord,
     session_id: str,
@@ -183,25 +202,27 @@ async def refresh(
     presented = request.cookies.get(REFRESH_COOKIE)
 
     if not presented:
+        # No cookie to clear, and nothing to say beyond "sign in".
         raise auth_required(request, "No refresh token.")
 
     result = await sessions.refresh(presented, now=now)
 
     if not result.ok or result.issued is None:
-        # The cookie is cleared on every failure, including reuse. Leaving a
-        # dead token in the browser means the client retries it forever, and
-        # on the reuse path each retry is another alarm about a family that is
-        # already revoked.
-        _clear_refresh_cookie(response, secure=_secure_cookies(request))
+        clearing = _clearing_header(secure=_secure_cookies(request))
 
         if result.outcome is RefreshOutcome.REUSE_DETECTED:
             raise auth_required(
                 request,
                 "Session ended. Sign in again.",
                 code="TOKEN_REVOKED",
+                headers=clearing,
             )
 
-        raise auth_required(request, "Session expired. Sign in again.")
+        raise auth_required(
+            request,
+            "Session expired. Sign in again.",
+            headers=clearing,
+        )
 
     user = await accounts.users.get(result.issued.session.user_id)
 
@@ -216,9 +237,11 @@ async def refresh(
             revoked_at=now,
         )
 
-        _clear_refresh_cookie(response, secure=_secure_cookies(request))
-
-        raise auth_required(request, "Session ended. Sign in again.")
+        raise auth_required(
+            request,
+            "Session ended. Sign in again.",
+            headers=_clearing_header(secure=_secure_cookies(request)),
+        )
 
     _set_refresh_cookie(response, result.issued.token, secure=_secure_cookies(request))
 

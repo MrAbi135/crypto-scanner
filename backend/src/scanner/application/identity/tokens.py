@@ -23,7 +23,7 @@ as "no capabilities" rather than "not implemented".
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import jwt
 from jwt import InvalidTokenError
@@ -122,18 +122,28 @@ class AccessTokens:
                 algorithms=[_ALGORITHM],
                 audience=_AUDIENCE,
                 issuer=_ISSUER,
-                options={"require": ["sub", "tid", "sid", "role", "exp", "iat"]},
+                options={
+                    "require": ["sub", "tid", "sid", "role", "exp", "iat"],
+                    # Expiry is evaluated below against the caller's `now`,
+                    # not here against the system clock.
+                    #
+                    # Every other identity path in this codebase takes `now`
+                    # as an argument -- sessions, revocation, rotation. Leaving
+                    # PyJWT's own check on meant the token layer read the wall
+                    # clock while the session layer read the injected one, so
+                    # the two could disagree about whether the same moment had
+                    # passed. `exp` is still *required* to be present; what
+                    # changes is which clock decides.
+                    "verify_exp": False,
+                },
             )
         except InvalidTokenError:
             return None
 
-        expires_at = datetime.fromtimestamp(payload["exp"], tz=now.tzinfo)
+        expires_at = datetime.fromtimestamp(payload["exp"], tz=UTC)
 
-        # PyJWT already refused an expired token against its own clock. This
-        # re-checks against the caller's, because every other identity path in
-        # this codebase takes `now` as an argument and a token that survived
-        # here while a session check called it expired would be a very
-        # confusing bug.
+        # The only expiry check, and it runs on the caller's clock. See the
+        # `verify_exp` note above.
         if expires_at <= now:
             return None
 
