@@ -14,6 +14,8 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI
 
+from scanner.application.identity import AccountService, SessionService
+from scanner.application.identity.tokens import AccessTokens
 from scanner.config import get_settings
 from scanner.config.processes import ApiSettings
 from scanner.infrastructure.clock import SystemClock
@@ -27,11 +29,18 @@ from scanner.infrastructure.persistence.ict_evidence_repository import (
 from scanner.infrastructure.persistence.ict_zone_repositories import (
     PgIctZoneRepository,
 )
+from scanner.infrastructure.persistence.identity_repositories import (
+    PgTenantRepository,
+    PgUserRepository,
+)
 from scanner.infrastructure.persistence.liquidity_detection_repositories import (
     PgLiquidityPoolRepository,
 )
 from scanner.infrastructure.persistence.repositories import PgCandleRepository
-from scanner.interfaces.api.app import build_read_api
+from scanner.infrastructure.persistence.session_repository import (
+    PgSessionRepository,
+)
+from scanner.interfaces.api.app import ENTITLEMENTS_ENFORCED, build_read_api
 from scanner.runtime.wiring.bootstrap import bootstrap
 from scanner.runtime.wiring.health import mount_health, run_asgi
 
@@ -52,31 +61,40 @@ def build_api_app(settings: ApiSettings) -> FastAPI:
     # ^(dev|staging|prod)$, so the longer spelling would never match and the
     # unauthenticated API would mount in production. Exactly the silent
     # failure this branch exists to prevent.
-    if settings.env == "prod":
-        # Not a soft warning. An unauthenticated read API reachable in
-        # production would expose the whole detection record to anyone who
-        # found the port, and the failure would be silent -- it would simply
-        # work. It stays off until S12 brings identity.
-        log.info("read_api_not_mounted", reason="production requires authentication")
-
-        return app
+    # The production bail-out is gone: it existed because these rows had no
+    # authentication, and now they do. What is still absent is TAD §21's
+    # entitlement layer, which is a limit on *what a caller may see*, not on
+    # whether they are known -- and with one operator and one plan there is
+    # nothing to divide.
 
     clock = SystemClock()
 
-    sessions = build_session_factory(build_engine(settings.db_dsn))
+    db = build_session_factory(build_engine(settings.db_dsn))
+
+    users = PgUserRepository(db)
+    session_repository = PgSessionRepository(db)
 
     read_api = build_read_api(
-        candles=PgCandleRepository(sessions, clock),
-        evidence=PgIctEvidenceRepository(sessions),
-        zones=PgIctZoneRepository(sessions),
-        pools=PgLiquidityPoolRepository(sessions),
+        candles=PgCandleRepository(db, clock),
+        evidence=PgIctEvidenceRepository(db),
+        zones=PgIctZoneRepository(db),
+        pools=PgLiquidityPoolRepository(db),
         clock=clock,
-        allow_unauthenticated=True,
+        accounts=AccountService(users, PgTenantRepository(db)),
+        sessions=SessionService(session_repository),
+        session_repository=session_repository,
+        # Raises at boot if the configured secret is too short to be one.
+        access_tokens=AccessTokens(settings.access_token_secret),
     )
 
     @asynccontextmanager
     async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
-        log.info("read_api_mounted", env=settings.env, auth="NONE (S10a)")
+        log.info(
+            "read_api_mounted",
+            env=settings.env,
+            auth="bearer",
+            entitlements=ENTITLEMENTS_ENFORCED,
+        )
 
         yield
 

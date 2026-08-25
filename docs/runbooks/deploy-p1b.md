@@ -398,3 +398,39 @@ If the id matches the pending consumer, that batch is *in flight*, not
 stranded — the engine simply does not talk to Redis while it works through
 thirty-odd closes at twenty seconds each. What matters is that the **dead**
 consumers show `pending 0`. On 2026-08-24 they did.
+
+
+## Step 11 — the api process needs a signing secret (S10)
+
+`SCANNER_ACCESS_TOKEN_SECRET` has **no default**, so the api container will
+refuse to start without it. That is deliberate: a default would let the process
+boot and issue access tokens anyone holding the default could forge, and the
+symptom — everything works — is indistinguishable from correct operation.
+
+Generate one and put it in the env file before deploying anything that includes
+S10:
+
+```bash
+python3 -c "import secrets; print('SCANNER_ACCESS_TOKEN_SECRET=' + secrets.token_urlsafe(48))"   >> ops/env/dev.env
+```
+
+Minimum 32 characters; `token_urlsafe(48)` gives 64. Rotating it invalidates
+every outstanding access token — refresh cookies survive, so clients recover on
+their next refresh rather than being signed out.
+
+**Do not deploy this during a soak.** It restarts the api container, and
+`soak_status.sh` counts a restart on any of the six as a broken run. The
+identity work is api-only and the soak is about the engine, so it waits.
+
+### First account
+
+There is no `/auth/register` — §18.1's row triggers a verification email and no
+provider is configured. Provision the operator account instead:
+
+```bash
+SCANNER_NEW_PASSWORD='<a real passphrase>'   $DC run --rm api python -m scanner.runtime.cli users create --email you@example.com
+```
+
+The command takes no `--password` flag: argv is visible in `ps`, lands in shell
+history, and is captured by process accounting. It reads the environment
+variable above, or prompts when it is unset.
