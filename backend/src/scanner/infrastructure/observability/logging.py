@@ -83,6 +83,15 @@ def configure_logging(level: str, service: str, release: str = "") -> None:
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso", utc=True),
         _add_correlation_id,
+        # Renders `exc_info=True` into an `exception` field. Without it the
+        # JSON carried a bare `"exc_info": true` and no traceback — an error
+        # log that claims to have the exception and does not. Diagnosing the
+        # zone-bound failure meant reproducing it by hand to see the error the
+        # engine had already logged three hundred times.
+        #
+        # Before `_redact_secrets`, so the rendered traceback is scrubbed too:
+        # an exception repr can carry a DSN or a bind parameter.
+        structlog.processors.format_exc_info,
         _redact_secrets,
     ]
     structlog.configure(
