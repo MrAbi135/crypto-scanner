@@ -40,6 +40,13 @@ from scanner.infrastructure.persistence.repositories import PgCandleRepository
 from scanner.infrastructure.persistence.session_repository import (
     PgSessionRepository,
 )
+from scanner.infrastructure.persistence.signal_outcome_repository import (
+    PgSignalOutcomeRepository,
+)
+from scanner.infrastructure.persistence.signal_repository import PgSignalRepository
+from scanner.infrastructure.persistence.signal_transition_repository import (
+    PgSignalTransitionRepository,
+)
 from scanner.interfaces.api.app import ENTITLEMENTS_ENFORCED, build_read_api
 from scanner.runtime.wiring.bootstrap import bootstrap
 from scanner.runtime.wiring.health import mount_health, run_asgi
@@ -85,6 +92,9 @@ def build_api_app(settings: ApiSettings) -> FastAPI:
         session_repository=session_repository,
         # Raises at boot if the configured secret is too short to be one.
         access_tokens=AccessTokens(settings.access_token_secret),
+        signals=PgSignalRepository(db),
+        signal_transitions=PgSignalTransitionRepository(db),
+        outcomes=PgSignalOutcomeRepository(db),
     )
 
     @asynccontextmanager

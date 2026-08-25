@@ -53,6 +53,18 @@ class SignalTransitionRepository(Protocol):
         """
         ...
 
+    async def list_for_signal(self, signal_id: str) -> tuple[SignalTransitionRecord, ...]:
+        """§18.8's lifecycle row: one signal's history, oldest first.
+
+        Refresh rows included. §12.3's `stress_test` observations are in the
+        spec's own description of this row ("incl. stress_test events"), and
+        §10.3's refreshes are the same kind of fact — a reader asking what
+        happened to a signal wants both. The two state queries exclude them for
+        a different reason (ordering, see the repository), which is why this is
+        a separate method rather than a flag on those.
+        """
+        ...
+
     async def list_live(self, symbol: str, timeframe: str) -> tuple[str, ...]:
         """Signal ids on this series whose latest state is not terminal."""
         ...

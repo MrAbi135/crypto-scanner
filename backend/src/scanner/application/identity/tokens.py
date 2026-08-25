@@ -124,17 +124,26 @@ class AccessTokens:
                 issuer=_ISSUER,
                 options={
                     "require": ["sub", "tid", "sid", "role", "exp", "iat"],
-                    # Expiry is evaluated below against the caller's `now`,
-                    # not here against the system clock.
+                    # **Every time-based check here is off, and the injected
+                    # `now` is the only authority.**
                     #
-                    # Every other identity path in this codebase takes `now`
-                    # as an argument -- sessions, revocation, rotation. Leaving
-                    # PyJWT's own check on meant the token layer read the wall
-                    # clock while the session layer read the injected one, so
-                    # the two could disagree about whether the same moment had
-                    # passed. `exp` is still *required* to be present; what
-                    # changes is which clock decides.
+                    # Each identity path in this codebase takes `now` as an
+                    # argument -- sessions, revocation, rotation. Any check
+                    # PyJWT performs uses the system clock instead, so the
+                    # token layer and the session layer would disagree about
+                    # whether the same moment had passed.
+                    #
+                    # `exp` was turned off first and `iat` was missed, which
+                    # cost an hour: a token minted at an injected time *ahead*
+                    # of the wall clock was refused as issued in the future,
+                    # and the symptom was a bare 401 with no reason. Both are
+                    # still *required* to be present; what changes is which
+                    # clock reads them. `iat` is carried for audit and is not
+                    # gated -- there is one process, so a token from its own
+                    # future is a clock bug, not an attack.
                     "verify_exp": False,
+                    "verify_iat": False,
+                    "verify_nbf": False,
                 },
             )
         except InvalidTokenError:

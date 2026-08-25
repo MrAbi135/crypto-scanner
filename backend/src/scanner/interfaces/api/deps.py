@@ -11,6 +11,9 @@ from scanner.application.ports.ict_evidence import IctEvidenceRepository
 from scanner.application.ports.ict_zones import IctZoneRepository
 from scanner.application.ports.liquidity_detection import LiquidityPoolRepository
 from scanner.application.ports.sessions import SessionRepository
+from scanner.application.ports.signal_outcomes import SignalOutcomeRepository
+from scanner.application.ports.signal_transitions import SignalTransitionRepository
+from scanner.application.ports.signals import SignalRepository
 
 
 def get_candles(request: Request) -> CandleRepository:
@@ -53,3 +56,15 @@ def get_session_repository(request: Request) -> SessionRepository:
 
 def get_access_tokens(request: Request) -> AccessTokens:
     return request.app.state.access_tokens  # type: ignore[no-any-return]
+
+
+def get_signals(request: Request) -> SignalRepository:
+    return request.app.state.signals  # type: ignore[no-any-return]
+
+
+def get_signal_transitions(request: Request) -> SignalTransitionRepository:
+    return request.app.state.signal_transitions  # type: ignore[no-any-return]
+
+
+def get_outcomes(request: Request) -> SignalOutcomeRepository:
+    return request.app.state.outcomes  # type: ignore[no-any-return]

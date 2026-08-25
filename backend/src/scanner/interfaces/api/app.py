@@ -34,12 +34,16 @@ from scanner.application.ports.ict_evidence import IctEvidenceRepository
 from scanner.application.ports.ict_zones import IctZoneRepository
 from scanner.application.ports.liquidity_detection import LiquidityPoolRepository
 from scanner.application.ports.sessions import SessionRepository
+from scanner.application.ports.signal_outcomes import SignalOutcomeRepository
+from scanner.application.ports.signal_transitions import SignalTransitionRepository
+from scanner.application.ports.signals import SignalRepository
 from scanner.interfaces.api.auth import router as auth_router
 from scanner.interfaces.api.coins import router as coins_router
 from scanner.interfaces.api.errors import install_error_handlers
 from scanner.interfaces.api.market import router as market_router
 from scanner.interfaces.api.me import router as me_router
 from scanner.interfaces.api.security import require_user
+from scanner.interfaces.api.signals import router as signals_router
 
 # Kept in the code so a reader can see the subset at a glance, and so the
 # contract test can assert that nothing was quietly added.
@@ -49,6 +53,9 @@ IMPLEMENTED_ROWS: tuple[str, ...] = (
     "POST /api/v1/auth/logout",
     "GET /api/v1/auth/sessions",
     "GET /api/v1/me",
+    "GET /api/v1/signals/{signal_id}",
+    "GET /api/v1/signals/{signal_id}/evidence",
+    "GET /api/v1/signals/{signal_id}/transitions",
     "DELETE /api/v1/auth/sessions/{session_id}",
     "GET /api/v1/market/candles",
     "GET /api/v1/coins/{symbol_id}/structure",
@@ -72,6 +79,9 @@ def build_read_api(
     sessions: SessionService,
     session_repository: SessionRepository,
     access_tokens: AccessTokens,
+    signals: SignalRepository,
+    signal_transitions: SignalTransitionRepository,
+    outcomes: SignalOutcomeRepository,
 ) -> FastAPI:
     """Assemble the API. Every identity collaborator is required.
 
@@ -96,6 +106,9 @@ def build_read_api(
     app.state.sessions = sessions
     app.state.session_repository = session_repository
     app.state.access_tokens = access_tokens
+    app.state.signals = signals
+    app.state.signal_transitions = signal_transitions
+    app.state.outcomes = outcomes
 
     install_error_handlers(app)
 
@@ -110,6 +123,7 @@ def build_read_api(
     protected = [Depends(require_user)]
 
     app.include_router(me_router, dependencies=protected)
+    app.include_router(signals_router, dependencies=protected)
     app.include_router(market_router, dependencies=protected)
     app.include_router(coins_router, dependencies=protected)
 
