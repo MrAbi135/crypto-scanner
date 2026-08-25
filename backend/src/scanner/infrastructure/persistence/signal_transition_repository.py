@@ -86,6 +86,42 @@ class PgSignalTransitionRepository:
         async with self._sessions() as session:
             return (await session.execute(stmt)).scalar_one_or_none()
 
+    async def list_for_signal(self, signal_id: str) -> tuple[SignalTransitionRecord, ...]:
+        """One signal's whole history, oldest first.
+
+        Ordered by candle then `refresh` then id: within a candle the state
+        change reads before the refresh that accompanied it, which is the order
+        they happened in as far as a reader is concerned. `transition_id` only
+        breaks a tie the unique constraint already forbids.
+        """
+        stmt = (
+            select(SignalTransitionRow)
+            .where(SignalTransitionRow.signal_id == signal_id)
+            .order_by(
+                SignalTransitionRow.at_candle_open_time.asc(),
+                SignalTransitionRow.refresh.asc(),
+                SignalTransitionRow.transition_id.asc(),
+            )
+        )
+
+        async with self._sessions() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+
+        return tuple(
+            SignalTransitionRecord(
+                transition_id=row.transition_id,
+                signal_id=row.signal_id,
+                from_state=row.from_state,
+                to_state=row.to_state,
+                at_candle_open_time=row.at_candle_open_time,
+                recorded_at=row.recorded_at,
+                stress_test=row.stress_test,
+                refresh=row.refresh,
+                trigger_evidence=row.trigger_evidence,
+            )
+            for row in rows
+        )
+
     async def list_live(self, symbol: str, timeframe: str) -> tuple[str, ...]:
         """Signal ids on this series whose latest state is not terminal.
 

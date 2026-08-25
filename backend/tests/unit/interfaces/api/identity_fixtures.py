@@ -144,8 +144,42 @@ class FakeSessionStore:
         return tuple(r for r in self.rows.values() if r.user_id == user_id and r.live_at(now))
 
 
+class EmptySignals:
+    """T17/T18/T19 with nothing in them.
+
+    The modules that only exercise the market and coins rows still have to
+    supply these, because `build_read_api` requires every collaborator — a
+    default would let a test build an app whose signal rows silently 404 for
+    the wrong reason.
+    """
+
+    async def get(self, signal_id):
+        return None
+
+    async def append(self, record):
+        return True
+
+    async def latest_for_dedup_key(self, dedup_key):
+        return None
+
+    async def recent(self, *, limit, symbol=None, timeframe=None):
+        return ()
+
+    async def scan(self, *, batch=500):
+        return []
+
+    async def current_state(self, signal_id):
+        return None
+
+    async def list_for_signal(self, signal_id):
+        return ()
+
+    async def list_live(self, symbol, timeframe):
+        return ()
+
+
 def identity(users: FakeUsers | None = None) -> dict:
-    """The four collaborators `build_read_api` requires, as kwargs."""
+    """Every collaborator `build_read_api` requires, as kwargs."""
 
     store = FakeSessionStore()
     people = users or FakeUsers()
@@ -155,6 +189,9 @@ def identity(users: FakeUsers | None = None) -> dict:
         "sessions": SessionService(store),
         "session_repository": store,
         "access_tokens": AccessTokens(TEST_SECRET),
+        "signals": EmptySignals(),
+        "signal_transitions": EmptySignals(),
+        "outcomes": EmptySignals(),
     }
 
 
