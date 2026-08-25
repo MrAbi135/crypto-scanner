@@ -38,6 +38,7 @@ from scanner.interfaces.api.auth import router as auth_router
 from scanner.interfaces.api.coins import router as coins_router
 from scanner.interfaces.api.errors import install_error_handlers
 from scanner.interfaces.api.market import router as market_router
+from scanner.interfaces.api.me import router as me_router
 from scanner.interfaces.api.security import require_user
 
 # Kept in the code so a reader can see the subset at a glance, and so the
@@ -47,6 +48,7 @@ IMPLEMENTED_ROWS: tuple[str, ...] = (
     "POST /api/v1/auth/refresh",
     "POST /api/v1/auth/logout",
     "GET /api/v1/auth/sessions",
+    "GET /api/v1/me",
     "DELETE /api/v1/auth/sessions/{session_id}",
     "GET /api/v1/market/candles",
     "GET /api/v1/coins/{symbol_id}/structure",
@@ -107,6 +109,7 @@ def build_read_api(
     # no router escaped.
     protected = [Depends(require_user)]
 
+    app.include_router(me_router, dependencies=protected)
     app.include_router(market_router, dependencies=protected)
     app.include_router(coins_router, dependencies=protected)
 
