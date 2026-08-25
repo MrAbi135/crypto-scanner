@@ -74,9 +74,15 @@ fi
 echo
 
 echo "-- stream --"
-groups=$($C exec -T redis redis-cli XINFO GROUPS scanner:stream:candle-closed 2>/dev/null | paste - - - - - - - -)
-echo "$groups" | tr '\t' ' '
-lag=$(echo "$groups" | grep -oE "lag [0-9]+" | grep -oE "[0-9]+")
+# Tabs normalised once, and everything below reads the normalised text. The
+# first version printed a tab-free copy and then grepped the original for
+# "lag [0-9]+", which cannot match "lag<TAB>156" -- so it reported "could not
+# read stream lag" against a perfectly readable one. It flagged rather than
+# skipped, which is the only reason it was noticed on the first run.
+groups=$($C exec -T redis redis-cli XINFO GROUPS scanner:stream:candle-closed 2>/dev/null \
+  | paste - - - - - - - - | tr '\t' ' ')
+echo "$groups"
+lag=$(echo "$groups" | grep -oE "lag +[0-9]+" | grep -oE "[0-9]+" | tail -1)
 
 if ! echo "${lag:-x}" | grep -qE '^[0-9]+$'; then
   # A non-numeric reading is itself an alert. Silently skipping it is how the
