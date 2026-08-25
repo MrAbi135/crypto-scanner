@@ -5,7 +5,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 
+import sqlalchemy as sa
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -19,7 +21,7 @@ from scanner.application.ports.ict_zones import (
     IctZoneRecord,
     IctZoneTransitionRecord,
 )
-from scanner.domain.ict import TERMINAL_ZONE_STATES, InteractionKind
+from scanner.domain.ict import MAX_ZONES, TERMINAL_ZONE_STATES, InteractionKind
 from scanner.infrastructure.persistence.ict_zone_interaction_models import (
     IctZoneInteractionRow,
 )
@@ -211,11 +213,32 @@ class PgIctZoneInteractionContextRepository:
                     # service's work, on zones that were dead.
                     IctZoneRow.state.notin_(sorted(TERMINAL_ZONE_STATES)),
                 )
+                # `created_at`, not `created_index` — the same correction
+                # `list_live` already carries. `created_index` is the zone's
+                # offset inside whichever 500-candle window first detected it,
+                # frozen there while the window slides on, so ordering by it
+                # sorts zones from different windows against each other by an
+                # accident of when the engine looked. That was survivable while
+                # this query returned everything; with the bound below it
+                # decides *which* zones exist as far as this service is
+                # concerned.
                 .order_by(
-                    IctZoneRow.created_index.asc(),
+                    IctZoneRow.created_at.desc(),
                     IctZoneRow.zone_type.asc(),
                     IctZoneRow.zone_id.asc(),
                 )
+                # §5.1's `P.ict.max_zones = 60`, which this path was missing
+                # while `list_live` had it. The consequence was not subtle:
+                # BTCUSDT M5 reached 33,807 live zones on the soak VM, every
+                # pass walked all of them (22s → 82s against a 2s target), and
+                # at 32,767 the transitions read below hit PostgreSQL's
+                # per-statement parameter ceiling and every pass began to fail.
+                #
+                # Bounding here rather than only downstream is what makes the
+                # two paths agree: §8 confluence sees 60 zones via `list_live`,
+                # so recording interactions for the other 33,747 was work whose
+                # output nothing read.
+                .limit(MAX_ZONES)
             )
 
             return tuple(_zone_record(row) for row in result.scalars().all())
@@ -250,7 +273,21 @@ class PgIctZoneInteractionContextRepository:
             result = await session.execute(
                 select(IctZoneTransitionRow)
                 .where(
-                    IctZoneTransitionRow.zone_id.in_(list(zone_ids)),
+                    # `= ANY(:ids)` with one array bind, not `IN (...)` with
+                    # one bind per id. PostgreSQL refuses a statement carrying
+                    # more than 32,767 parameters, and this query is fed a
+                    # caller's list — so `IN` made the ceiling a function of
+                    # how much data had accumulated. It failed for the first
+                    # time the day the live-zone count crossed it, five hours
+                    # into a soak, with every container still reporting
+                    # healthy.
+                    #
+                    # The bound in `list_zones` means the list is now sixty
+                    # long. This stays because a limit that has to hold for
+                    # correctness *and* for the query to parse is one limit
+                    # doing two jobs, and the next caller will not know that.
+                    IctZoneTransitionRow.zone_id
+                    == sa.any_(sa.cast(list(zone_ids), ARRAY(sa.String))),
                 )
                 .order_by(
                     IctZoneTransitionRow.zone_id.asc(),

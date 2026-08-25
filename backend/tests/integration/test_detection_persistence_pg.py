@@ -1339,3 +1339,98 @@ async def test_verify_seals_reads_the_stored_payloads(engine) -> None:
     # `payload_hash` of "aaaa..." and every one of them is caught. A pass that
     # found no failures at all here would mean the scan was reading nothing.
     assert "sig-1" in failed
+
+
+async def test_the_interaction_path_applies_the_same_zone_bound_as_confluence(engine) -> None:
+    """§5.1's `P.ict.max_zones = 60`, on the path that was missing it.
+
+    `list_live` carried the bound and `list_zones` did not, so §8 confluence
+    saw sixty zones while the interaction replay walked every live one. On the
+    soak VM that reached 33,807 for BTCUSDT M5: the pass time went 22s → 82s
+    against a 2s target, and interactions were being recorded for zones
+    nothing downstream would ever read.
+    """
+    sessions = build_session_factory(engine)
+    zones = PgIctZoneRepository(sessions)
+    symbol = "ZBOUND"
+
+    for i in range(MAX_ZONES + 25):
+        await zones.upsert(
+            zone(
+                f"b-{i:04d}",
+                symbol=symbol,
+                created_index=i,
+                created_at=T0 + timedelta(minutes=i),
+            )
+        )
+
+    listed = await PgIctZoneInteractionContextRepository(sessions).list_zones(symbol, TF)
+
+    assert len(listed) == MAX_ZONES
+
+
+async def test_the_bounded_zone_read_keeps_the_newest_by_wall_clock(engine) -> None:
+    """Which sixty, and by what ordering.
+
+    `created_index` is the zone's offset inside whichever 500-candle window
+    first detected it — frozen there while the window slides on. Ordering by
+    it sorted zones from different windows against each other by an accident
+    of when the engine looked, which was survivable while this query returned
+    everything and is not now that it decides which zones exist.
+
+    **The fixture had to be rebuilt to make this test capable of failing.**
+    The first version gave the newest zone the *lowest* index, which makes
+    index-ascending and time-descending select the same sixty rows — the test
+    passed against the wrong ordering, which mutation-testing caught and
+    reading did not. Here the two run together instead, so index-ascending
+    keeps the sixty oldest and time-descending keeps the sixty newest, and the
+    two answers share only fifty-five rows.
+    """
+    sessions = build_session_factory(engine)
+    zones = PgIctZoneRepository(sessions)
+    # Its own symbol: the module shares one database and "ZORDER" already
+    # belongs to the `list_live` ordering test above.
+    symbol = "ZORDERBOUND"
+
+    for i in range(MAX_ZONES + 5):
+        await zones.upsert(
+            zone(
+                f"o-{i:04d}",
+                symbol=symbol,
+                created_index=i,
+                created_at=T0 + timedelta(minutes=i),
+            )
+        )
+
+    listed = await PgIctZoneInteractionContextRepository(sessions).list_zones(symbol, TF)
+
+    # Newest first, and the five oldest are the ones dropped.
+    assert listed[0].zone_id == f"o-{MAX_ZONES + 4:04d}"
+    assert {z.zone_id for z in listed}.isdisjoint({f"o-{i:04d}" for i in range(5)})
+
+
+async def test_reading_transitions_survives_more_ids_than_postgres_takes_parameters(
+    engine,
+) -> None:
+    """The failure that stopped the soak, reproduced above the ceiling.
+
+    PostgreSQL refuses a statement carrying more than 32,767 bind parameters.
+    `IN (...)` spends one per id, so this query's ceiling was a function of how
+    much data had accumulated — it worked for thirteen hours and then failed
+    on every pass. As `= ANY(:ids)` the ids are one array parameter and the
+    count is irrelevant.
+
+    No rows are inserted: what is under test is whether the statement can be
+    sent at all.
+    """
+    sessions = build_session_factory(engine)
+    context = PgIctZoneInteractionContextRepository(sessions)
+
+    ids = [f"absent-{i}" for i in range(40_000)]
+
+    found = await context.list_transitions_for(ids)
+
+    # Every requested id still gets an entry, so a caller can index without
+    # distinguishing "no transitions" from "not asked for".
+    assert len(found) == len(ids)
+    assert found[ids[0]] == ()
