@@ -167,12 +167,12 @@ class StructureShiftReplayService:
             external_classified = classify_swings(confirmed_external)
             internal_classified = classify_swings(confirmed_internal)
 
-            inferred = _infer_external_trend(
-                external_classified,
-            )
-
-            if machine.state is TrendState.RANGING and inferred is not TrendState.RANGING:
-                machine.state = inferred
+            # §3.4's entry edge, from the machine that owns it. This module
+            # had its own copy of the rule and `structure_replay` had a third,
+            # returning a different type -- three implementations of one line
+            # of doctrine, and the one the BOS gate consulted was the one that
+            # did not persist.
+            machine.apply_structure(external_classified)
 
             if candidate is not None:
                 candidate.has_displacement = (
@@ -649,66 +649,6 @@ def _has_followthrough(
         return candle.close < break_extreme
 
     return candle.close > break_extreme
-
-
-def _infer_external_trend(
-    classified: tuple[ClassifiedSwing, ...],
-) -> TrendState:
-    highs = [
-        item.label
-        for item in classified
-        if item.label
-        in {
-            StructureLabel.HH,
-            StructureLabel.LH,
-            StructureLabel.EQH,
-        }
-    ]
-
-    lows = [
-        item.label
-        for item in classified
-        if item.label
-        in {
-            StructureLabel.HL,
-            StructureLabel.LL,
-            StructureLabel.EQL,
-        }
-    ]
-
-    if (
-        len(highs) >= 2
-        and len(lows) >= 2
-        and highs[-2:]
-        == [
-            StructureLabel.HH,
-            StructureLabel.HH,
-        ]
-        and lows[-2:]
-        == [
-            StructureLabel.HL,
-            StructureLabel.HL,
-        ]
-    ):
-        return TrendState.BULLISH
-
-    if (
-        len(highs) >= 2
-        and len(lows) >= 2
-        and highs[-2:]
-        == [
-            StructureLabel.LH,
-            StructureLabel.LH,
-        ]
-        and lows[-2:]
-        == [
-            StructureLabel.LL,
-            StructureLabel.LL,
-        ]
-    ):
-        return TrendState.BEARISH
-
-    return TrendState.RANGING
 
 
 def _atr_at(

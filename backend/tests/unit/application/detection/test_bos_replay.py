@@ -34,7 +34,7 @@ from tests.unit.application.detection.test_structure_replay import (
 from scanner.application.detection.state import EngineStateManager
 from scanner.application.detection.structure_replay import StructureReplayService
 from scanner.domain.common import Candle, CandleSource
-from scanner.domain.structure import SwingKind, SwingPoint, SwingStrength
+from scanner.domain.structure import SwingKind, SwingPoint, SwingStrength, TrendStateMachine
 from scanner.shared import Timeframe
 
 T0 = datetime(2026, 8, 1, tzinfo=UTC)
@@ -123,6 +123,7 @@ async def test_a_close_through_a_swing_high_is_a_bos_once_trend_is_bullish() -> 
         timeframe=Timeframe.H1,
         candles=candles,
         external_swings=tuple(UPTREND),
+        trend=TrendStateMachine(),
     )
 
     assert inserted == 1
@@ -167,6 +168,7 @@ async def test_an_outside_bar_closing_bearish_does_not_break_upward() -> None:
         timeframe=Timeframe.H1,
         candles=candles,
         external_swings=tuple(UPTREND),
+        trend=TrendStateMachine(),
     )
 
     assert inserted == 0
@@ -190,6 +192,7 @@ async def test_an_outside_bar_closing_bullish_still_breaks_upward() -> None:
         timeframe=Timeframe.H1,
         candles=candles,
         external_swings=tuple(UPTREND),
+        trend=TrendStateMachine(),
     )
 
     assert inserted == 1
@@ -223,6 +226,7 @@ async def test_an_ordinary_bearish_candle_through_the_level_still_breaks() -> No
         timeframe=Timeframe.H1,
         candles=candles,
         external_swings=tuple(UPTREND),
+        trend=TrendStateMachine(),
     )
 
     assert inserted == 1
@@ -265,6 +269,7 @@ async def test_a_level_price_already_left_behind_is_consumed_without_a_break() -
         timeframe=Timeframe.H1,
         candles=candles,
         external_swings=tuple(UPTREND),
+        trend=TrendStateMachine(),
     )
 
     assert inserted == 1
@@ -297,6 +302,7 @@ async def test_no_bos_while_structure_is_ranging() -> None:
         timeframe=Timeframe.H1,
         candles=candles,
         external_swings=tuple(ranging),
+        trend=TrendStateMachine(),
     )
 
     assert inserted == 0
@@ -320,6 +326,7 @@ async def test_a_swing_cannot_break_before_it_has_confirmed() -> None:
         timeframe=Timeframe.H1,
         candles=candles,
         external_swings=tuple(UPTREND),
+        trend=TrendStateMachine(),
     )
 
     assert inserted == 0

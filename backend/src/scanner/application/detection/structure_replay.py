@@ -29,11 +29,11 @@ from scanner.domain.structure import (
     IDLE_CANDLES,
     BreakDirection,
     ClassifiedSwing,
-    StructureLabel,
     SwingKind,
     SwingPoint,
     SwingStrength,
     TrendState,
+    TrendStateMachine,
     classify_swings,
     detect_bos,
     detect_external_swings,
@@ -82,12 +82,46 @@ class StructureReplayService:
         clock: Clock,
         *,
         algo_version: str = STRUCTURE_ALGO_VERSION,
+        shift_state: EngineStateManager | None = None,
+        shift_algo_version: str | None = None,
     ) -> None:
         self._candles = candles
         self._events = events
         self._states = states
         self._clock = clock
         self._algo_version = algo_version
+        # §3.4's maintained state, as the shift engine last left it. Optional
+        # so the golden harness and `engine run` can drive this service alone;
+        # absent, the window starts from RANGING, which is where a series with
+        # no history starts anyway.
+        self._shift_state = shift_state
+        self._shift_algo_version = shift_algo_version
+
+    async def _seed_trend(self, symbol: str, timeframe: Timeframe) -> TrendState:
+        """The trend as the shift engine last recorded it, or RANGING.
+
+        RANGING on absence rather than a guess: §3.4's diagram starts there,
+        and a series whose state has never been written has never earned a
+        trend.
+        """
+        if self._shift_state is None or self._shift_algo_version is None:
+            return TrendState.RANGING
+
+        state = await self._shift_state.load(
+            symbol,
+            timeframe.value,
+            self._shift_algo_version,
+        )
+
+        if state is None:
+            return TrendState.RANGING
+
+        try:
+            return TrendState(state.trend_state)
+        except ValueError:
+            # A value this enum does not know. Reported as RANGING rather than
+            # raised: an unreadable state should cost breaks, not the pass.
+            return TrendState.RANGING
 
     async def run(
         self,
@@ -100,6 +134,17 @@ class StructureReplayService:
     ) -> StructureReplayReport:
         if end <= start:
             raise ValueError("end must be greater than start")
+
+        # §3.4: "Maintain one authoritative directional state". Seeded from
+        # what the shift engine last persisted, then advanced candle by candle
+        # inside the window.
+        #
+        # The shift engine runs *after* this one in the pipeline, so the state
+        # read here is the previous close's. That is the causally correct
+        # answer: at the moment a candle breaks a level, the prevailing trend
+        # is the one established before it printed. Reading the current pass's
+        # own conclusion would be reading the future.
+        trend = TrendStateMachine(state=await self._seed_trend(symbol, timeframe))
 
         if rebuild_state:
             await self._states.rebuild(
@@ -208,11 +253,16 @@ class StructureReplayService:
             timeframe=timeframe,
             candles=candles,
             external_swings=external_swings,
+            trend=trend,
         )
         inserted += bos_inserted
 
+        # The state the machine actually held after the window, not a fresh
+        # re-derivation. Reporting one thing while the BOS gate acted on
+        # another is how the engine came to log `trend: BULLISH` on a series
+        # where no break had fired in eight days.
         trend_state = _idle_adjusted(
-            _infer_external_trend(external_classified),
+            trend.state.value,
             candles=candles,
             external_swings=external_swings,
             broke_at=broke_at,
@@ -249,6 +299,7 @@ class StructureReplayService:
         timeframe: Timeframe,
         candles: list[Candle],
         external_swings: tuple[SwingPoint, ...],
+        trend: TrendStateMachine,
     ) -> tuple[int, frozenset[int]]:
         """Replay BOS chronologically using trend known at each candle.
 
@@ -282,18 +333,23 @@ class StructureReplayService:
                 continue
 
             classified = classify_swings(confirmed_swings)
-            trend_state = _infer_external_trend(classified)
+
+            # The entry edge, applied to the maintained state rather than
+            # re-derived. `apply_structure` is a no-op once a trend is held --
+            # §3.4 draws no edge from BULLISH back to RANGING except the idle
+            # rule, and leaving a trend is the shift engine's job.
+            trend_state = trend.apply_structure(classified).value
 
             if trend_state in {
-                "BULLISH",
-                "BULLISH_CAUTION",
+                TrendState.BULLISH.value,
+                TrendState.BULLISH_CAUTION.value,
             }:
                 direction = BreakDirection.UP
                 required_kind = SwingKind.HIGH
 
             elif trend_state in {
-                "BEARISH",
-                "BEARISH_CAUTION",
+                TrendState.BEARISH.value,
+                TrendState.BEARISH_CAUTION.value,
             }:
                 direction = BreakDirection.DOWN
                 required_kind = SwingKind.LOW
@@ -710,65 +766,3 @@ def _idle_adjusted(
     )
 
     return TrendState.RANGING.value if idle else trend_state
-
-
-def _infer_external_trend(
-    classified: tuple[ClassifiedSwing, ...],
-) -> str:
-    """Require two consecutive structural pairs before assigning trend."""
-
-    highs = [
-        item.label
-        for item in classified
-        if item.label
-        in {
-            StructureLabel.HH,
-            StructureLabel.LH,
-            StructureLabel.EQH,
-        }
-    ]
-
-    lows = [
-        item.label
-        for item in classified
-        if item.label
-        in {
-            StructureLabel.HL,
-            StructureLabel.LL,
-            StructureLabel.EQL,
-        }
-    ]
-
-    if (
-        len(highs) >= 2
-        and len(lows) >= 2
-        and highs[-2:]
-        == [
-            StructureLabel.HH,
-            StructureLabel.HH,
-        ]
-        and lows[-2:]
-        == [
-            StructureLabel.HL,
-            StructureLabel.HL,
-        ]
-    ):
-        return "BULLISH"
-
-    if (
-        len(highs) >= 2
-        and len(lows) >= 2
-        and highs[-2:]
-        == [
-            StructureLabel.LH,
-            StructureLabel.LH,
-        ]
-        and lows[-2:]
-        == [
-            StructureLabel.LL,
-            StructureLabel.LL,
-        ]
-    ):
-        return "BEARISH"
-
-    return "RANGING"

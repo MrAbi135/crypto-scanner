@@ -27,6 +27,7 @@ from scanner.domain.structure import (
     SwingKind,
     SwingPoint,
     SwingStrength,
+    TrendStateMachine,
 )
 from scanner.shared import Timeframe
 
@@ -470,6 +471,7 @@ async def test_bos_replay_waits_for_confirmed_external_swings() -> None:
         timeframe=Timeframe.H1,
         candles=candles,
         external_swings=external_swings,
+        trend=TrendStateMachine(),
     )
 
     bos_events = [event for event in events.events.values() if event.event_type == "BOS_UP"]
