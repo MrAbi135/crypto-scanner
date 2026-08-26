@@ -370,8 +370,39 @@ Set it to something that names the build, before the clock starts:
 
 ```bash
 sed -i "s|^SCANNER_RELEASE=.*|SCANNER_RELEASE=p1b-$(git rev-parse --short HEAD)|" ops/env/dev.env
+$DC build api engine ingest worker          # all four. see below.
 $DC up -d --force-recreate engine worker ingest api
 ```
+
+### Build all four services, and check the code rather than the label
+
+**Each service has its own image.** `scanner-dev-api`, `scanner-dev-engine`,
+`scanner-dev-ingest` and `scanner-dev-worker` are built separately even though
+they share a Dockerfile, so `$DC build api` leaves the other three on whatever
+they were built from last. `--force-recreate` then makes new *containers* from
+those same old *images*, and everything comes up healthy.
+
+Nothing in the output says so. On 2026-08-26 that put the engine an hour and a
+half behind main while every log line it wrote read `release: p1b-d24db9c` —
+because `SCANNER_RELEASE` is read from `dev.env` at startup and has no
+connection to what is inside the image. The label was accurate about the
+checkout and silent about the binary.
+
+`docker images` will not settle it either: a rebuild whose layers are cached
+reports the *old* `CreatedAt` on a genuinely new image. Compare image IDs, or
+better, grep the code:
+
+```bash
+# Something the new build has and the old one does not.
+NEEDLE=_supersedes
+for s in api engine ingest worker; do
+  echo "$s $(docker exec scanner-dev-$s-1 grep -c $NEEDLE     /app/src/scanner/domain/momentum/legs.py 2>&1)"
+done
+```
+
+Zero for any service means that service is running old code, whatever its
+release stamp says. Do this after the recreate, not after the build — it is
+the running container that matters.
 
 Then record T0 and check it took:
 
