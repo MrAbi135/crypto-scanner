@@ -2260,9 +2260,24 @@ def _read_participation(
 # Without this bridge every FVG, IFVG and BPR zone scores zero state points --
 # not because it is stale, but because "OPEN" is not a key in the table. The two
 # names describe the same two facts: untouched, and touched.
+# §8.3.1's freshness ladder is written in a mixed vocabulary: `FRESH` and
+# `TESTED` are `ZoneState` words (OB, breaker, mitigation) and `CE_FILLED` is
+# an `FvgState` one. Neither family speaks all three, so the scorer needs the
+# translation or a zone is charged for the enum its detector happens to use.
+#
+# §5.9 fixes the pairs, because it defines the interaction grammar once for
+# "**all** zone objects": mitigation is "price reaches >= 50% of zone depth
+# then closes outside on polarity side", and consequent encroachment is the
+# same 50% of an FVG. The two words name one event.
+#
+# `MITIGATED` was missing, so an OB or breaker that had been mitigated scored
+# nothing for freshness where an FVG in the identical condition scored 6 --
+# and §5.9 calls mitigation a *Respect*, which is evidence for the zone rather
+# than against it. Thirty-one live zones on the host sat in that state.
 _FVG_STATE_EQUIVALENT: dict[str, str] = {
     "OPEN": "FRESH",
     "TOUCHED": "TESTED",
+    "MITIGATED": "CE_FILLED",
 }
 
 
