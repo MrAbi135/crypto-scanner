@@ -7,18 +7,20 @@ lived in `structure_replay` as a stateless function that recomputed the trend
 from the last two labels on every candle, while the caution and flip edges
 lived here.
 
-Split that way the state could not persist. One LH after a run of HH sent the
+Split that way the state cannot persist. One LH after a run of HH sends the
 stateless half straight back to RANGING, which is an edge the diagram does not
 draw — `BULLISH` leaves only via `BULLISH_CAUTION` (on a CHoCH) or the idle
-rule. And because the BOS gate consulted the stateless half, breaks stopped
-firing wherever four consecutive same-direction structural events inside one
-window were rare.
+rule. The BOS gate consulted the stateless half, so it shut on a single
+contrary label whatever the maintained state said.
 
-Measured on the staging host: **zero BOS events on H1 and H4 across eight
-days**, against 99 on M5 and 72 on M15 — the slow timeframes simply never held
-the pattern long enough. Since setups only form on H1 and H4, and §8.6's A3
-requires a displaced BOS, no setup could ever classify and nothing could ever
-publish.
+**On the correction that prompted this, and what it does not claim.** The
+change was first justified with a measurement of "zero BOS events on H1 and
+H4". That measurement was wrong — it came from a truncated query that dropped
+the H1 rows, and the host in fact held 63 BOS events on H1 and 5 on H4. The
+defect above is real and reachable by reading §3.4 against the code; how much
+detection it actually cost is **not** established, and no claim about that is
+made here. See `test_trend_is_maintained` for the properties that are
+demonstrated.
 """
 
 from __future__ import annotations

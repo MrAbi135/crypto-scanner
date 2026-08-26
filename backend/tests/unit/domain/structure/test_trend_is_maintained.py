@@ -7,13 +7,14 @@ edge that fires because the last two labels stopped agreeing.
 
 The entry rule used to live outside the machine, in two separate functions
 returning two different types, and the BOS gate consulted the one with no
-memory. So a single LH after a run of HH dropped the gate straight back to
-RANGING and breaks stopped firing.
+memory. A single LH after a run of HH dropped that gate straight back to
+RANGING.
 
-Measured on the staging host before this: **zero BOS events on H1 and H4
-across eight days**, against 99 on M5 and 72 on M15. Setups form only on H1 and
-H4, §8.6's A3 needs a displaced BOS, so nothing could classify and nothing
-could publish.
+**What this file does not assert.** The change was first justified by a
+measurement of "zero BOS on H1 and H4" that turned out to be a truncated query
+— the host held 63 on H1 and 5 on H4. The properties below are demonstrated
+from §3.4 itself and stand on their own; the production impact is unquantified
+and deliberately unclaimed.
 """
 
 from __future__ import annotations
