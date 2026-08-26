@@ -186,6 +186,21 @@ class EmptySignals:
         return ()
 
 
+class EmptyRankings:
+    """§9.2 over nothing: a quiet close, which is a real answer."""
+
+    async def snapshot(self, symbols, timeframe, at, *, elapsed_candles: int = 0):
+        from scanner.application.ranking import RankingSnapshot
+
+        return RankingSnapshot(
+            timeframe=timeframe,
+            at=at,
+            rows=(),
+            gate_passers=0,
+            below_floor=0,
+        )
+
+
 def identity(users: FakeUsers | None = None) -> dict:
     """Every collaborator `build_read_api` requires, as kwargs."""
 
@@ -202,6 +217,7 @@ def identity(users: FakeUsers | None = None) -> dict:
         "outcomes": EmptySignals(),
         "track_record": EmptySignals(),
         "track_statistics": EmptySignals(),
+        "rankings": EmptyRankings(),
     }
 
 

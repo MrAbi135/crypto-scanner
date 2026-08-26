@@ -41,12 +41,14 @@ from scanner.application.ports.track_record import (
     TrackRecordRepository,
     TrackRecordStatistics,
 )
+from scanner.application.ranking import RankingSnapshotService
 from scanner.interfaces.api.auth import router as auth_router
 from scanner.interfaces.api.coins import router as coins_router
 from scanner.interfaces.api.errors import install_error_handlers
 from scanner.interfaces.api.market import router as market_router
 from scanner.interfaces.api.me import router as me_router
 from scanner.interfaces.api.query import CursorCodec
+from scanner.interfaces.api.rankings import router as rankings_router
 from scanner.interfaces.api.security import require_user
 from scanner.interfaces.api.signals import router as signals_router
 
@@ -58,6 +60,8 @@ IMPLEMENTED_ROWS: tuple[str, ...] = (
     "POST /api/v1/auth/logout",
     "GET /api/v1/auth/sessions",
     "GET /api/v1/me",
+    "GET /api/v1/rankings",
+    "GET /api/v1/rankings/weights",
     "GET /api/v1/signals/history",
     "GET /api/v1/signals/statistics",
     "GET /api/v1/signals/{signal_id}",
@@ -91,6 +95,7 @@ def build_read_api(
     outcomes: SignalOutcomeRepository,
     track_record: TrackRecordRepository,
     track_statistics: TrackRecordStatistics,
+    rankings: RankingSnapshotService,
 ) -> FastAPI:
     """Assemble the API. Every identity collaborator is required.
 
@@ -120,6 +125,7 @@ def build_read_api(
     app.state.outcomes = outcomes
     app.state.track_record = track_record
     app.state.track_statistics = track_statistics
+    app.state.rankings = rankings
     # §8's cursors are signed with the same key as the access token and
     # domain-separated inside the codec, so no second secret is required.
     app.state.cursors = CursorCodec(access_tokens.secret)
@@ -137,6 +143,7 @@ def build_read_api(
     protected = [Depends(require_user)]
 
     app.include_router(me_router, dependencies=protected)
+    app.include_router(rankings_router, dependencies=protected)
     app.include_router(signals_router, dependencies=protected)
     app.include_router(market_router, dependencies=protected)
     app.include_router(coins_router, dependencies=protected)

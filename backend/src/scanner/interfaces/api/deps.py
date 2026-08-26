@@ -18,6 +18,7 @@ from scanner.application.ports.track_record import (
     TrackRecordRepository,
     TrackRecordStatistics,
 )
+from scanner.application.ranking import RankingSnapshotService
 from scanner.interfaces.api.query import CursorCodec
 
 
@@ -91,3 +92,7 @@ def get_track_statistics(request: Request) -> TrackRecordStatistics:
     wants to fake one should not have to implement the other.
     """
     return request.app.state.track_statistics  # type: ignore[no-any-return]
+
+
+def get_rankings(request: Request) -> RankingSnapshotService:
+    return request.app.state.rankings  # type: ignore[no-any-return]
