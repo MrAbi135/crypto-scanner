@@ -73,7 +73,7 @@ def create_mitigation_block(
     return MitigationBlock(
         mitigation_id=_build_mitigation_id(
             parent_ob_id=ob.ob_id,
-            invalidation_index=invalidation_index,
+            invalidation_at=invalidation_at,
             polarity=polarity,
         ),
         parent_ob_id=ob.ob_id,
@@ -184,14 +184,14 @@ def _reaches_midpoint(
 def _build_mitigation_id(
     *,
     parent_ob_id: str,
-    invalidation_index: int,
+    invalidation_at: datetime,
     polarity: ZonePolarity,
 ) -> str:
     raw = "|".join(
         (
             "mitigation",
             parent_ob_id,
-            str(invalidation_index),
+            invalidation_at.isoformat(),
             polarity.value,
         )
     )

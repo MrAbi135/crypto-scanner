@@ -72,7 +72,7 @@ def create_breaker(
     return BreakerBlock(
         breaker_id=_build_breaker_id(
             parent_ob_id=ob.ob_id,
-            invalidation_index=invalidation_index,
+            invalidation_at=invalidation_at,
             polarity=polarity,
         ),
         parent_ob_id=ob.ob_id,
@@ -185,14 +185,14 @@ def _reaches_midpoint(
 def _build_breaker_id(
     *,
     parent_ob_id: str,
-    invalidation_index: int,
+    invalidation_at: datetime,
     polarity: ZonePolarity,
 ) -> str:
     raw = "|".join(
         (
             "breaker",
             parent_ob_id,
-            str(invalidation_index),
+            invalidation_at.isoformat(),
             polarity.value,
         )
     )

@@ -59,7 +59,7 @@ def create_ifvg(
     return InverseFairValueGap(
         ifvg_id=_build_ifvg_id(
             parent_fvg_id=fvg.fvg_id,
-            inversion_index=inversion_index,
+            inversion_at=inversion_at,
             polarity=polarity,
         ),
         parent_fvg_id=fvg.fvg_id,
@@ -184,14 +184,14 @@ def _touches(
 def _build_ifvg_id(
     *,
     parent_fvg_id: str,
-    inversion_index: int,
+    inversion_at: datetime,
     polarity: ZonePolarity,
 ) -> str:
     raw = "|".join(
         (
             "ifvg",
             parent_fvg_id,
-            str(inversion_index),
+            inversion_at.isoformat(),
             polarity.value,
         )
     )

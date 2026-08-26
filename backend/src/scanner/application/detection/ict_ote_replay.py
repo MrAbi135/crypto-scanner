@@ -360,7 +360,6 @@ class IctOteReplayService:
                     record.zone_id,
                     from_state,
                     to_state,
-                    candle_index,
                     transitioned_at,
                 ),
                 zone_id=record.zone_id,
@@ -576,17 +575,31 @@ def _range_id(
     low: SwingPoint,
     high: SwingPoint,
 ) -> str:
-    raw = f"pd|{low.index}|{low.price}|{high.index}|{high.price}"
+    """A dealing range, identified by the swings that bound it.
 
-    return hashlib.sha256(raw.encode()).hexdigest()
+    `SwingPoint.index` was here and is gone: it is an offset inside the window
+    that detected the swing, so the same range was a new range on every pass —
+    and every OTE zone hanging off it was a new zone. `open_time` is the same
+    swing named durably.
+    """
+    return _sha(
+        f"pd|{low.open_time.isoformat()}|{low.price}|{high.open_time.isoformat()}|{high.price}"
+    )
 
 
 def _leg_id(
     origin: SwingPoint,
     extreme: SwingPoint,
 ) -> str:
-    raw = f"impulse|{origin.index}|{origin.price}|{extreme.index}|{extreme.price}"
+    """An impulse leg, identified by its two swings. See `_range_id`."""
 
+    return _sha(
+        f"impulse|{origin.open_time.isoformat()}|{origin.price}"
+        f"|{extreme.open_time.isoformat()}|{extreme.price}"
+    )
+
+
+def _sha(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -594,10 +607,11 @@ def _transition_id(
     zone_id: str,
     from_state: str,
     to_state: str,
-    candle_index: int,
     transitioned_at: datetime,
 ) -> str:
-    raw = f"{zone_id}|{from_state}|{to_state}|{candle_index}|{transitioned_at.isoformat()}"
+    """See `ict_replay._build_transition_id` — the window-local index is gone."""
+
+    raw = f"{zone_id}|{from_state}|{to_state}|{transitioned_at.isoformat()}"
 
     return hashlib.sha256(raw.encode()).hexdigest()
 

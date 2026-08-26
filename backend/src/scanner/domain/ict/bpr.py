@@ -100,7 +100,7 @@ def compose_bpr(
         bpr_id=_build_bpr_id(
             first_id=first.fvg_id,
             second_id=second.fvg_id,
-            created_index=current_index,
+            created_at=created_at,
             band=band,
         ),
         parent_a_id=first.fvg_id,
@@ -139,7 +139,7 @@ def _build_bpr_id(
     *,
     first_id: str,
     second_id: str,
-    created_index: int,
+    created_at: datetime,
     band: ZoneBand,
 ) -> str:
     parents = sorted(
@@ -154,7 +154,7 @@ def _build_bpr_id(
             "bpr",
             parents[0],
             parents[1],
-            str(created_index),
+            created_at.isoformat(),
             str(band.low),
             str(band.high),
         )

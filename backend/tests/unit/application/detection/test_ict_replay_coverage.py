@@ -537,11 +537,14 @@ def test_ict_record_conversion_and_helpers() -> None:
     assert ict_mod._fvg_transition_reason(FvgState.INVERTED) == "close_through"
     assert ict_mod._ifvg_transition_reason(IfvgState.DEAD) == "flip_failed"
 
+    # Determinism over identical inputs is what this used to assert, and it is
+    # true of any hash — it could not fail. What matters is that the id is
+    # built only from things that survive the window sliding, so the same
+    # transition seen on two different passes is the same transition.
     transition_a = ict_mod._build_transition_id(
         zone_id="z",
         from_state="A",
         to_state="B",
-        candle_index=1,
         transitioned_at=datetime(2026, 8, 16, tzinfo=UTC),
     )
 
@@ -549,11 +552,18 @@ def test_ict_record_conversion_and_helpers() -> None:
         zone_id="z",
         from_state="A",
         to_state="B",
-        candle_index=1,
         transitioned_at=datetime(2026, 8, 16, tzinfo=UTC),
     )
 
     assert transition_a == transition_b
+
+    # And a different candle is a different transition.
+    assert transition_a != ict_mod._build_transition_id(
+        zone_id="z",
+        from_state="A",
+        to_state="B",
+        transitioned_at=datetime(2026, 8, 16, 1, tzinfo=UTC),
+    )
 
 
 @pytest.mark.parametrize(
