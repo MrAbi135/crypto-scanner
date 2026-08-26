@@ -110,6 +110,23 @@ def build_detection_pipeline(
             events,
             EngineStateManager(RedisEngineStateStore(redis_client)),
             clock,
+            # §3.4's maintained state, as the shift engine left it on the
+            # previous close. Structure runs first in the pipeline, so this is
+            # deliberately last pass's answer -- the trend prevailing *before*
+            # the candle that is breaking a level.
+            #
+            # Without it `_seed_trend` returns RANGING on every pass, and since
+            # `apply_structure` only enters a trend and never leaves one, the
+            # machine latched onto whatever the oldest candles in the window
+            # implied and held it for all five hundred. On the host that meant
+            # BTCUSDT H1 replaying BEARISH while the shift engine reported
+            # BULLISH and price rose from 63,000 to 81,272 -- so the BOS gate
+            # was open downward only and no BOS_UP fired for five days.
+            shift_state=EngineStateManager(
+                RedisEngineStateStore(redis_client),
+                namespace=SHIFT_NAMESPACE,
+            ),
+            shift_algo_version=STRUCTURE_SHIFT_ALGO_VERSION,
         ),
         liquidity=LiquidityReplayService(
             candles,
