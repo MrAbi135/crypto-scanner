@@ -2951,3 +2951,69 @@ async def test_publishing_without_metrics_still_works() -> None:
     await svc._publish("BTCUSDT", TF, BASE + TF.duration * 10, publishable_candidate())
 
     assert len(signals.rows) == 1
+
+
+class TestTheFreshnessLadderSpeaksBothVocabularies:
+    """§8.3.1's state row is written in words from two different enums.
+
+    `FRESH` and `TESTED` are `ZoneState` (OB, breaker, mitigation); `CE_FILLED`
+    is `FvgState`. No zone family speaks all three, so without a translation a
+    zone is charged for whichever enum its detector happens to use rather than
+    for the condition it is in.
+
+    §5.9 supplies the pairing, and does it deliberately: it defines the
+    interaction grammar once for "**all** zone objects", so mitigation --
+    "price reaches >= 50% of zone depth then closes outside on polarity side"
+    -- and an FVG's consequent encroachment are one event under two names.
+    """
+
+    def test_mitigated_scores_what_ce_filled_scores(self) -> None:
+        """They are the same 50%, and §5.9 counts both as a *Respect* -- which
+        is evidence for the zone. Scoring one 6 and the other 0 makes the award
+        a fact about the detector rather than about price."""
+
+        from scanner.application.detection.confluence_replay import _FVG_STATE_EQUIVALENT
+
+        assert _FVG_STATE_EQUIVALENT["MITIGATED"] == "CE_FILLED"
+
+    def test_every_translated_word_is_one_the_doctrine_pays_for(self) -> None:
+        """A translation to a word outside §8.3.1's table would read as a
+        mapping and behave as a deletion -- silently, because an unknown state
+        scores zero exactly as an untranslated one does."""
+
+        from scanner.application.detection.confluence_replay import _FVG_STATE_EQUIVALENT
+        from scanner.domain.confluence.factor_points import ZONE_STATE_POINTS
+
+        assert set(_FVG_STATE_EQUIVALENT.values()) <= set(ZONE_STATE_POINTS)
+
+    def test_each_zone_family_can_reach_the_ladder(self) -> None:
+        """Reachability has to be asked per family, or it cannot fail.
+
+        Asking whether §8.3.1's three words are reachable *at all* is always
+        true and always was: `FRESH` and `TESTED` are `ZoneState` members and
+        `CE_FILLED` is an `FvgState` one, so the union covers the table however
+        the translation is written -- including not written at all.
+
+        The question worth asking is whether a zone of a given family can climb
+        the ladder its own detector can express. An FVG that has been touched
+        and an order block that has been mitigated are both *somewhere* on it,
+        and before the translation each scored zero for being described in the
+        wrong dialect.
+        """
+        from scanner.application.detection.confluence_replay import _FVG_STATE_EQUIVALENT
+        from scanner.domain.confluence.factor_points import ZONE_STATE_POINTS
+        from scanner.domain.ict.model import FvgState, IfvgState, ZoneState
+
+        def payable(family: type) -> set[str]:
+            return {_FVG_STATE_EQUIVALENT.get(state.value, state.value) for state in family} & set(
+                ZONE_STATE_POINTS
+            )
+
+        # Every family must reach all three rungs. Without the translation
+        # `ZoneState` and `IfvgState` reach two: both carry MITIGATED and
+        # neither carries CE_FILLED, so the half-consumed award was payable
+        # only to FVGs.
+        for family in (ZoneState, FvgState, IfvgState):
+            assert payable(family) == set(ZONE_STATE_POINTS), (
+                f"{family.__name__} reaches {sorted(payable(family))}"
+            )
