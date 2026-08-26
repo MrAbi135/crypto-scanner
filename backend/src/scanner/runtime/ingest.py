@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -21,6 +21,7 @@ from scanner.application.marketdata.live_ingest import LiveIngestService
 from scanner.application.marketdata.outbox_relay import OutboxRelayService
 from scanner.application.marketdata.trade_aggregator import TradeAggregator
 from scanner.application.marketdata.warmup_backfill import WarmupBackfillService
+from scanner.application.ports import CandleRepository, Clock
 from scanner.config import get_settings
 from scanner.config.processes import IngestSettings
 from scanner.domain.common import Candle, TradePrint
@@ -44,6 +45,7 @@ from scanner.infrastructure.redis.client import build_redis
 from scanner.infrastructure.redis.event_stream import RedisEventStreamPublisher
 from scanner.runtime.wiring.bootstrap import bootstrap
 from scanner.runtime.wiring.health import build_health_app, run_asgi
+from scanner.shared import Timeframe
 
 log = structlog.get_logger(__name__)
 
@@ -137,6 +139,87 @@ async def _run_websocket(
     await adapter.run()
 
 
+def build_readiness_probe(
+    *,
+    feeds: Sequence[tuple[str, Timeframe]],
+    live_ingest: LiveIngestService,
+    candles: CandleRepository,
+    clock: Clock,
+) -> Callable[[], Awaitable[tuple[bool, dict[str, str]]]]:
+    """§2.12's readiness, as a function that can be tested.
+
+    Extracted from the lifespan it used to be nested inside. A probe that
+    cannot be called without standing up a process is a probe nobody tests,
+    and this one was wrong for months.
+    """
+
+    async def _probe() -> tuple[bool, dict[str, str]]:
+        """Two questions, kept apart.
+
+        **Coverage** — does this feed have current data? — is a fact
+        about the database, and survives a restart.
+
+        **Freshness** (SLS §2.12) — is the pipe keeping up? — is the
+        exchange-event-to-observation lag, and can only be measured
+        once this process has seen a close.
+
+        They were conflated: no observation meant not-ready, so after
+        any restart every slow timeframe reported `NO_DATA` until it
+        next closed. On H4 that is up to four hours, on a daily series
+        a day — with perfect data on disk the whole time. Under Docker
+        that is a cosmetic "unhealthy"; under the orchestrator TAD §22
+        targets it is a pod that never enters service, and on a
+        liveness probe a restart loop that can never end because the
+        thing it waits for needs the process to stay up.
+
+        So a feed with no observation yet is judged on coverage alone.
+        `NO_DATA` now means what it says.
+        """
+        details: dict[str, str] = {}
+        all_ready = True
+        now = clock.now()
+
+        for symbol, timeframe in feeds:
+            key = f"feed:{symbol}:{timeframe.value}"
+
+            if live_ingest.has_observation(symbol, timeframe):
+                details[key] = live_ingest.freshness(symbol, timeframe).value
+
+                if not live_ingest.detection_allowed(symbol, timeframe):
+                    all_ready = False
+
+                continue
+
+            latest = await candles.latest_open_time(symbol, timeframe)
+
+            if latest is None:
+                details[key] = "NO_DATA"
+                all_ready = False
+                continue
+
+            # `latest` is an open time, so the candle it names closed
+            # one interval later. One further interval of slack is the
+            # window in which the next close has not happened yet --
+            # normal for every timeframe, all the time.
+            closed_at = latest + timeframe.duration
+
+            if now - closed_at <= timeframe.duration:
+                # Covered, and lag not yet measured. Ready: the engine
+                # reads stored candles, and this is what it will read.
+                details[key] = "AWAITING_CLOSE"
+                continue
+
+            # Covered but behind. Distinguished from `NO_DATA` because
+            # "nothing has ever arrived" and "arrivals stopped" call
+            # for different investigations.
+            details[key] = "BEHIND"
+            all_ready = False
+
+        return all_ready, details
+
+    return _probe
+
+
 def main() -> None:
     settings = get_settings("ingest")
     bootstrap(settings, "ingest")
@@ -189,35 +272,12 @@ def main() -> None:
                 target_candles=settings.warmup_backfill_candles,
             ).warm_all(symbols, timeframes)
 
-            async def readiness_probe() -> tuple[bool, dict[str, str]]:
-                details: dict[str, str] = {}
-                all_ready = True
-
-                for symbol, timeframe in feeds:
-                    key = f"feed:{symbol}:{timeframe.value}"
-
-                    if not live_ingest.has_observation(
-                        symbol,
-                        timeframe,
-                    ):
-                        details[key] = "NO_DATA"
-                        all_ready = False
-                        continue
-
-                    state = live_ingest.freshness(
-                        symbol,
-                        timeframe,
-                    )
-
-                    details[key] = state.value
-
-                    if not live_ingest.detection_allowed(
-                        symbol,
-                        timeframe,
-                    ):
-                        all_ready = False
-
-                return all_ready, details
+            readiness_probe = build_readiness_probe(
+                feeds=feeds,
+                live_ingest=live_ingest,
+                candles=candle_repo,
+                clock=clock,
+            )
 
             app.state.readiness_probe = readiness_probe
             app.state.live_ingest = live_ingest
