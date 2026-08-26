@@ -136,8 +136,8 @@ def detect_order_block(
             symbol=context_candle.symbol,
             timeframe=(context_candle.timeframe.value),
             polarity=polarity,
-            created_index=created_index,
-            confirmed_index=(displacement_index),
+            created_at=created_at,
+            confirmed_at=context_candle.open_time,
             band=band,
         ),
         polarity=polarity,
@@ -295,8 +295,8 @@ def _build_ob_id(
     symbol: str,
     timeframe: str,
     polarity: ZonePolarity,
-    created_index: int,
-    confirmed_index: int,
+    created_at: datetime,
+    confirmed_at: datetime,
     band: ZoneBand,
 ) -> str:
     raw = "|".join(
@@ -305,8 +305,8 @@ def _build_ob_id(
             symbol,
             timeframe,
             polarity.value,
-            str(created_index),
-            str(confirmed_index),
+            created_at.isoformat(),
+            confirmed_at.isoformat(),
             str(band.low),
             str(band.high),
         )

@@ -597,7 +597,6 @@ class IctReplayService:
                         zone_id=(record.zone_id),
                         from_state=(from_state),
                         to_state=to_state,
-                        candle_index=(candle_index),
                         transitioned_at=(transitioned_at),
                     )
                 ),
@@ -894,15 +893,20 @@ def _build_transition_id(
     zone_id: str,
     from_state: str,
     to_state: str,
-    candle_index: int,
     transitioned_at: datetime,
 ) -> str:
+    """One transition per (zone, edge, candle), keyed on nothing that slides.
+
+    `candle_index` was here and is gone: it is an offset inside whichever
+    500-candle window observed the transition, so the same transition took a
+    new id on every pass. `transitioned_at` names the candle durably, which is
+    what the uniqueness was always meant to be about.
+    """
     raw = "|".join(
         (
             zone_id,
             from_state,
             to_state,
-            str(candle_index),
             transitioned_at.isoformat(),
         )
     )

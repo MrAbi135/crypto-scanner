@@ -829,7 +829,7 @@ class LiquidityReplayService:
                 displacement_id=_build_displacement_id(
                     symbol=record.symbol,
                     timeframe=record.timeframe,
-                    index=index,
+                    at=candles[index].close_time,
                 ),
                 displacement_at=candles[index].close_time,
                 displacement_index=index,
@@ -915,7 +915,6 @@ class LiquidityReplayService:
         transition_id = _build_transition_id(
             pool_id=record.pool_id,
             to_state=to_state,
-            candle_index=candle_index,
             transitioned_at=transitioned_at,
         )
 
@@ -1219,7 +1218,7 @@ def _build_displacement_id(
     *,
     symbol: str,
     timeframe: Timeframe,
-    index: int,
+    at: datetime,
 ) -> str:
     """Stable id for a displacement the liquidity engine observed.
 
@@ -1230,7 +1229,7 @@ def _build_displacement_id(
     its own.
     """
 
-    raw = "|".join(("displacement", symbol, timeframe.value, str(index)))
+    raw = "|".join(("displacement", symbol, timeframe.value, at.isoformat()))
 
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -1262,14 +1261,14 @@ def _build_transition_id(
     *,
     pool_id: str,
     to_state: str,
-    candle_index: int,
     transitioned_at: datetime,
 ) -> str:
+    """See `ict_replay._build_transition_id` — the window-local index is gone."""
+
     raw = "|".join(
         (
             pool_id,
             to_state,
-            str(candle_index),
             transitioned_at.isoformat(),
         )
     )

@@ -841,7 +841,6 @@ class IctOrderBlockReplayService:
                         zone_id=(record.zone_id),
                         from_state=(from_state),
                         to_state=to_state,
-                        candle_index=(candle_index),
                         transitioned_at=(transitioned_at),
                     )
                 ),
@@ -1616,15 +1615,15 @@ def _build_transition_id(
     zone_id: str,
     from_state: str,
     to_state: str,
-    candle_index: int,
     transitioned_at: datetime,
 ) -> str:
+    """See `ict_replay._build_transition_id` — the window-local index is gone."""
+
     raw = "|".join(
         (
             zone_id,
             from_state,
             to_state,
-            str(candle_index),
             transitioned_at.isoformat(),
         )
     )
