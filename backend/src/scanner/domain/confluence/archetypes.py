@@ -16,6 +16,7 @@ published.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
@@ -102,51 +103,103 @@ class ArchetypeEvidence:
     range_width_atr: Decimal = Decimal(0)
 
 
-def _matches(archetype: Archetype, e: ArchetypeEvidence) -> bool:
-    if archetype is Archetype.SWEEP_REVERSAL:
-        return (
-            e.external_sweep
-            and e.mss_confirmed
-            and e.mss_origin_zone_retested
-            and e.range_extreme_pd
-            and e.stop_hunt_confirmed
-        )
+# §8.6's rules as data: one named condition per clause, per archetype.
+#
+# They were an `if` chain returning a bool, which answered "does this match"
+# and nothing else. A classification that returns None is a decision — it is
+# what stops a setup publishing, whatever its confidence — and it was the only
+# decision in the pipeline that recorded no reason for itself.
+#
+# On the staging host that cost real time: 63 of 64 setups carried a null
+# archetype, one of them at confidence 77 with gates passed, and the database
+# could not say which clause had refused them. Naming the clauses makes
+# `explain_archetype` and `classify_archetype` read the same table, so the
+# answer and the reason can never drift apart.
+_RULES: dict[Archetype, tuple[tuple[str, Callable[[ArchetypeEvidence], bool]], ...]] = {
+    Archetype.SWEEP_REVERSAL: (
+        ("external_sweep", lambda e: e.external_sweep),
+        ("mss_confirmed", lambda e: e.mss_confirmed),
+        ("mss_origin_zone_retested", lambda e: e.mss_origin_zone_retested),
+        ("range_extreme_pd", lambda e: e.range_extreme_pd),
+        ("stop_hunt_confirmed", lambda e: e.stop_hunt_confirmed),
+    ),
+    Archetype.BREAKER_RETEST: (
+        ("breaker_formed", lambda e: e.breaker_formed),
+        ("breaker_first_retest_respected", lambda e: e.breaker_first_retest_respected),
+        # §8.6 allows either the grade or the entry-grade confirmation -- two
+        # routes to the same quality claim, not both required.
+        (
+            "breaker_grade_a_or_entry_grade_confirmation",
+            lambda e: e.breaker_grade_a or e.entry_grade_confirmation,
+        ),
+    ),
+    Archetype.CONTINUATION_PULLBACK: (
+        ("trend_active", lambda e: e.trend_active),
+        ("displaced_bos", lambda e: e.displaced_bos),
+        ("retraced_into_zone", lambda e: e.retraced_into_zone),
+        ("htf_aligned", lambda e: e.htf_aligned),
+        ("retracement_leg", lambda e: e.retracement_leg),
+        # "not counter-displacement": a counter-displaced leg is not a pullback
+        # at all, it is CHoCH territory (§3.6).
+        ("not_counter_displacement", lambda e: not e.counter_displacement),
+    ),
+    Archetype.FVG_CONTINUATION: (
+        ("displacement_fvg", lambda e: e.displacement_fvg),
+        ("fvg_first_touch", lambda e: e.fvg_first_touch),
+        ("htf_aligned", lambda e: e.htf_aligned),
+        ("fvg_age_within_limit", lambda e: 0 <= e.fvg_age_candles <= MAX_FVG_AGE_CANDLES),
+    ),
+    Archetype.RANGE_LIQUIDITY_PLAY: (
+        ("ranging", lambda e: e.ranging),
+        ("range_extreme_swept", lambda e: e.range_extreme_swept),
+        ("rejection_confirmed", lambda e: e.rejection_confirmed),
+        ("range_width_atr", lambda e: e.range_width_atr >= RANGE_MIN_ATR),
+    ),
+}
 
-    if archetype is Archetype.BREAKER_RETEST:
-        return (
-            e.breaker_formed
-            and e.breaker_first_retest_respected
-            # §8.6 allows either the grade or the entry-grade confirmation --
-            # two routes to the same quality claim, not both required.
-            and (e.breaker_grade_a or e.entry_grade_confirmation)
-        )
 
-    if archetype is Archetype.CONTINUATION_PULLBACK:
-        return (
-            e.trend_active
-            and e.displaced_bos
-            and e.retraced_into_zone
-            and e.htf_aligned
-            and e.retracement_leg
-            # "not counter-displacement": a counter-displaced leg is not a
-            # pullback at all, it is CHoCH territory (§3.6).
-            and not e.counter_displacement
-        )
+@dataclass(frozen=True, slots=True)
+class ArchetypeMatch:
+    """Which archetype matched, and for the rest, exactly what was missing."""
 
-    if archetype is Archetype.FVG_CONTINUATION:
-        return (
-            e.displacement_fvg
-            and e.fvg_first_touch
-            and e.htf_aligned
-            and 0 <= e.fvg_age_candles <= MAX_FVG_AGE_CANDLES
-        )
+    archetype: Archetype | None
+    # Archetype value -> the named clauses that were false, in rule order.
+    # The matched archetype is absent; every other one is present with at
+    # least one entry, so an empty dict is impossible unless something matched.
+    unmet: dict[str, tuple[str, ...]]
 
-    return (
-        e.ranging
-        and e.range_extreme_swept
-        and e.rejection_confirmed
-        and e.range_width_atr >= RANGE_MIN_ATR
-    )
+    @property
+    def matched(self) -> bool:
+        return self.archetype is not None
+
+    @property
+    def closest(self) -> str | None:
+        """The archetype that failed on the fewest clauses.
+
+        Not a ranking of quality -- §8.6's order is the ranking. This is for a
+        human reading a setup that did not classify and wanting to know where
+        to look first, which on real data is the question actually asked.
+        """
+        if self.matched or not self.unmet:
+            return None
+
+        return min(self.unmet, key=lambda name: len(self.unmet[name]))
+
+
+def explain_archetype(evidence: ArchetypeEvidence) -> ArchetypeMatch:
+    """§8.6's classification, with its reasoning kept."""
+
+    unmet: dict[str, tuple[str, ...]] = {}
+
+    for archetype in CLASSIFICATION_ORDER:
+        failed = tuple(name for name, holds in _RULES[archetype] if not holds(evidence))
+
+        if not failed:
+            return ArchetypeMatch(archetype=archetype, unmet=unmet)
+
+        unmet[archetype.value] = failed
+
+    return ArchetypeMatch(archetype=None, unmet=unmet)
 
 
 def classify_archetype(evidence: ArchetypeEvidence) -> Archetype | None:
@@ -155,12 +208,11 @@ def classify_archetype(evidence: ArchetypeEvidence) -> Archetype | None:
     None is a real answer: §8.6 says every *publishable* setup must match
     exactly one archetype, so a candidate matching none is simply not a setup —
     not a setup of unknown type.
-    """
-    for archetype in CLASSIFICATION_ORDER:
-        if _matches(archetype, evidence):
-            return archetype
 
-    return None
+    Delegates to `explain_archetype` rather than repeating the rules, so the
+    verdict and its reasoning cannot disagree.
+    """
+    return explain_archetype(evidence).archetype
 
 
 def meets_floor(archetype: Archetype, final_confidence: Decimal) -> bool:
