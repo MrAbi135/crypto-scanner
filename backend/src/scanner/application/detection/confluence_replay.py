@@ -89,9 +89,9 @@ from scanner.domain.confluence import (
     StructureEvidence,
     TargetBand,
     ZoneEvidence,
-    classify_archetype,
     entry_zone,
     evaluate_gates,
+    explain_archetype,
     final_confidence,
     htf_alignment_factor,
     invalidation_for,
@@ -259,6 +259,16 @@ class SetupCandidate:
     grade: str | None
     archetype: str | None
     publishable: bool
+
+    # Why §8.6 said what it said. A classification that returns None is what
+    # stops a setup publishing whatever its confidence, and it was the only
+    # decision in the pipeline that recorded no reason -- so a null archetype
+    # in the database was unanswerable without re-running the pass by hand.
+    archetype_unmet: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    archetype_closest: str | None = None
+    # Set when a real match was withdrawn by §8.2 G3 rather than never made.
+    # Those are different facts and read identically without this.
+    archetype_withdrawn_by_pd: bool = False
     factors: dict[str, Decimal] = field(default_factory=dict)
 
     # §8.3's "itemized attribution trees". The factor functions build them and
@@ -721,7 +731,7 @@ class ConfluenceReplayService:
         # link that is missing rather than on a fabricated one.
         impulse = legs.latest(LegKind.IMPULSE, direction)
 
-        archetype = classify_archetype(
+        match = explain_archetype(
             ArchetypeEvidence(
                 external_sweep=any(s.external for s in supporting),
                 range_extreme_pd=_pd_extreme(pd, direction),
@@ -757,11 +767,17 @@ class ConfluenceReplayService:
             )
         )
 
+        archetype = match.archetype
+
         # §8.2 G3's other half. Suspending PD does not block the candidate,
         # it narrows what the candidate may be called -- so a reversal chain
         # that happened to match is withdrawn rather than published under a
         # context the doctrine says cannot support it.
-        if archetype is not None and _pd_suspended(pd) and archetype not in CONTINUATION_ARCHETYPES:
+        pd_withdrawn = (
+            archetype is not None and _pd_suspended(pd) and archetype not in CONTINUATION_ARCHETYPES
+        )
+
+        if pd_withdrawn:
             archetype = None
 
         publishable = (
@@ -813,6 +829,9 @@ class ConfluenceReplayService:
             confidence=confidence.final,
             grade=confidence.published_grade.value if confidence.published_grade else None,
             archetype=archetype.value if archetype else None,
+            archetype_unmet=match.unmet,
+            archetype_closest=match.closest,
+            archetype_withdrawn_by_pd=pd_withdrawn,
             publishable=publishable,
             factors={f.value: score for f, score in factors.items()},
             attribution={
@@ -879,6 +898,16 @@ class ConfluenceReplayService:
                         # whose missing inputs are not stated cannot be read
                         # honestly a month later.
                         "zone_id": candidate.zone_id,
+                        # §8.6's verdict *and* its reasoning. Without
+                        # this a null archetype is unanswerable from the
+                        # database, which is how 63 of 64 setups on the
+                        # staging host sat unexplained.
+                        "archetype_unmet": {
+                            name: list(clauses)
+                            for name, clauses in candidate.archetype_unmet.items()
+                        },
+                        "archetype_closest": candidate.archetype_closest,
+                        "archetype_withdrawn_by_pd": candidate.archetype_withdrawn_by_pd,
                         "unreachable_inputs": list(candidate.unreachable),
                     },
                     sort_keys=True,
@@ -1241,6 +1270,16 @@ class ConfluenceReplayService:
                 evidence=json.dumps(
                     {
                         "zone_id": candidate.zone_id,
+                        # §8.6's verdict *and* its reasoning. Without
+                        # this a null archetype is unanswerable from the
+                        # database, which is how 63 of 64 setups on the
+                        # staging host sat unexplained.
+                        "archetype_unmet": {
+                            name: list(clauses)
+                            for name, clauses in candidate.archetype_unmet.items()
+                        },
+                        "archetype_closest": candidate.archetype_closest,
+                        "archetype_withdrawn_by_pd": candidate.archetype_withdrawn_by_pd,
                         "grade": candidate.grade,
                         "unreachable_inputs": list(candidate.unreachable),
                         "attribution": {
