@@ -122,6 +122,135 @@ class TestRetracement:
         assert legs[1].retrace_fraction == Decimal("0.5")
 
 
+class TestTheAnchorFollowsTheMarket:
+    """`previous_impulse` must not outlive the structure it describes.
+
+    Every other test in this file stops at two legs, which is one short of
+    where the bug lived: it takes an impulse, a reversal, and then a *third*
+    leg to see that the anchor never moved. The consequence was a one-way
+    ratchet -- a counter-direction leg can never be classified `IMPULSE`
+    (escalation and retracement are both checked first), and only an `IMPULSE`
+    re-anchored, so whichever direction printed the window's first impulse held
+    the anchor for the rest of the window and the other direction was locked
+    out of `IMPULSE` entirely.
+
+    On the host that showed up as ETHUSDT H1 with 9 down impulses and zero up,
+    BTCUSDT H1 with 12 up and zero down, and `ESCALATE` filling the locked-out
+    side exactly -- so §8.6 A3, which wants a displaced BOS inside the latest
+    impulse leg in the candidate's direction, could never match one of the two
+    directions on any symbol.
+    """
+
+    def test_a_reversal_lets_the_new_direction_impulse(self) -> None:
+        """The ratchet, stated as the property it broke.
+
+        Up-impulse, a counter-leg past 100% (§7.5's escalation), a shallow
+        bounce, then a real down move. That last leg is an impulse by every
+        measure §7.5 names, and before the anchor followed the reversal it came
+        out `ESCALATE` -- measured against a leg the market had left behind.
+        """
+        legs = segment_legs(
+            candles(),
+            [
+                swing(20, "100"),
+                swing(30, "130", SwingKind.HIGH),
+                swing(40, "95"),
+                swing(50, "110", SwingKind.HIGH),
+                swing(58, "65"),
+            ],
+            frozenset({25, 55}),
+        )
+
+        assert [(leg.kind, leg.direction) for leg in legs] == [
+            (LegKind.IMPULSE, "UP"),
+            (LegKind.ESCALATE, "DOWN"),
+            (LegKind.RETRACEMENT, "UP"),
+            (LegKind.IMPULSE, "DOWN"),
+        ]
+
+    def test_the_bounce_is_measured_against_the_reversal_not_the_old_impulse(
+        self,
+    ) -> None:
+        """The same move, read as a fraction of the right leg.
+
+        130 -> 95 then back to 110 is 43% of the reversal. Against the
+        abandoned up-impulse it would be 50% -- a different number describing a
+        different pullback, and the one OTE would have anchored on.
+        """
+        legs = segment_legs(
+            candles(),
+            [
+                swing(20, "100"),
+                swing(30, "130", SwingKind.HIGH),
+                swing(40, "95"),
+                swing(50, "110", SwingKind.HIGH),
+            ],
+            frozenset({25}),
+        )
+
+        assert legs[2].retrace_fraction == Decimal(15) / Decimal(35)
+
+    def test_a_small_counter_displaced_leg_does_not_take_the_anchor(self) -> None:
+        """§7.5 escalates a counter-displaced leg "regardless of how small it
+        is" so §3.6 can see it. Small is a thing to report, not a thing to
+        measure the next pullback against -- otherwise noise re-anchors the
+        window.
+
+        The third leg is the tell: with the anchor still on the up-impulse it
+        runs with the trend and is an impulse; had the 0.6-ATR blip taken the
+        anchor, it would be counter to it and escalate instead.
+        """
+        legs = segment_legs(
+            candles(),
+            [
+                swing(20, "100"),
+                swing(30, "130", SwingKind.HIGH),
+                swing(40, "124"),
+                swing(50, "160", SwingKind.HIGH),
+            ],
+            frozenset({25, 35, 45}),
+        )
+
+        assert legs[1].kind is LegKind.ESCALATE
+        assert legs[1].net_progress_atr < Decimal("1.5")
+        assert (legs[2].kind, legs[2].direction) == (LegKind.IMPULSE, "UP")
+
+    def test_neither_direction_is_locked_out_of_one_window(self) -> None:
+        """A rally, a reversal, and a fall -- impulses on both sides of it.
+
+        This is the shape the host actually prints and the shape no fixture
+        here had: a *run* in one direction, then a run in the other. A pure
+        zigzag would not do, and asserting it would be wrong rather than
+        merely weak -- every leg of an alternation is counter to the one before
+        it, so after the first there is no continuation leg to be an impulse.
+        The ratchet is about the anchor going stale, not about zigzags.
+        """
+        legs = segment_legs(
+            candles(),
+            [
+                swing(10, "100"),
+                swing(18, "140", SwingKind.HIGH),
+                swing(26, "135"),
+                swing(34, "180", SwingKind.HIGH),
+                swing(42, "120"),
+                swing(50, "130", SwingKind.HIGH),
+                swing(58, "80"),
+            ],
+            frozenset({15, 30, 55}),
+        )
+
+        assert [(leg.kind, leg.direction) for leg in legs] == [
+            (LegKind.IMPULSE, "UP"),
+            (LegKind.MICRO, "DOWN"),
+            (LegKind.IMPULSE, "UP"),
+            (LegKind.ESCALATE, "DOWN"),
+            (LegKind.RETRACEMENT, "UP"),
+            # Before the anchor followed the reversal this was `ESCALATE`,
+            # measured as a 111% retracement of an up-leg two reversals back.
+            (LegKind.IMPULSE, "DOWN"),
+        ]
+
+
 class TestMicro:
     def test_a_leg_below_three_quarters_atr_is_micro(self) -> None:
         legs = segment_legs(

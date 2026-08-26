@@ -108,10 +108,55 @@ def segment_legs(
 
         legs.append(leg)
 
-        if leg.kind is LegKind.IMPULSE:
+        if leg.kind is LegKind.IMPULSE or _supersedes(leg):
             previous_impulse = leg
 
     return tuple(legs)
+
+
+def _supersedes(leg: Leg) -> bool:
+    """Has this escalating leg taken over as the leg others retrace?
+
+    `previous_impulse` exists for exactly one purpose: to be the leg a
+    counter-move is measured against. Re-anchoring it only on `IMPULSE` made
+    that a one-way ratchet, because a counter-direction leg can never *be* an
+    impulse -- `retrace` is not None for it, and escalation and retracement are
+    both checked first. So whichever direction printed the window's first
+    impulse held the anchor for the rest of the window, and the other direction
+    was locked out of `IMPULSE` permanently.
+
+    Measured on the host, three windows, two symbols, two timeframes -- and
+    every one of them lopsided the same way::
+
+        ETHUSDT H1   first impulse DOWN   IMPULSE UP 0  / DOWN 9
+        BTCUSDT H1   first impulse UP     IMPULSE UP 12 / DOWN 0
+        BTCUSDT H4   first impulse UP     IMPULSE UP 15 / DOWN 0
+
+    with `ESCALATE` filling the locked-out side exactly and nowhere else. That
+    complementarity is the signature of a mechanism, not of three markets.
+    Downstream, §8.6 A3 asks for a displaced BOS inside the latest impulse leg
+    in the candidate's direction, so on any given symbol one of the two
+    directions could never classify as A3 at all.
+
+    §7.5 escalates a counter-leg that displaces or retraces past 100% because
+    "that is what a CHoCH looks like before it is confirmed" (§3.6) -- which is
+    precisely the moment the old anchor stops being what the market is pulling
+    back from. Keeping it is the error.
+
+    Strength is required before re-anchoring, though, because escalation is
+    deliberately indiscriminate about size: §7.5 escalates a counter-displaced
+    leg "regardless of how small it is" so §3.6 can see it. A leg that small is
+    a thing to report, not a thing to measure the next pullback against.
+    """
+    if leg.kind is not LegKind.ESCALATE:
+        return False
+
+    # It travelled further than the leg it was retracing. Whatever it is
+    # called, it is no longer the smaller half of that pair.
+    if leg.retrace_fraction is not None and leg.retrace_fraction > FULL_RETRACE:
+        return True
+
+    return leg.displaced and leg.net_progress_atr >= IMPULSE_MIN_ATR
 
 
 def _classify(
