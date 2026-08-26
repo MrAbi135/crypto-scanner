@@ -16,6 +16,7 @@ from fastapi import FastAPI
 
 from scanner.application.identity import AccountService, SessionService
 from scanner.application.identity.tokens import AccessTokens
+from scanner.application.ranking import RankingSnapshotService
 from scanner.config import get_settings
 from scanner.config.processes import ApiSettings
 from scanner.infrastructure.clock import SystemClock
@@ -36,10 +37,11 @@ from scanner.infrastructure.persistence.identity_repositories import (
 from scanner.infrastructure.persistence.liquidity_detection_repositories import (
     PgLiquidityPoolRepository,
 )
-from scanner.infrastructure.persistence.repositories import PgCandleRepository
+from scanner.infrastructure.persistence.repositories import PgCandleRepository, PgSymbolRepository
 from scanner.infrastructure.persistence.session_repository import (
     PgSessionRepository,
 )
+from scanner.infrastructure.persistence.setup_repository import PgSetupRepository
 from scanner.infrastructure.persistence.signal_outcome_repository import (
     PgSignalOutcomeRepository,
 )
@@ -104,6 +106,10 @@ def build_api_app(settings: ApiSettings) -> FastAPI:
         outcomes=PgSignalOutcomeRepository(db),
         track_record=archive,
         track_statistics=archive,
+        rankings=RankingSnapshotService(
+            PgSetupRepository(db),
+            PgSymbolRepository(db),
+        ),
     )
 
     @asynccontextmanager
