@@ -51,6 +51,12 @@ from scanner.interfaces.api.market import router as market_router
 from scanner.interfaces.api.me import router as me_router
 from scanner.interfaces.api.query import CursorCodec
 from scanner.interfaces.api.rankings import router as rankings_router
+from scanner.interfaces.api.ratelimit import (
+    InMemoryRateLimitStore,
+    RateLimitStore,
+    assert_every_row_has_a_class,
+    enforce_rate_limit,
+)
 from scanner.interfaces.api.scanner import router as scanner_router
 from scanner.interfaces.api.security import require_user
 from scanner.interfaces.api.signals import router as signals_router
@@ -103,6 +109,11 @@ def build_read_api(
     rankings: RankingSnapshotService,
     feed: LiveFeedService,
     incidents: IncidentRepository,
+    # §11's buckets. Defaulted, unlike every other collaborator here, because
+    # the in-process store is the correct one for a single-container
+    # deployment and a test that does not care about limits should not have to
+    # build one. The Redis store, when there is one, is passed here.
+    rate_limits: RateLimitStore | None = None,
 ) -> FastAPI:
     """Assemble the API. Every identity collaborator is required.
 
@@ -116,6 +127,10 @@ def build_read_api(
         version="v1",
         docs_url="/api/v1/docs",
         openapi_url="/api/v1/openapi.json",
+        # §11 on every row, including the unauthenticated auth ones -- those
+        # are the rows a limiter matters most on. Declared here rather than per
+        # router so a future router cannot be mounted outside it.
+        dependencies=[Depends(enforce_rate_limit)],
     )
 
     app.state.candles = candles
@@ -135,6 +150,11 @@ def build_read_api(
     app.state.rankings = rankings
     app.state.feed = feed
     app.state.incidents = incidents
+    # §11's buckets. Asserted here rather than discovered on a request: a row
+    # added without a class would be served unlimited, and unlimited is the one
+    # answer §11 does not offer.
+    assert_every_row_has_a_class(IMPLEMENTED_ROWS)
+    app.state.rate_limits = rate_limits or InMemoryRateLimitStore()
     # §8's cursors are signed with the same key as the access token and
     # domain-separated inside the codec, so no second secret is required.
     app.state.cursors = CursorCodec(access_tokens.secret)
