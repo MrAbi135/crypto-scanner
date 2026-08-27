@@ -876,13 +876,32 @@ async def _ob_grades(shifts: tuple[ShiftEvidenceRecord, ...]) -> set[str]:
     return {zone.grade for zone in zones.zones.values() if zone.zone_type == "OB"}
 
 
-def _mss(direction: str, choch: int, followthrough: int) -> ShiftEvidenceRecord:
+def _mss(
+    direction: str,
+    choch: int,
+    followthrough: int,
+    *,
+    index_offset: int = 0,
+) -> ShiftEvidenceRecord:
+    """An MSS record shaped the way `structure_shift_replay` writes one.
+
+    `event_at` is stamped from the follow-through candle, because that is what
+    production does -- and it is now the only durable half of the record, so a
+    fixture that invented an unrelated timestamp would be testing nothing the
+    engine does.
+
+    `index_offset` shifts both indices as a *later* window would see them,
+    leaving `event_at` alone. Their difference is unchanged, which is the whole
+    point: it is the one quantity that survives the window sliding.
+    """
+    at = pad_for_warmup(fixture_series())[followthrough].open_time
+
     return ShiftEvidenceRecord(
         event_type=f"MSS_{direction}",
         direction=direction,
-        choch_index=choch,
-        followthrough_index=followthrough,
-        event_at=datetime(2026, 8, 16, 6, tzinfo=UTC),
+        choch_index=choch + index_offset,
+        followthrough_index=followthrough + index_offset,
+        event_at=at,
         payload=json.dumps({"direction": direction}),
     )
 
@@ -898,11 +917,42 @@ async def test_an_mss_over_the_displacement_grades_the_ob_a() -> None:
     have come from the MSS.
     """
     without = await _ob_grades(())
-    covering = await _ob_grades((_mss("UP", 0, 400), _mss("DOWN", 0, 400)))
+    covering = await _ob_grades((_mss("UP", 0, 299), _mss("DOWN", 0, 299)))
 
     assert without, "fixture produced no order blocks, so this proves nothing"
     assert without == {"OB_B"}
     assert "OB_A" in covering
+
+
+@pytest.mark.asyncio
+async def test_an_mss_recorded_by_an_older_window_is_still_its_origin() -> None:
+    """The regression, and the reason this comparison is made in time.
+
+    `choch_index` and `followthrough_index` are offsets inside whichever
+    five-hundred-candle window recorded the MSS, written once and never
+    revised, while the window slides one candle per close. Compared against a
+    displacement indexed in *today's* window they are two coordinate systems.
+
+    On the host the stored `choch_index` ran to 499 and `followthrough_index`
+    to 500 -- the window's own edge -- and an ETHUSDT H1 MSS from 2026-08-19
+    carried 457 where the current window put it near 317. `_within_mss`
+    answered false on 233 of the 234 order blocks the host had ever graded, so
+    §5.1's second route to OB_A never opened and §8.6 A1 could not be met.
+
+    The offset here is what a window a hundred and forty closes later would
+    have stored. Nothing about the market changed, so nothing about the grade
+    may change either.
+    """
+    fresh = await _ob_grades((_mss("UP", 0, 299), _mss("DOWN", 0, 299)))
+    stale = await _ob_grades(
+        (
+            _mss("UP", 0, 299, index_offset=140),
+            _mss("DOWN", 0, 299, index_offset=140),
+        )
+    )
+
+    assert "OB_A" in fresh
+    assert stale == fresh
 
 
 @pytest.mark.asyncio
@@ -927,7 +977,7 @@ async def test_the_mss_direction_vocabulary_is_translated() -> None:
     A record spelled the displacement's way must not match.
     """
     mistyped = await _ob_grades(
-        (_mss("BULLISH", 0, 400), _mss("BEARISH", 0, 400)),
+        (_mss("BULLISH", 0, 299), _mss("BEARISH", 0, 299)),
     )
 
     assert mistyped == {"OB_B"}
