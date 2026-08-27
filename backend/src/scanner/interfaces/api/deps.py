@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
+from scanner.application.feed import LiveFeedService
 from scanner.application.identity import AccountService, SessionService
 from scanner.application.identity.tokens import AccessTokens
 from scanner.application.ports import CandleRepository, Clock
@@ -96,3 +97,7 @@ def get_track_statistics(request: Request) -> TrackRecordStatistics:
 
 def get_rankings(request: Request) -> RankingSnapshotService:
     return request.app.state.rankings  # type: ignore[no-any-return]
+
+
+def get_feed(request: Request) -> LiveFeedService:
+    return request.app.state.feed  # type: ignore[no-any-return]

@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI
 
+from scanner.application.feed import LiveFeedService
 from scanner.application.identity import AccountService, SessionService
 from scanner.application.identity.tokens import AccessTokens
 from scanner.application.ranking import RankingSnapshotService
@@ -109,6 +110,12 @@ def build_api_app(settings: ApiSettings) -> FastAPI:
         rankings=RankingSnapshotService(
             PgSetupRepository(db),
             PgSymbolRepository(db),
+        ),
+        feed=LiveFeedService(
+            PgSignalRepository(db),
+            PgSignalTransitionRepository(db),
+            PgSymbolRepository(db),
+            clock,
         ),
     )
 

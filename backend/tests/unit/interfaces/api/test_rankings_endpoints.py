@@ -19,6 +19,7 @@ from scanner.interfaces.api.app import build_read_api
 from scanner.shared import Timeframe
 from tests.unit.interfaces.api.identity_fixtures import (
     TEST_SECRET,
+    EmptyFeed,
     EmptyRankings,
     FakeSessionStore,
     FakeTenants,
@@ -119,6 +120,7 @@ def build(rankings=None) -> TestClient:
         track_record=EmptyRepo(),
         track_statistics=EmptyRepo(),
         rankings=rankings or EmptyRankings(),
+        feed=EmptyFeed(),
     )
 
     return TestClient(app)

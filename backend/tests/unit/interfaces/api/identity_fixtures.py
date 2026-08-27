@@ -201,6 +201,21 @@ class EmptyRankings:
         )
 
 
+class EmptyFeed:
+    """§18.4 over nothing. A quiet board is a real answer and not an error."""
+
+    async def read(self):
+        from datetime import UTC, datetime
+
+        from scanner.application.feed import Feed
+
+        return Feed(
+            generated_at=datetime(2026, 8, 26, 12, tzinfo=UTC),
+            rows=(),
+            live_total=0,
+        )
+
+
 def identity(users: FakeUsers | None = None) -> dict:
     """Every collaborator `build_read_api` requires, as kwargs."""
 
@@ -218,6 +233,7 @@ def identity(users: FakeUsers | None = None) -> dict:
         "track_record": EmptySignals(),
         "track_statistics": EmptySignals(),
         "rankings": EmptyRankings(),
+        "feed": EmptyFeed(),
     }
 
 
