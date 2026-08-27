@@ -618,6 +618,34 @@ class PgIncidentRepository:
 
             return [_to_incident(row) for row in rows]
 
+    async def list_ledger(
+        self,
+        *,
+        symbol: str | None = None,
+        open_only: bool = False,
+        limit: int = 100,
+    ) -> Sequence[IncidentRecord]:
+        """Newest first, resolved entries included unless asked otherwise.
+
+        `started_at` descending with `id` breaking ties: two incidents opened
+        on one candle would otherwise come back in whatever order the planner
+        chose, and a ledger that reorders itself between reads is not a ledger.
+        """
+        stmt = select(IncidentRow)
+
+        if open_only:
+            stmt = stmt.where(IncidentRow.resolved_at.is_(None))
+
+        if symbol is not None:
+            stmt = stmt.where(IncidentRow.symbol == symbol)
+
+        stmt = stmt.order_by(IncidentRow.started_at.desc(), IncidentRow.id.desc()).limit(limit)
+
+        async with self._sessions() as session:
+            rows = (await session.execute(stmt)).scalars()
+
+            return [_to_incident(row) for row in rows]
+
 
 class PgLiquidityHistoryRepository:
     """PostgreSQL persistence for daily liquidity observations."""

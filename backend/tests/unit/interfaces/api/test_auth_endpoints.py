@@ -15,6 +15,7 @@ from scanner.interfaces.api.auth import REFRESH_COOKIE
 from tests.unit.interfaces.api.identity_fixtures import (
     TEST_SECRET,
     EmptyFeed,
+    EmptyIncidents,
     EmptyRankings,
     EmptySignals,
     FakeSessionStore,
@@ -88,6 +89,7 @@ def build() -> tuple[TestClient, FakeClock, FakeSessionStore, FakeUsers]:
         track_statistics=EmptySignals(),
         rankings=EmptyRankings(),
         feed=EmptyFeed(),
+        incidents=EmptyIncidents(),
     )
 
     return TestClient(app), clock, store, users

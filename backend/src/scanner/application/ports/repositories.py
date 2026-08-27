@@ -171,3 +171,21 @@ class IncidentRepository(Protocol):
     ) -> Sequence[IncidentRecord]:
         """Return all incidents for one series."""
         ...
+
+    async def list_ledger(
+        self,
+        *,
+        symbol: str | None = None,
+        open_only: bool = False,
+        limit: int = 100,
+    ) -> Sequence[IncidentRecord]:
+        """§18.7's ledger read: newest first, resolved entries included.
+
+        Separate from `list_open`, which the engine uses to ask "is this series
+        currently degraded" and which is right to return every open row in
+        arrival order. A reader is asking a different question -- what has gone
+        wrong lately -- and wants the newest first and the resolved ones too,
+        because an incident that was found and fixed is the part of the ledger
+        that shows the honesty working.
+        """
+        ...
