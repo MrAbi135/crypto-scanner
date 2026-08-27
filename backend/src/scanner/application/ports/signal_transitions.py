@@ -68,3 +68,15 @@ class SignalTransitionRepository(Protocol):
     async def list_live(self, symbol: str, timeframe: str) -> tuple[str, ...]:
         """Signal ids on this series whose latest state is not terminal."""
         ...
+
+    async def live_states(self) -> tuple[tuple[str, str], ...]:
+        """Every live signal id with the state it currently holds.
+
+        §18.4's feed is one board across every symbol and timeframe, so asking
+        `list_live` per series would be a query per context and would still not
+        say which state each signal is in -- and §18.4 renders that state.
+
+        Returned as pairs rather than a mapping because the caller orders by
+        §9.2 and a dict would invite ordering by insertion instead.
+        """
+        ...

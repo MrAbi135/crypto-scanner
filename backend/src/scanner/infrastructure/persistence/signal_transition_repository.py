@@ -168,3 +168,47 @@ class PgSignalTransitionRepository:
 
         async with self._sessions() as session:
             return tuple((await session.execute(stmt)).scalars().all())
+
+    async def live_states(self) -> tuple[tuple[str, str], ...]:
+        """Every live signal id with the state it currently holds.
+
+        The same window function as `list_live` without the series filter, and
+        carrying `to_state` out with the id: §18.4's feed spans every context
+        and renders the state, so running the per-series query once per context
+        would be both more queries and less information.
+
+        `refresh` rows are excluded for the reason `list_live` gives -- a
+        refresh on the candle a signal resolved would otherwise outrank the
+        resolution and keep a finished signal on the board.
+        """
+        ranked = (
+            select(
+                SignalTransitionRow.signal_id,
+                SignalTransitionRow.to_state,
+                func.row_number()
+                .over(
+                    partition_by=SignalTransitionRow.signal_id,
+                    order_by=(
+                        SignalTransitionRow.at_candle_open_time.desc(),
+                        SignalTransitionRow.transition_id.desc(),
+                    ),
+                )
+                .label("rank"),
+            )
+            .where(SignalTransitionRow.refresh.is_(False))
+            .subquery()
+        )
+
+        stmt = (
+            select(ranked.c.signal_id, ranked.c.to_state)
+            .where(
+                ranked.c.rank == 1,
+                ranked.c.to_state.notin_([s.value for s in TERMINAL_STATES]),
+            )
+            .order_by(ranked.c.signal_id)
+        )
+
+        async with self._sessions() as session:
+            rows = (await session.execute(stmt)).all()
+
+        return tuple((row[0], row[1]) for row in rows)
