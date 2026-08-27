@@ -67,6 +67,21 @@ where rows >= 20                            -- a 2/1 split on three rows is nois
 -- off the window-local index. Harmless to read and not harmless to carry: they
 -- were 79% of every row an H1 pass loaded.
 --
+-- **The pool reference is not called the same thing in every payload.** A
+-- sweep writes `pool_id`; a stop hunt writes `sweep_pool_id`, because §4.7
+-- builds it *on* a sweep and also carries a `displacement_id` that would be
+-- ambiguous otherwise. The first version of this check read `pool_id` from
+-- both, so on a stop hunt it joined on NULL, matched nothing, and reported
+-- every single one as orphaned -- a check that could not pass, of exactly the
+-- kind this file exists to find.
+--
+-- It was not only noise. The same predicate had been used to clean the table
+-- an hour earlier, and it deleted 5,907 stop-hunt rows that were not orphaned
+-- at all. Reading a missing field as a missing *pool* is the whole error, so
+-- the third clause below refuses to guess: an event carrying neither key is
+-- reported as an unreadable shape rather than silently counted as a violation
+-- or silently skipped.
+--
 -- Recent only. History from before an identity change is debris to be cleaned
 -- once, not a live defect to alarm on every hour.
 
@@ -74,11 +89,33 @@ select 'C. orphaned liquidity events' as check,
        e.symbol, e.timeframe, e.event_type, count(*) as rows
 from detection.engine_events e
 left join detection.liquidity_pools p
-       on p.pool_id = e.payload::json ->> 'pool_id'
+       on p.pool_id = coalesce(e.payload::json ->> 'pool_id',
+                               e.payload::json ->> 'sweep_pool_id')
 where e.event_type like 'LIQUIDITY%'
   and e.created_at > now() - interval '6 hours'
+  -- Only rows that name a pool. One that names none is the next check's
+  -- business, not evidence of an orphan.
+  and coalesce(e.payload::json ->> 'pool_id',
+               e.payload::json ->> 'sweep_pool_id') is not null
   and p.pool_id is null
 group by 1, 2, 3, 4;
+
+-- C2. A liquidity payload this check cannot read.
+--
+-- If a new event type arrives, or a payload is renamed again, the join above
+-- would quietly have nothing to test and report clean. This makes that
+-- condition loud instead: the check saying "I do not know how to check this"
+-- is worth more than the check saying nothing.
+
+select 'C2. liquidity payload names no pool' as check,
+       e.event_type, count(*) as rows,
+       (array_agg(distinct left(e.payload, 120)))[1] as sample
+from detection.engine_events e
+where e.event_type like 'LIQUIDITY%'
+  and e.created_at > now() - interval '6 hours'
+  and e.payload::json ->> 'pool_id' is null
+  and e.payload::json ->> 'sweep_pool_id' is null
+group by 1, 2;
 
 
 -- ===========================================================================
