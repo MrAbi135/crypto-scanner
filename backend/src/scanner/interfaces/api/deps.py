@@ -11,6 +11,7 @@ from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.ict_evidence import IctEvidenceRepository
 from scanner.application.ports.ict_zones import IctZoneRepository
 from scanner.application.ports.liquidity_detection import LiquidityPoolRepository
+from scanner.application.ports.repositories import IncidentRepository
 from scanner.application.ports.sessions import SessionRepository
 from scanner.application.ports.signal_outcomes import SignalOutcomeRepository
 from scanner.application.ports.signal_transitions import SignalTransitionRepository
@@ -101,3 +102,7 @@ def get_rankings(request: Request) -> RankingSnapshotService:
 
 def get_feed(request: Request) -> LiveFeedService:
     return request.app.state.feed  # type: ignore[no-any-return]
+
+
+def get_incidents(request: Request) -> IncidentRepository:
+    return request.app.state.incidents  # type: ignore[no-any-return]

@@ -20,6 +20,7 @@ from scanner.shared import Timeframe
 from tests.unit.interfaces.api.identity_fixtures import (
     TEST_SECRET,
     EmptyFeed,
+    EmptyIncidents,
     EmptyRankings,
     FakeSessionStore,
     FakeTenants,
@@ -231,6 +232,7 @@ def build(*, signals=None, transitions=None, outcomes=None, archive=None, stats=
         track_statistics=stats or FakeStatistics(),
         rankings=EmptyRankings(),
         feed=EmptyFeed(),
+        incidents=EmptyIncidents(),
     )
 
     return TestClient(app)

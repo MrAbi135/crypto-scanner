@@ -38,7 +38,11 @@ from scanner.infrastructure.persistence.identity_repositories import (
 from scanner.infrastructure.persistence.liquidity_detection_repositories import (
     PgLiquidityPoolRepository,
 )
-from scanner.infrastructure.persistence.repositories import PgCandleRepository, PgSymbolRepository
+from scanner.infrastructure.persistence.repositories import (
+    PgCandleRepository,
+    PgIncidentRepository,
+    PgSymbolRepository,
+)
 from scanner.infrastructure.persistence.session_repository import (
     PgSessionRepository,
 )
@@ -111,6 +115,7 @@ def build_api_app(settings: ApiSettings) -> FastAPI:
             PgSetupRepository(db),
             PgSymbolRepository(db),
         ),
+        incidents=PgIncidentRepository(db),
         feed=LiveFeedService(
             PgSignalRepository(db),
             PgSignalTransitionRepository(db),

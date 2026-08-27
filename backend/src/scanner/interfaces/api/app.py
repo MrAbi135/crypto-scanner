@@ -34,6 +34,7 @@ from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.ict_evidence import IctEvidenceRepository
 from scanner.application.ports.ict_zones import IctZoneRepository
 from scanner.application.ports.liquidity_detection import LiquidityPoolRepository
+from scanner.application.ports.repositories import IncidentRepository
 from scanner.application.ports.sessions import SessionRepository
 from scanner.application.ports.signal_outcomes import SignalOutcomeRepository
 from scanner.application.ports.signal_transitions import SignalTransitionRepository
@@ -64,6 +65,7 @@ IMPLEMENTED_ROWS: tuple[str, ...] = (
     "GET /api/v1/me",
     "GET /api/v1/rankings",
     "GET /api/v1/scanner/feed",
+    "GET /api/v1/market/incidents",
     "GET /api/v1/rankings/weights",
     "GET /api/v1/signals/history",
     "GET /api/v1/signals/statistics",
@@ -100,6 +102,7 @@ def build_read_api(
     track_statistics: TrackRecordStatistics,
     rankings: RankingSnapshotService,
     feed: LiveFeedService,
+    incidents: IncidentRepository,
 ) -> FastAPI:
     """Assemble the API. Every identity collaborator is required.
 
@@ -131,6 +134,7 @@ def build_read_api(
     app.state.track_statistics = track_statistics
     app.state.rankings = rankings
     app.state.feed = feed
+    app.state.incidents = incidents
     # §8's cursors are signed with the same key as the access token and
     # domain-separated inside the codec, so no second secret is required.
     app.state.cursors = CursorCodec(access_tokens.secret)

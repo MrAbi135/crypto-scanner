@@ -1,13 +1,12 @@
 """Market data read endpoints (API Spec §18.7).
 
-Implements the `Candles` row only -- the subset Roadmap §7.2 step 3 exists to
-serve. `session-stats`, `sentiment` and `incidents` remain `DESIGNED`.
+`Candles` and `Incidents`. `session-stats` and `sentiment` remain `DESIGNED`.
 
-**Auth is not implemented here, and that is a deviation.** The spec marks these
-rows 🔑 with `tf:{tf}` entitlements, and identity is S10-S12. Rather than invent
-a placeholder auth that would have to be unpicked, the endpoints ship
-unauthenticated and the router refuses to mount unless the deployment has
-explicitly declared itself private. See `build_read_api`.
+The auth deviation this file used to describe is closed: identity landed in
+S10-S12 and `build_read_api` mounts this router behind `require_user` like
+every other read group. The `tf:{tf}` entitlement on the candles row is still
+outstanding -- authentication is not entitlement -- and that is the remaining
+gap, not authentication itself.
 """
 
 from __future__ import annotations
@@ -18,9 +17,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request
 
 from scanner.application.ports import CandleRepository, Clock
-from scanner.interfaces.api.deps import get_candles, get_clock
+from scanner.application.ports.repositories import IncidentRecord, IncidentRepository
+from scanner.interfaces.api.deps import get_candles, get_clock, get_incidents
 from scanner.interfaces.api.envelope import Freshness, success
 from scanner.interfaces.api.errors import bad_request
+from scanner.interfaces.api.query import QueryRejectedError
 from scanner.interfaces.api.window import window_end
 from scanner.shared import Timeframe
 
@@ -101,3 +102,74 @@ def _timeframe(request: Request, raw: str) -> Timeframe:
             "timeframe is not a scanned timeframe",
             field="timeframe",
         ) from None
+
+
+# §18.7 documents `symbol_id` and `open_only`, and nothing else. §9 refuses a
+# filter the server did not apply, so anything further is a 422 rather than a
+# ledger quietly returning everything and calling itself filtered.
+INCIDENT_LIMIT = 100
+
+
+@router.get("/incidents")
+async def list_incidents(
+    request: Request,
+    incidents: Annotated[IncidentRepository, Depends(get_incidents)],
+    clock: Annotated[Clock, Depends(get_clock)],
+    symbol_id: Annotated[str | None, Query(max_length=32)] = None,
+    open_only: Annotated[bool, Query()] = False,
+) -> dict[str, object]:
+    """DDD T8's data-honesty ledger.
+
+    §18.7 calls this row "public honesty -- not admin-gated", and the
+    permissions column says `user`. That is the whole point of it: a reader who
+    can see a signal can see what was wrong with the data underneath it. Hiding
+    the ledger behind an operator role would leave the signal looking better
+    than the data it was computed from, which is the failure §2.12 and §15.3
+    exist to prevent.
+
+    Resolved incidents are included by default. An incident that was found and
+    fixed is the part of the ledger that shows the honesty working, and a
+    default of open-only would make a well-run week look like an empty one.
+    """
+    # Refused the way every other §9 row refuses -- a `QueryRejectedError`,
+    # which the app maps to a field-precise 422. A 400 here would make this the
+    # one endpoint that answers a bad filter differently from the rest.
+    unknown = sorted(set(request.query_params) - {"symbol_id", "open_only"})
+
+    if unknown:
+        raise QueryRejectedError(
+            f"unknown query parameter: {unknown[0]}",
+            field=unknown[0],
+        )
+
+    rows = await incidents.list_ledger(
+        symbol=symbol_id,
+        open_only=open_only,
+        limit=INCIDENT_LIMIT,
+    )
+
+    return success(
+        [_incident(row) for row in rows],
+        generated_at=clock.now(),
+        # The ledger is a record of things that happened, not a live reading.
+        freshness=Freshness(state="RECORDED", observed_at=rows[0].started_at if rows else None),
+        page={"count": len(rows), "has_more": len(rows) == INCIDENT_LIMIT},
+    )
+
+
+def _incident(row: IncidentRecord) -> dict[str, object]:
+    return {
+        "id": row.id,
+        "scope": row.scope_type,
+        "type": row.incident_type,
+        "symbol": row.symbol,
+        "timeframe": row.timeframe.value if row.timeframe is not None else None,
+        "candle_span": row.candle_span,
+        "started_at": row.started_at.isoformat(),
+        # Both, always. `resolved_at` alone would leave a reader guessing what
+        # was done, and `resolution` alone would not say when it stopped.
+        "resolved_at": row.resolved_at.isoformat() if row.resolved_at is not None else None,
+        "resolution": row.resolution,
+        "open": row.resolved_at is None,
+        "notes": row.notes,
+    }

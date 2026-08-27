@@ -216,6 +216,13 @@ class EmptyFeed:
         )
 
 
+class EmptyIncidents:
+    """A clean ledger. DDD T8 having nothing to report is the good case."""
+
+    async def list_ledger(self, *, symbol=None, open_only=False, limit=100):
+        return []
+
+
 def identity(users: FakeUsers | None = None) -> dict:
     """Every collaborator `build_read_api` requires, as kwargs."""
 
@@ -234,6 +241,7 @@ def identity(users: FakeUsers | None = None) -> dict:
         "track_statistics": EmptySignals(),
         "rankings": EmptyRankings(),
         "feed": EmptyFeed(),
+        "incidents": EmptyIncidents(),
     }
 
 

@@ -322,3 +322,55 @@ async def test_incident_roundtrip(engine) -> None:
     stored = await repo.list_for_series("ETHUSDT", Timeframe.H1)
     assert len(stored) == 1 and stored[0].candle_span == 3
     assert not await repo.list_open("ETHUSDT")  # resolved ⇒ not open
+
+
+async def test_the_ledger_read_returns_resolved_rows_newest_first(engine) -> None:
+    """§18.7's read, against the database rather than a fake.
+
+    The endpoint's unit tests use a fake repository, so nothing there touches
+    this SQL -- and the two things it must get right are both SQL: that a
+    resolved row is *not* filtered out (the engine's `list_open` filters
+    exactly those, and reusing it would have made a well-run week look like an
+    empty one), and that the order is deterministic.
+    """
+    sessions = build_session_factory(engine)
+    repo = PgIncidentRepository(sessions)
+
+    symbol = f"LEDGER{new_ulid()[:6]}USDT"
+
+    older = IncidentRecord(
+        id=new_ulid(),
+        scope_type="symbol_tf",
+        incident_type="gap",
+        started_at=BASE_TIME,
+        symbol=symbol,
+        timeframe=Timeframe.H1,
+        candle_span=3,
+        resolution="backfilled",
+        resolved_at=BASE_TIME + timedelta(hours=1),
+    )
+    newer = IncidentRecord(
+        id=new_ulid(),
+        scope_type="symbol_tf",
+        incident_type="stale_feed",
+        started_at=BASE_TIME + timedelta(days=1),
+        symbol=symbol,
+        timeframe=Timeframe.H1,
+        candle_span=0,
+    )
+
+    await repo.record(older)
+    await repo.record(newer)
+
+    ledger = await repo.list_ledger(symbol=symbol)
+
+    # Resolved kept, and newest first.
+    assert [row.id for row in ledger] == [newer.id, older.id]
+    assert ledger[1].resolved_at is not None
+
+    # `open_only` is the narrowing, not the default.
+    assert [row.id for row in await repo.list_ledger(symbol=symbol, open_only=True)] == [newer.id]
+
+    # The limit is applied in the query; a ledger that read everything and
+    # sliced afterwards would grow with the history rather than the answer.
+    assert len(await repo.list_ledger(symbol=symbol, limit=1)) == 1

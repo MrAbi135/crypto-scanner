@@ -18,6 +18,7 @@ from scanner.interfaces.api.app import build_read_api
 from scanner.shared import Timeframe
 from tests.unit.interfaces.api.identity_fixtures import (
     TEST_SECRET,
+    EmptyIncidents,
     EmptyRankings,
     EmptySignals,
     FakeSessionStore,
@@ -122,6 +123,7 @@ def build(
         track_record=EmptySignals(),
         track_statistics=EmptySignals(),
         rankings=EmptyRankings(),
+        incidents=EmptyIncidents(),
         feed=LiveFeedService(
             signals or FakeSignals(),
             transitions or FakeTransitions(),
