@@ -182,7 +182,7 @@ class IctOrderBlockReplayService:
             end,
         )
 
-        mss_spans = _mss_spans(shift_records)
+        mss_spans = _mss_spans(shift_records, timeframe)
 
         liquidity_records = await self._evidence.list_liquidity(
             symbol,
@@ -328,7 +328,7 @@ class IctOrderBlockReplayService:
             ...,
         ],
         displacement: Displacement,
-        mss_spans: dict[str, tuple[tuple[int, int], ...]],
+        mss_spans: dict[str, tuple[tuple[datetime, datetime], ...]],
         atrs: Sequence[Decimal | None],
     ) -> OrderBlock | None:
         displacement_index = displacement.candle_index
@@ -378,7 +378,11 @@ class IctOrderBlockReplayService:
                 # a literal `False` until now, so the second half of the grade
                 # rule never fired and OB_A could only ever come from an
                 # external break.
-                mss_origin=_within_mss(mss_spans, displacement),
+                mss_origin=_within_mss(
+                    mss_spans,
+                    displacement,
+                    candles[displacement_index].open_time,
+                ),
                 fvg_created=fvg_created,
                 origin_swept=False,
                 origin_failure_swing=False,
@@ -1123,14 +1127,32 @@ _DISPLACEMENT_TO_SHIFT: dict[str, str] = {
 
 def _mss_spans(
     shifts: tuple[ShiftEvidenceRecord, ...],
-) -> dict[str, tuple[tuple[int, int], ...]]:
-    """Each MSS's confirming span, by direction.
+    timeframe: Timeframe,
+) -> dict[str, tuple[tuple[datetime, datetime], ...]]:
+    """Each MSS's confirming span, by direction, in time.
 
     §3.6 builds an MSS from a CHoCH plus displacement plus follow-through, so
-    the span [choch_index, followthrough_index] is where its move happened.
-    CHoCH records are ignored here: §5.1 asks about an MSS specifically.
+    [choch, followthrough] is where its move happened. CHoCH records are
+    ignored here: §5.1 asks about an MSS specifically.
+
+    **In time, because the indices are window-local.** They are offsets inside
+    whichever five-hundred-candle window recorded the MSS, written once and
+    never revised, while the window slides one candle per close. On the host
+    the stored `choch_index` runs to 499 and `followthrough_index` to 500 --
+    the window's own edge -- and an ETHUSDT H1 MSS from 2026-08-19 carries 457
+    against a current-window position near 317. Compared with a displacement
+    indexed in *today's* window, that is two coordinate systems, and
+    `_within_mss` answered false on 233 of the 234 order blocks the host has
+    ever graded. §5.1's second route to OB_A, and with it §8.6 A1's "retest of
+    the MSS-origin zone", were unreachable.
+
+    Nothing new has to be persisted to fix it. `event_at` is stamped from the
+    followthrough candle's `open_time`, so it dates the end of the span
+    exactly; and while neither index is durable, *their difference* is -- the
+    window offset is common to both and cancels. The start is that many
+    candles before the end.
     """
-    spans: dict[str, list[tuple[int, int]]] = {"UP": [], "DOWN": []}
+    spans: dict[str, list[tuple[datetime, datetime]]] = {"UP": [], "DOWN": []}
 
     for shift in shifts:
         if not shift.event_type.startswith("MSS_"):
@@ -1139,10 +1161,12 @@ def _mss_spans(
         if shift.direction not in spans:
             continue
 
+        length = abs(shift.followthrough_index - shift.choch_index)
+
         spans[shift.direction].append(
             (
-                min(shift.choch_index, shift.followthrough_index),
-                max(shift.choch_index, shift.followthrough_index),
+                shift.event_at - timeframe.duration * length,
+                shift.event_at,
             )
         )
 
@@ -1150,21 +1174,25 @@ def _mss_spans(
 
 
 def _within_mss(
-    spans: dict[str, tuple[tuple[int, int], ...]],
+    spans: dict[str, tuple[tuple[datetime, datetime], ...]],
     displacement: Displacement,
+    at: datetime,
 ) -> bool:
     """Does this displacement sit inside an MSS's confirming move?
 
     That is what "the candidate sits at the origin of an MSS" means for an OB:
     the candidate is the footprint immediately before the displacement, so if
     the displacement is the MSS's own, the candidate is its origin.
+
+    `at` is the displacement candle's `open_time`, not its index. See
+    `_mss_spans` for why the index cannot answer this.
     """
     direction = _DISPLACEMENT_TO_SHIFT.get(displacement.direction.value)
 
     if direction is None:
         return False
 
-    return any(start <= displacement.candle_index <= end for start, end in spans.get(direction, ()))
+    return any(start <= at <= end for start, end in spans.get(direction, ()))
 
 
 def _structure_break_flags(
