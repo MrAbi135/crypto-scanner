@@ -264,6 +264,56 @@ export interface SignalTransition {
   readonly evidence: Record<string, unknown>
 }
 
+/** One §18.8 archive row: the signal, and (once resolved) what became of it. */
+export interface ArchivedSignal {
+  readonly signal_id: string
+  readonly symbol: string
+  readonly timeframe: string
+  readonly direction: string
+  readonly archetype: string
+  readonly grade: string
+  readonly confidence: string
+  readonly published_at: string
+  readonly versions: Versions
+  /** Absent while the signal is live — never null-fielded (§18.8). */
+  readonly outcome?: {
+    readonly outcome: string
+    readonly resolved_at: string | null
+    readonly elapsed_candles: number | null
+    readonly mfe_r: string | null
+    readonly mae_r: string | null
+    /** PRD FC-10.1: in the archive, out of the statistics. */
+    readonly excluded_from_stats: boolean
+  }
+}
+
+/** One §18.8 statistics group — always version-segmented. */
+export interface StatsGroup {
+  readonly group_by: string
+  readonly key: string | null
+  readonly algo_version: string
+  readonly counts: {
+    readonly resolved: number
+    readonly success: number
+    readonly failed: number
+    readonly expired: number
+    readonly invalidated_early: number
+  }
+  readonly hit_rate: {
+    readonly rated: number
+    /** Null, never zero, when nothing was rated. */
+    readonly rate_pct: string | null
+    readonly confidence_interval: {
+      readonly level: string
+      readonly low_pct: string
+      readonly high_pct: string
+    } | null
+    readonly sufficient_for_inference: boolean
+    /** PRD FC-10.1's own phrasing, carried in the payload. */
+    readonly label: string
+  }
+}
+
 // §13. `freshness` is always present; `versions` only on doctrine-derived rows.
 export interface Freshness {
   readonly state: string

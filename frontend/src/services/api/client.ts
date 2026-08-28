@@ -10,6 +10,7 @@ import { env } from '@shared/config/env'
 import { currentSession, setSession, type Session } from '@services/api/session'
 import type {
   ApiError,
+  ArchivedSignal,
   Candle,
   Envelope,
   FeedRow,
@@ -17,6 +18,7 @@ import type {
   PlatformStatus,
   RankedRow,
   SignalDetail,
+  StatsGroup,
   SignalEvidence,
   SignalTransition,
   StructureEvent,
@@ -105,6 +107,24 @@ export function fetchSignalTransitions(
     `/signals/${encodeURIComponent(signalId)}/transitions`,
     {},
   )
+}
+
+export function fetchHistory(
+  filters: Record<string, string> = {},
+): Promise<Envelope<readonly ArchivedSignal[]>> {
+  // Filters go to the server, as everywhere (§9). §18.8 paywalls nothing
+  // here: "honesty never paywalled".
+  return request<readonly ArchivedSignal[]>('/signals/history', filters)
+}
+
+export function fetchStatistics(
+  groupBy: string,
+  window: string,
+): Promise<Envelope<readonly StatsGroup[]>> {
+  return request<readonly StatsGroup[]>('/signals/statistics', {
+    group_by: groupBy,
+    window,
+  })
 }
 
 export function fetchStatus(): Promise<Envelope<PlatformStatus>> {

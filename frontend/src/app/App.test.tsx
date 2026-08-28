@@ -55,6 +55,10 @@ function stubFetch(rows: readonly unknown[]) {
       const url = String(input)
       const data = url.includes('/scanner/feed')
         ? rows
+        : url.includes('/signals/statistics')
+          ? []
+          : url.includes('/signals/history')
+            ? []
         : url.includes('/evidence')
           ? {
               signal_id: 'sig-1',
@@ -130,6 +134,9 @@ describe('App shell', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Chart' }))
     await waitFor(() => expect(screen.getByLabelText('Symbol')).toBeDefined())
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Track record' }))
+    expect(await screen.findByRole('heading', { name: 'Track record' })).toBeDefined()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Live feed' }))
     expect(await screen.findByRole('heading', { name: 'Live feed' })).toBeDefined()
