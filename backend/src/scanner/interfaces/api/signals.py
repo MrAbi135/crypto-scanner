@@ -493,16 +493,25 @@ async def signal_evidence(
     signals: Annotated[SignalRepository, Depends(get_signals)],
     clock: Annotated[Clock, Depends(get_clock)],
 ) -> dict[str, Any]:
-    """§18.8's evidence chain, "each with event refs + candle natural keys".
+    """§18.8's evidence row: the sealed payload's chain and §15.4's breakdown.
 
     Read straight out of the sealed payload. §12.1 froze it at publication, and
-    the whole point of the row is that a chart can deep-link to the candles a
+    the whole point of the row is that a chart can deep-link to the objects a
     claim was made from — which requires the ids that were true then, not the
     ones a fresh detection pass would produce now.
 
-    The natural keys travel beside the ids because §15.2's evidence is an
-    "event-id chain": an id alone deep-links to nothing without knowing which
-    symbol, timeframe and candle it belongs to.
+    **The keys here are the sealer's keys, and the first version's were not.**
+    It read `payload.get("evidence", {})` where `SealedPayload.as_dict` writes
+    `evidence_ids`, so the row returned an empty chain for every signal ever
+    sealed — and its `confidence` was the bare number §15.4 forbids, with the
+    F1-F6 breakdown sitting unread under `factors`. The test passed because
+    its fixture invented an `evidence` key the sealer never writes; the fixture
+    is now built by `SealedPayload.as_dict()` itself, so the two cannot drift
+    apart again.
+
+    The natural keys (symbol, timeframe) travel beside the ids because §15.2's
+    evidence is an "event-id chain": an id alone deep-links to nothing without
+    knowing which series it belongs to.
     """
     signal = await signals.get(signal_id)
 
@@ -516,8 +525,23 @@ async def signal_evidence(
             "signal_id": signal.signal_id,
             "symbol": signal.symbol,
             "timeframe": signal.timeframe.value,
-            "evidence": payload.get("evidence", {}),
-            "confidence": payload.get("confidence", {}),
+            # §15.2's chain, under the sealer's own name.
+            "evidence_ids": payload.get("evidence_ids", []),
+            # The zone the entry is priced from — the one id on the chain a
+            # chart can resolve today (zone ids are stable; see the chart's
+            # deep-link note on sweep/swing ids).
+            "entry_zone_id": (payload.get("entry_zone") or {}).get("zone_id"),
+            # §15.4: confidence "is displayed with its factor breakdown —
+            # never as a bare number". Shaped so a client cannot take the
+            # number without at least holding the breakdown beside it.
+            "confidence": {
+                "final": payload.get("confidence"),
+                "grade": payload.get("grade"),
+                "factors": payload.get("factors", {}),
+            },
+            "reason": payload.get("reason"),
+            "htf_chain": payload.get("htf_chain", {}),
+            "risk": payload.get("risk", {}),
         },
         generated_at=clock.now(),
         freshness=Freshness(state="RECORDED", observed_at=signal.published_at),
