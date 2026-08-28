@@ -15,6 +15,8 @@ from scanner.application.ports.signal_outcomes import SignalOutcomeRecord
 from scanner.application.ports.signal_transitions import SignalTransitionRecord
 from scanner.application.ports.signals import SignalRecord
 from scanner.application.signal_audit import reseal
+from scanner.domain.confluence import EntryZone, Invalidation, SignalLevels, TargetBand
+from scanner.domain.lifecycle import SignalPayload
 from scanner.interfaces.api.app import build_read_api
 from scanner.shared import Timeframe
 from tests.unit.interfaces.api.identity_fixtures import (
@@ -33,15 +35,48 @@ NOW = datetime(2026, 8, 25, 12, tzinfo=UTC)
 PUBLISHED = datetime(2026, 8, 24, 9, tzinfo=UTC)
 AUTH = bearer(now=NOW)
 
-PAYLOAD = {
-    "symbol": "BTCUSDT",
-    "evidence": {
-        "structure": [{"event_id": "ev-1", "candle_open_time": "2026-08-24T08:00:00+00:00"}],
-        "liquidity": [{"pool_id": "p-1"}],
-    },
-    "confidence": {"final": "82", "factors": {"F1": "12"}},
-    "versions": {"algo_version": "s8-test", "param_set_version": "2026.08.24.2"},
-}
+# Built by the real sealer, not written by hand.
+#
+# The first fixture here was a hand-written dict with an `evidence` key -- a
+# key `SealedPayload.as_dict` has never produced. The endpoint read the same
+# invented key, the test passed, and the row returned an empty chain for every
+# signal actually sealed in production. A fixture the domain builds cannot
+# drift from what the domain builds.
+PAYLOAD = SignalPayload(
+    symbol="BTCUSDT",
+    timeframe="H1",
+    direction="UP",
+    evidence_ids=("zone-1", "ev-1"),
+    confidence=Decimal("82"),
+    grade="B",
+    factors={"F1": "12", "F2": "40", "F3": "80", "F4": "50", "F5": "60", "F6": "100"},
+    archetype="A3",
+    reason="A3 long: trend with a displaced break, retraced into the zone.",
+    invalidation_distance_atr=Decimal("0.4"),
+    invalidation_distance_pct=Decimal("0.3"),
+    r_multiple=Decimal("5.1"),
+    condition_tags=(),
+    levels=SignalLevels(
+        direction="UP",
+        entry=EntryZone(
+            zone_id="zone-1",
+            proximal=Decimal("101"),
+            distal=Decimal("100"),
+            refined_proximal=None,
+            refined_distal=None,
+        ),
+        invalidation=Invalidation(price=Decimal("100"), rule="zone_distal_edge"),
+        primary_target=TargetBand(
+            low=Decimal("110"),
+            high=Decimal("110"),
+            pool_id="p-1",
+            strength=Decimal("23.75"),
+        ),
+    ),
+    htf_chain={"H1": "SIGNAL", "HTF": "UP"},
+    algo_version="s8-test",
+    param_set_version="2026.08.24.2",
+).as_dict()
 
 SEALED = json.dumps(PAYLOAD, sort_keys=True, separators=(",", ":"))
 
@@ -388,14 +423,39 @@ def test_the_evidence_chain_comes_from_the_sealed_payload() -> None:
     """
     body = build().get("/api/v1/signals/sig-1/evidence", headers=AUTH).json()
 
-    chain = body["data"]["evidence"]
-
-    assert chain["structure"][0]["event_id"] == "ev-1"
-    assert chain["structure"][0]["candle_open_time"] == "2026-08-24T08:00:00+00:00"
+    # The sealer's key, not a hand-invented one. The first version of this
+    # test asserted against an `evidence` key its own fixture had made up, and
+    # the endpoint read the same invented key: green test, empty row on every
+    # production signal.
+    assert body["data"]["evidence_ids"] == ["zone-1", "ev-1"]
+    assert body["data"]["entry_zone_id"] == "zone-1"
     # The natural keys a deep-link needs travel with it: an event id alone
     # locates nothing without its series.
     assert body["data"]["symbol"] == "BTCUSDT"
     assert body["data"]["timeframe"] == "H1"
+
+
+def test_confidence_travels_with_its_breakdown_never_bare() -> None:
+    """SLS §15.4: confidence "is displayed with its factor breakdown — never
+    as a bare number". The shape enforces it: a client reaching for the number
+    finds it inside an object that also holds the factors."""
+
+    body = build().get("/api/v1/signals/sig-1/evidence", headers=AUTH).json()
+
+    confidence = body["data"]["confidence"]
+
+    assert confidence["final"] == "82"
+    assert confidence["grade"] == "B"
+    assert confidence["factors"]["F3"] == "80"
+    assert len(confidence["factors"]) == 6
+
+
+def test_the_reason_and_risk_ride_along() -> None:
+    body = build().get("/api/v1/signals/sig-1/evidence", headers=AUTH).json()
+
+    assert "retraced into the zone" in body["data"]["reason"]
+    assert body["data"]["risk"]["r_multiple"] == "5.1"
+    assert body["data"]["htf_chain"]["HTF"] == "UP"
 
 
 # --------------------------------------------------------------- transitions
