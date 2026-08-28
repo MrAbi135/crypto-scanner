@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.5
-**Ratified:** 2026-07-12 · **Last amended:** 2026-08-17 (see Amendment History)
+**Version:** 1.0.6
+**Ratified:** 2026-07-12 · **Last amended:** 2026-08-28 (see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -908,7 +908,7 @@ Converts per-setup confidence into a market-wide, comparable ordering, and grade
 
 ### 9.2 Cross-Symbol Ranking
 
-Published signals rank by: (1) FinalConfidence (desc); (2) tie-break: archetype priority A1 > A2 > A5 > A3 > A4 (reversal-class setups are rarer and time-critical); (3) tie-break: higher TF; (4) tie-break: higher liquidity tier; (5) final deterministic tie-break: symbol lexicographic. No randomness anywhere.
+Published signals rank by: (1) FinalConfidence (desc); (2) tie-break: archetype priority A1 > A2 > A5 > A3 > A4 (reversal-class setups are rarer and time-critical); (3) tie-break: higher TF; (4) tie-break: higher liquidity tier; (5) tie-break: symbol lexicographic; (6) final deterministic tie-break: direction lexicographic (`DOWN` before `UP`). No randomness anywhere. Key (6) exists because one symbol may carry a long and a short signal at the same close (§10.3 dedup is per direction); without it the chain is not a total order on published signals, which §9.2 requires of itself.
 
 ### 9.3 Score Decay
 
@@ -1027,6 +1027,8 @@ Per closed candle on the signal's TF: entry-zone touch check (→ ACTIVE); inval
 | D1 | 15 | 15 d |
 
 TTL = `P.lifecycle.ttl[TF]`. Rationale: a setup's evidence is a snapshot of flow; beyond ~20 bars the causal chain is archaeology. Display-rank decay (§9.3) runs across the same window.
+
+The table is complete as written: W1 carries no row because §0.3 declares it *"context only, no signals"*, and a timeframe that cannot publish has nothing to expire. A W1 row here would imply the opposite.
 
 ---
 
@@ -1156,6 +1158,25 @@ Every parameter change increments `param_set_version` and requires golden-datase
 ---
 
 ## Amendment History
+
+### v1.0.6 — 2026-08-28
+
+Two clarifications. **Neither changes detection behaviour**: the first records
+a tie-break the implementation has carried (documented and tested) since the
+ranking shipped; the second states that an apparent omission is not one.
+
+| # | Section | Was | Now | Why |
+|---|---|---|---|---|
+| 1 | §9.2 | five keys ending at "symbol lexicographic" | a sixth key: direction lexicographic (`DOWN` before `UP`) | One symbol can carry a long and a short at the same close (§10.3 dedups per direction), so the five-key chain was not a total order on published signals — two opposite-direction signals with equal confidence, archetype, TF and tier tied unresolved. The implementation (`domain/ranking/order.py`) has always appended direction as a final key, with a comment naming it as past the end of §9.2's chain; this makes the document say what the tested behaviour does. |
+| 2 | §12.5 | TTL table rows for M5–D1, W1 absent without comment | one sentence stating the absence is deliberate | §0.3 makes W1 *"context only, no signals"*; a TF that cannot publish has nothing to expire. Left unstated, the missing row read as an oversight and was carried as an open question for five days. |
+
+**Impact review.** No parameter changes, no detector changes, no golden dataset
+relabelling. §9.3's decay and §9.4's grades read FinalConfidence only and are
+untouched. No `algo_version` or `param_set_version` bump: per the v1.0.3
+precedent, a correction the implementation already follows is a patch
+increment with the document as the party at fault — and entry 2 changes no
+reading at all.
+
 
 ### v1.0.5 — 2026-08-18
 
@@ -1371,4 +1392,4 @@ belongs in its own amendment, not folded into an unrelated one.
 
 *This document is the complete detection doctrine of the Institutional AI Crypto Scanner. An engineering team implementing it makes zero trading-logic decisions: where a question is not answered here, the answer is an amendment to this document — never a guess in code.*
 
-**— End of Scanner Logic Specification v1.0.4 —**
+**— End of Scanner Logic Specification v1.0.6 —**

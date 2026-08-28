@@ -4,7 +4,7 @@
 
 **Document Status:** Official Database Design Document — defines the complete persistence architecture
 **Authority:** Subordinate to `PROJECT_CONSTITUTION.md`, `SCANNER_LOGIC_SPECIFICATION.md`, `TECHNOLOGY_DECISION_RECORD.md`, `PRODUCT_REQUIREMENTS_DOCUMENT.md`, and `TECHNICAL_ARCHITECTURE_DOCUMENT.md` (all v1.0.0); authoritative over all database structure, retention, and data-operations policy
-**Version:** 1.0.0 | **Ratified:** 2026-07-12
+**Version:** 1.0.1 | **Ratified:** 2026-07-12 | **Last amended:** 2026-08-28 (see §23)
 **Amendment Rule:** Schema evolution follows expand-migrate-contract discipline (Constitution §33.6); structural changes require a DDD revision
 
 > Engine: PostgreSQL 16 + TimescaleDB (TDR §8). Access exclusively through the repository layer (TAD §13). This document defines structure and policy — no SQL, no migrations, no ORM models. Field lists name the semantically required columns; exact column naming follows Constitution §11 conventions at implementation.
@@ -287,7 +287,7 @@ Each table: Purpose / Description / Main Fields / Relationships / Index Requirem
 - **Description:** One row per published signal: complete SLS §15.2 payload **snapshotted** (evidence chain, factor breakdown, zones, levels, versions, HTF states) as sealed JSONB + extracted queryable columns; payload hash (SLS §15.3.5). Append-only forever; no UPDATE surface exists.
 - **Main Fields:** id, setup_id, symbol_id, timeframe, direction, archetype, grade, final_confidence, entry_band, invalidation_level, target_bands, published_at, ttl_candles, algo_version_id, payload (sealed JSONB), payload_hash, dedup_key.
 - **Relationships:** → T16, T1, T10; ← T18, T19, AI explanations, alert events, journal references.
-- **Index Requirements:** PK (id); (published_at); (symbol_id, published_at); (archetype, grade, published_at) for stats; unique partial on dedup_key for active window (SLS §10.3).
+- **Index Requirements:** PK (id); (published_at); (symbol_id, published_at); (archetype, grade, published_at) for stats; plain (dedup_key, published_at) — §10.3's dedup uniqueness is enforced at write time by SLS §15.3 check (4), not by the database. A unique *partial* index needs a mutable "active" predicate on this table, and T17 has none by design: state lives in T18 and this table is append-only forever. Adding a closed-at column to host the predicate would trade Constitution §45.5's immutability for a constraint, and immutability is the stronger promise (v1.0.1).
 - **Expected Growth:** Quality floors make this deliberately small: est. 1,500–6,000/month.
 - **Read/Write Pattern:** Insert-once; read constantly (feed history, track record, evidence, backtest comparison).
 - **Retention:** **Forever. Constitutionally immutable (Constitution §45.5).** Checksum-verified in every backup cycle.
@@ -560,7 +560,7 @@ Each table: Purpose / Description / Main Fields / Relationships / Index Requirem
 |---|---|
 | CHECK — domain enums | status/state/grade/archetype/outcome columns constrained to their SLS-defined value sets (states can't be invented by bugs) |
 | CHECK — data sanity | OHLC ordering (H ≥ max(O,C) etc. — SLS §2.15 mirrored at storage as last defense), non-negative volumes, band ordering (proximal vs distal per direction), confidence ∈ [0,100] |
-| UNIQUE | Natural identities: (venue, exchange_symbol); candle composite PK; (email); dedup_key partial-unique on active signals; (algo_version, param_set_version) |
+| UNIQUE | Natural identities: (venue, exchange_symbol); candle composite PK; (email); (algo_version, param_set_version). Signal dedup uniqueness is write-time per T17's index note (v1.0.1) |
 | NOT NULL | Default posture; nullable is a documented decision per column |
 | Immutability | T17/T19/T38 (+ finalized T34): enforced by (a) no UPDATE grants to the application role on these tables, (b) trigger-guard rejecting UPDATE/DELETE (defense in depth), (c) hash chains/payload hashes for tamper evidence |
 | Temporal | period_end > period_start; resolved_at ≥ started_at; expiry mandatory on overrides |
@@ -663,7 +663,7 @@ Validation is layered (Constitution §9.3): boundary (Pydantic) → application 
 
 1. CHECK constraints mirror SLS §2.15 candle sanity (OHLC ordering, non-negatives) — a bug that slips application validation cannot persist impossible market data.
 2. Enum CHECKs freeze state vocabularies to SLS definitions; adding a state is a migration (i.e., a governed spec event), not an insert.
-3. Composite uniqueness makes duplicates structurally impossible where doctrine demands identity (candle keys, dedup windows, version pairs).
+3. Composite uniqueness makes duplicates structurally impossible where doctrine demands identity (candle keys, version pairs); the signal dedup window is the one identity enforced at write time instead, because its table refuses the mutable column a partial-unique index would need (T17, v1.0.1).
 4. Immutability triggers (T17/T19/T38/finalized-T34) reject UPDATE/DELETE regardless of application-role misconfiguration.
 5. FK integrity per §7; evidence natural-key references validated by repositories at write (the one place FK enforcement is deliberately waived).
 6. **Rule of role separation:** the application role owns DML on its schemas only; migration role owns DDL; no superuser in any runtime path.
@@ -708,8 +708,28 @@ Validation is layered (Constitution §9.3): boundary (Pydantic) → application 
 
 ---
 
-## 23. Closing Statement
+## 23. Amendment History
+
+### v1.0.1 — 2026-08-28
+
+Two records of implemented reality, both from the `detection` schema's
+migrations; neither changes a table that exists.
+
+| # | Where | Was | Now | Why |
+|---|---|---|---|---|
+| 1 | T17 index requirements (§ tables), §19 UNIQUE row, §22 closing principle 3 | "unique partial on dedup_key for active window" | plain (dedup_key, published_at) index; uniqueness enforced at write time by SLS §15.3 check (4) | A partial index needs a predicate over a column of the table, and "active" is not one: §12's state lives in T18's transitions, and T17 has no UPDATE surface to record a change into. There is no expression over published_at meaning "inside its TTL" either — §12.5 counts TTL in candles, per timeframe. Migration `014_signals.py` argued this in its docstring and asked for a ruling; the ruling is: immutability (Constitution §45.5) outranks a database-level constraint that would require a mutable column. |
+| 2 | detection-schema field naming (T11–T19) | `symbol_id`, `algo_version_id` as implied FK columns | recorded: the `detection` schema uses plain `symbol` and `algo_version` text columns, no FKs to T1/T10 | Migrations 012–014 all made the same call and said so. Detection rows are evidence — self-contained records whose meaning must survive registry edits; an FK would let a registry rename retroactively re-label sealed evidence. The day a second consumer needs referential integrity is the day to revisit, as its own amendment. Field lists in this document already carry the caveat that "exact column naming follows Constitution §11 conventions at implementation". |
+
+Amendments follow Constitution §42.7: explicit proposal, impact review,
+version increment, recorded rationale. Impact: no migration changes (the
+schema already is this); no repository changes; SLS §10.3/§15.3 unchanged —
+this document simply stops asking for an index the doctrine's own immutability
+rule forbids.
+
+---
+
+## 24. Closing Statement
 
 This design encodes the platform's core promise at the storage layer: **facts are append-only, evidence is permanent, derived state is disposable, and the signal record cannot be edited by anyone — including us.** The two-workload split (OLTP + time-series) lives in one operationally boring PostgreSQL cluster with every scale ceiling measured and its successor named. Repositories implement against this document; where a storage question is not answered here, the answer is a DDD amendment, never an improvised table.
 
-**— End of Database Design Document v1.0.0 —**
+**— End of Database Design Document v1.0.1 —**
