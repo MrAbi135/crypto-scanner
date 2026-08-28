@@ -50,6 +50,8 @@ WINDOW = 500
 # runtime to re-prove the same property.
 CONTEXTS = (Timeframe.H1, Timeframe.H4)
 
+K_EXTERNAL = 5  # P.structure.k_external, SLS §3.1
+
 
 def _dsn() -> str:
     raw = os.environ.get("SCANNER_DB_DSN") or os.environ["DATABASE_URL"]
@@ -114,6 +116,78 @@ def _counts(series: list[Candle]) -> dict[str, int]:
     return tally
 
 
+async def _recorded_swings(conn, symbol: str, timeframe: Timeframe) -> dict[str, set]:
+    rows = await conn.execute(
+        text(
+            "select event_type, event_at from detection.engine_events"
+            " where symbol = :s and timeframe = :t"
+            "   and event_type in ('SWING_EXTERNAL_HIGH','SWING_EXTERNAL_LOW')"
+        ),
+        {"s": symbol, "t": timeframe.value},
+    )
+
+    found: dict[str, set] = {"HIGH": set(), "LOW": set()}
+
+    for event_type, event_at in rows:
+        found[event_type.rsplit("_", 1)[1]].add(event_at)
+
+    return found
+
+
+def _swing_faults(series: list[Candle], recorded: dict[str, set]) -> list[str]:
+    """§3.1 over what the engine actually stored.
+
+    Two directions, because they fail differently: a recorded swing that is not
+    a pivot means the detector invented one, and a pivot with no recorded swing
+    means it dropped one. Neither shows up in a count.
+
+    **The equal-extreme clause is applied, not ignored.** §3.1 says a tie
+    within ε does not confirm a strict swing; the *last* member of the equal
+    set that is then followed by k strictly opposite candles becomes the swing
+    point. A check written on strict inequality alone reports those as
+    invented -- which it did, on BTCUSDT H1 2026-08-16 10:00, where two
+    candles shared a low to the cent and the engine correctly took the later
+    one. The naive version of this check found a defect that was not there.
+    """
+    faults: list[str] = []
+    at = {candle.open_time: index for index, candle in enumerate(series)}
+
+    for kind, extreme, better in (
+        ("HIGH", [c.high for c in series], True),
+        ("LOW", [c.low for c in series], False),
+    ):
+        inside = {t for t in recorded[kind] if t in at}
+
+        for stamp in sorted(inside):
+            index = at[stamp]
+
+            if index < K_EXTERNAL or index + K_EXTERNAL >= len(series):
+                continue
+
+            value = extreme[index]
+            before = extreme[index - K_EXTERNAL : index]
+            after = extreme[index + 1 : index + K_EXTERNAL + 1]
+
+            # Strictly better than everything after, and at least as good as
+            # everything before: the tie rule puts the swing on the *last*
+            # member of an equal set, so an earlier equal candle is expected.
+            strict_after = all(value > x for x in after) if better else all(value < x for x in after)
+            weak_before = all(value >= x for x in before) if better else all(value <= x for x in before)
+
+            if not (strict_after and weak_before):
+                faults.append(f"recorded {kind} at {stamp} is not a §3.1 pivot")
+
+        for index in range(K_EXTERNAL, len(series) - K_EXTERNAL):
+            value = extreme[index]
+            window = extreme[index - K_EXTERNAL : index] + extreme[index + 1 : index + K_EXTERNAL + 1]
+            strict = all(value > x for x in window) if better else all(value < x for x in window)
+
+            if strict and series[index].open_time not in inside:
+                faults.append(f"unrecorded {kind} pivot at {series[index].open_time}")
+
+    return faults
+
+
 async def main() -> None:
     engine = create_async_engine(_dsn())
     violations = 0
@@ -148,6 +222,18 @@ async def main() -> None:
                     violations += 1
                 else:
                     print(line)
+
+                faults = _swing_faults(series, await _recorded_swings(conn, symbol, timeframe))
+
+                for fault in faults[:5]:
+                    print(f"VIOLATION {symbol:8} {timeframe.value:3} {fault}")
+
+                if faults:
+                    violations += 1
+                    if len(faults) > 5:
+                        print(f"         {symbol:8} {timeframe.value:3} ... {len(faults) - 5} more")
+                else:
+                    print(f"{symbol:8} {timeframe.value:3} §3.1 swings agree with the candles")
 
     await engine.dispose()
 
