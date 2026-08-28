@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import type { Candle, Pool, StructureEvent, Zone } from '@entities/market/types'
+import type { Candle, Pool, StructureEvent, Sweep, Zone } from '@entities/market/types'
 import { Chart } from './Chart'
 
 function candle(index: number, close = '105'): Candle {
@@ -61,19 +61,19 @@ describe('Chart', () => {
   it('says there are no candles rather than showing a blank frame', () => {
     // "No data" and "the engine found nothing" are opposite claims, and an
     // empty chart makes them look identical.
-    render(<Chart candles={[]} zones={[]} pools={[]} structure={[]} />)
+    render(<Chart candles={[]} zones={[]} pools={[]} structure={[]} sweeps={[]} />)
 
     expect(screen.getByTestId('chart-empty')).toBeDefined()
   })
 
   it('draws one group per candle', () => {
-    render(<Chart candles={[candle(0), candle(1), candle(2)]} zones={[]} pools={[]} structure={[]} />)
+    render(<Chart candles={[candle(0), candle(1), candle(2)]} zones={[]} pools={[]} structure={[]} sweeps={[]} />)
 
     expect(screen.getByTestId('candles').children).toHaveLength(3)
   })
 
   it('marks direction so up and down are distinguishable without colour', () => {
-    render(<Chart candles={[candle(0, '105'), candle(1, '95')]} zones={[]} pools={[]} structure={[]} />)
+    render(<Chart candles={[candle(0, '105'), candle(1, '95')]} zones={[]} pools={[]} structure={[]} sweeps={[]} />)
 
     expect(screen.getByTestId('candle-0').getAttribute('class')).toContain('candle--up')
     expect(screen.getByTestId('candle-1').getAttribute('class')).toContain('candle--down')
@@ -86,7 +86,7 @@ describe('Chart', () => {
       <Chart
         candles={[candle(0)]}
         zones={[zone('z1'), zone('z2', { zone_type: 'OB', state: 'TESTED' })]}
-        pools={[]} structure={[]}
+        pools={[]} structure={[]} sweeps={[]}
       />,
     )
 
@@ -95,13 +95,13 @@ describe('Chart', () => {
   })
 
   it('flags a stale zone rather than drawing it like a live one', () => {
-    render(<Chart candles={[candle(0)]} zones={[zone('z1', { stale_context: true })]} pools={[]} structure={[]} />)
+    render(<Chart candles={[candle(0)]} zones={[zone('z1', { stale_context: true })]} pools={[]} structure={[]} sweeps={[]} />)
 
     expect(screen.getByTestId('zone-z1').getAttribute('class')).toContain('zone--stale')
   })
 
   it('draws pools as levels carrying their side', () => {
-    render(<Chart candles={[candle(0)]} zones={[]} pools={[pool('p1'), pool('p2', 'SSL')]} structure={[]} />)
+    render(<Chart candles={[candle(0)]} zones={[]} pools={[pool('p1'), pool('p2', 'SSL')]} structure={[]} sweeps={[]} />)
 
     expect(screen.getByTestId('pool-p1').getAttribute('data-side')).toBe('BSL')
     expect(screen.getByTestId('pool-p2').getAttribute('data-side')).toBe('SSL')
@@ -110,7 +110,7 @@ describe('Chart', () => {
   it('places a zone band at the same y as the price it represents', () => {
     // The assertion that matters: an overlay two pixels off is a zone that
     // appears to sit above a candle it actually cuts through.
-    render(<Chart candles={[candle(0)]} zones={[zone('z1')]} pools={[pool('p1')]} structure={[]} />)
+    render(<Chart candles={[candle(0)]} zones={[zone('z1')]} pools={[pool('p1')]} structure={[]} sweeps={[]} />)
 
     const band = screen.getByTestId('zone-z1')
     const level = screen.getByTestId('pool-p1')
@@ -125,13 +125,13 @@ describe('Chart', () => {
   })
 
   it('describes its contents for a screen reader', () => {
-    render(<Chart candles={[candle(0)]} zones={[zone('z1')]} pools={[pool('p1')]} structure={[]} />)
+    render(<Chart candles={[candle(0)]} zones={[zone('z1')]} pools={[pool('p1')]} structure={[]} sweeps={[]} />)
 
     // "1 of 1 in view" rather than "1 zones": when objects are clipped for
     // being outside the price range, a screen-reader user has to hear that
     // too, or the chart quietly under-reports what the engine found.
     expect(screen.getByRole('img').getAttribute('aria-label')).toBe(
-      'Price chart with 1 candles, 1 of 1 zones in view, 1 liquidity pools and 0 swings',
+      'Price chart with 1 candles, 1 of 1 zones in view, 1 liquidity pools, 0 swings and 0 sweeps',
     )
   })
 })
@@ -145,7 +145,7 @@ describe('zone placement', () => {
       <Chart
         candles={[candle(0), candle(1), candle(2), candle(3)]}
         zones={[zone('z1', { created_at: '2026-08-17T02:00:00+00:00' })]}
-        pools={[]} structure={[]}
+        pools={[]} structure={[]} sweeps={[]}
       />,
     )
 
@@ -162,7 +162,7 @@ describe('zone placement', () => {
       <Chart
         candles={[candle(1), candle(2)]}
         zones={[zone('z1', { created_at: '2020-01-01T00:00:00+00:00' })]}
-        pools={[]} structure={[]}
+        pools={[]} structure={[]} sweeps={[]}
       />,
     )
 
@@ -184,7 +184,7 @@ describe('clipping', () => {
           zone('near', { band_low: '95', band_high: '100' }),
           zone('far', { band_low: '10', band_high: '12' }),
         ]}
-        pools={[]} structure={[]}
+        pools={[]} structure={[]} sweeps={[]}
       />,
     )
 
@@ -194,7 +194,7 @@ describe('clipping', () => {
   })
 
   it('stays quiet when everything is in view', () => {
-    render(<Chart candles={[candle(0)]} zones={[zone('z1')]} pools={[]} structure={[]} />)
+    render(<Chart candles={[candle(0)]} zones={[zone('z1')]} pools={[]} structure={[]} sweeps={[]} />)
 
     expect(screen.queryByTestId('chart-clipped')).toBeNull()
   })
@@ -225,6 +225,7 @@ describe('Chart swings', () => {
         zones={[]}
         pools={[]}
         structure={[swing('SWING_EXTERNAL_HIGH', '2026-08-17T01:00:00+00:00', '110')]}
+        sweeps={[]}
       />,
     )
 
@@ -246,6 +247,7 @@ describe('Chart swings', () => {
           swing('SWING_INTERNAL_HIGH', '2026-08-17T01:00:00+00:00', '105'),
           swing('SWING_EXTERNAL_HIGH', '2026-08-17T02:00:00+00:00', '105'),
         ]}
+        sweeps={[]}
       />,
     )
 
@@ -265,6 +267,7 @@ describe('Chart swings', () => {
         zones={[]}
         pools={[]}
         structure={[swing('SWING_EXTERNAL_HIGH', '2026-08-17T01:00:00+00:00', '110')]}
+        sweeps={[]}
       />,
     )
 
@@ -274,9 +277,103 @@ describe('Chart swings', () => {
   it('draws nothing when the engine recorded no swings', () => {
     // Distinct from an error. A quiet window and a broken fetch must not look
     // the same, which is why the count is in the chart's own label.
-    render(<Chart candles={[candle(1)]} zones={[]} pools={[]} structure={[]} />)
+    render(<Chart candles={[candle(1)]} zones={[]} pools={[]} structure={[]} sweeps={[]} />)
 
     expect(document.querySelectorAll('[data-testid^="swing-"]')).toHaveLength(0)
     expect(screen.getByTestId('chart').getAttribute('aria-label')).toContain('0 swings')
+  })
+})
+
+describe('Chart sweeps', () => {
+  function sweep(overrides: Partial<Sweep> = {}, evidence: Record<string, unknown> = {}): Sweep {
+    return {
+      pool_id: 'p1',
+      from_state: 'ACTIVE',
+      to_state: 'SWEPT',
+      reason: 'liquidity_sweep',
+      transitioned_at: '2026-08-17T01:00:00+00:00',
+      candle_index: 400,
+      evidence: {
+        reference_level: '105',
+        penetration_price: '110',
+        side: 'BSL',
+        reclaimed: false,
+        sweep_depth_atr: '0.5',
+        ...evidence,
+      },
+      ...overrides,
+    }
+  }
+
+  it('draws the reach from the level to the penetration', () => {
+    // §4.6's sweep *is* the reach past the level. A dot on the level would be
+    // a touch, which is the one thing §4.6 spends its length separating this
+    // from -- so the two ends are asserted against the price scale, not the
+    // presence of a shape.
+    render(
+      <Chart candles={[candle(1)]} zones={[]} pools={[]} structure={[]} sweeps={[sweep()]} />,
+    )
+
+    const group = screen.getByTestId('sweep-p1-2026-08-17T01:00:00+00:00')
+    const reach = group.querySelector('.sweep__reach') as SVGLineElement
+    const wick = document.querySelector('.candle__wick') as SVGLineElement
+
+    // '110' is the candle's high and '105' sits between high and low, so the
+    // penetration end lands on the wick's top and the level end does not.
+    expect(reach.getAttribute('y2')).toBe(wick.getAttribute('y1'))
+    expect(reach.getAttribute('y1')).not.toBe(reach.getAttribute('y2'))
+  })
+
+  it('marks a reclaimed sweep as the contrary evidence it is', () => {
+    // §4.6: a reclaimed sweep argues against the setup. It is identical in
+    // geometry to one that held, so nothing but an explicit mark separates
+    // them.
+    render(
+      <Chart
+        candles={[candle(1)]}
+        zones={[]}
+        pools={[]}
+        structure={[]}
+        sweeps={[sweep({}, { reclaimed: true })]}
+      />,
+    )
+
+    const group = screen.getByTestId('sweep-p1-2026-08-17T01:00:00+00:00')
+
+    expect(group.getAttribute('data-reclaimed')).toBe('true')
+    expect(group.getAttribute('class')).toContain('sweep--reclaimed')
+    expect(screen.getByText(/reclaimed, contrary evidence/)).toBeDefined()
+  })
+
+  it('does not draw a pool transition that is not a sweep', () => {
+    // A pool also goes BROKEN and EXPIRED. Either rendered as a sweep would be
+    // a confident lie on the instrument used to verify the doctrine.
+    render(
+      <Chart
+        candles={[candle(1)]}
+        zones={[]}
+        pools={[]}
+        structure={[]}
+        sweeps={[sweep({ reason: 'two_candle_rejection_failed', to_state: 'BROKEN' })]}
+      />,
+    )
+
+    expect(document.querySelectorAll('[data-testid^="sweep-"]')).toHaveLength(0)
+  })
+
+  it('skips a transition missing one of its two prices', () => {
+    // A segment with one end guessed is worse than an absent one: it looks
+    // measured.
+    render(
+      <Chart
+        candles={[candle(1)]}
+        zones={[]}
+        pools={[]}
+        structure={[]}
+        sweeps={[sweep({}, { penetration_price: undefined })]}
+      />,
+    )
+
+    expect(document.querySelectorAll('[data-testid^="sweep-"]')).toHaveLength(0)
   })
 })

@@ -153,3 +153,33 @@
 .swing--external {
   fill-opacity: 0.9;
 }
+
+/* Sweeps (SLS §4.6). The reach from the resting level to the far edge of the
+   penetration -- drawn as a segment because that is what a sweep is. A dot on
+   the level would be a touch, which §4.6 spends its length separating this
+   from. */
+.sweep__reach {
+  stroke: var(--colour-sweep, #7c3aed);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.sweep__tip {
+  fill: var(--colour-sweep, #7c3aed);
+}
+
+/* §4.6 calls a reclaimed sweep "contrary evidence": the level was taken and
+   given back, so it argues against the setup. Dashed rather than merely paler
+   -- the difference is categorical, not a matter of degree, and a viewer who
+   cannot separate the two colours must still be able to separate the two
+   meanings. */
+.sweep--reclaimed .sweep__reach {
+  stroke-dasharray: 3 3;
+  stroke: var(--colour-sweep-reclaimed, #a78bfa);
+}
+
+.sweep--reclaimed .sweep__tip {
+  fill: none;
+  stroke: var(--colour-sweep-reclaimed, #a78bfa);
+  stroke-width: 1.5;
+}
