@@ -79,6 +79,39 @@ export interface LiquidityMap {
   readonly sweeps: readonly Sweep[]
 }
 
+export interface TargetBand {
+  readonly low: string
+  readonly high: string
+  readonly pool_id: string
+  readonly strength: string
+}
+
+/** One row of §18.4's live feed — the `summary` projection, ranked. */
+export interface FeedRow {
+  readonly rank: number
+  readonly signal_id: string
+  readonly symbol: string
+  readonly timeframe: string
+  readonly direction: string
+  readonly archetype: string
+  readonly grade: string
+  /** §9.1's recorded score. Does not move. */
+  readonly confidence: string
+  /** §9.3's decayed score. Moves with age. */
+  readonly display_rank: string
+  readonly age_candles: number
+  readonly entry: { readonly proximal: string; readonly distal: string }
+  readonly invalidation: string
+  readonly targets: {
+    readonly primary: TargetBand | null
+    readonly secondary: TargetBand | null
+  }
+  readonly published_at: string
+  readonly ttl_candles: number
+  readonly lifecycle_state: string | null
+  readonly versions: Versions
+}
+
 // §13. `freshness` is always present; `versions` only on doctrine-derived rows.
 export interface Freshness {
   readonly state: string
@@ -100,7 +133,17 @@ export interface Meta {
 export interface Envelope<T> {
   readonly data: T
   readonly meta: Meta
-  readonly page?: { readonly count: number; readonly has_more: boolean }
+  readonly page?: {
+    readonly count: number
+    readonly has_more: boolean
+    /**
+     * §18.4's denominator, before filtering. Optional because only the rows
+     * that carry one send it -- and typed as such rather than defaulted to a
+     * number, so a screen has to decide what it means when absent instead of
+     * being handed a zero it cannot distinguish from a real one.
+     */
+    readonly live_total?: number
+  }
 }
 
 export interface ApiError {
