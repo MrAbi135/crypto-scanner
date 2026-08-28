@@ -164,6 +164,41 @@ export interface UniverseSymbol {
   readonly first_seen_at: string
 }
 
+/** One stored series, as §18.3's status row sees it. */
+export interface FeedCoverage {
+  readonly symbol: string
+  readonly timeframe: string
+  /** NO_DATA, AWAITING_CLOSE or BEHIND. Not §2.12's freshness — see the API. */
+  readonly coverage: string
+  readonly newest_close: string
+  /** Zero while merely awaiting a close. Alongside the state, not instead. */
+  readonly candles_behind: number
+}
+
+/** One open ingest incident (§18.3's "degraded symbol-TFs"). */
+export interface DegradedFeed {
+  readonly id: string
+  readonly type: string
+  readonly symbol: string | null
+  readonly timeframe: string | null
+  readonly started_at: string
+  readonly candle_span: number | null
+}
+
+/** §18.3's status strip. */
+export interface PlatformStatus {
+  readonly feeds: readonly FeedCoverage[]
+  readonly behind_count: number
+  readonly degraded: readonly DegradedFeed[]
+  readonly degraded_count: number
+  /**
+   * What §18.3 asks for and this endpoint cannot answer, named by the server.
+   * Rendered, not dropped: a strip that silently shows two of four reads as a
+   * strip that checked all four and found nothing wrong.
+   */
+  readonly not_measured: readonly string[]
+}
+
 // §13. `freshness` is always present; `versions` only on doctrine-derived rows.
 export interface Freshness {
   readonly state: string
