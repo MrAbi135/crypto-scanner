@@ -18,6 +18,7 @@ import {
 } from '@services/api/client'
 import { currentSession } from '@services/api/session'
 import { Chart } from '@features/chart/Chart'
+import { EventTimeline } from '@features/chart/EventTimeline'
 import { EvidencePanel } from '@features/chart/EvidencePanel'
 import { SignIn } from '@features/chart/SignIn'
 import type { Inspection } from '@features/chart/inspection'
@@ -167,6 +168,10 @@ export function ChartScreen() {
           />
 
           <EvidencePanel inspection={inspection} onClose={() => setInspection(null)} />
+
+          {/* Everything the structure endpoint returned that the chart does
+              not draw. Fetched all along and discarded until now. */}
+          <EventTimeline events={loaded.structure} />
 
           {/* Provenance on screen, not buried in a network tab. A chart whose
               algo_version the viewer cannot see is a chart they cannot use to
