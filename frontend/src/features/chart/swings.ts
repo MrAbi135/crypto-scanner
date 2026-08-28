@@ -23,6 +23,19 @@ export interface SwingMarker {
 const SWING = /^SWING_(INTERNAL|EXTERNAL)_(HIGH|LOW)$/
 
 /**
+ * The marker key for an event, as one function.
+ *
+ * Exported because the chart needs to find the event behind a marker in order
+ * to inspect it, and `SwingMarker` deliberately does not carry the event --
+ * holding it would put `evidence.index`, the window-local number this overlay
+ * exists to avoid, back within reach. Two copies of the key formula would
+ * drift; one cannot.
+ */
+export function swingKey(event: StructureEvent): string {
+  return `${event.event_type}-${event.event_at}`
+}
+
+/**
  * Turn `SWING_*` events into markers, oldest first.
  *
  * **Positioned by `event_at` and never by the payload's `index`.** That index
@@ -60,7 +73,7 @@ export function swingMarkers(events: readonly StructureEvent[]): readonly SwingM
       price,
       strength: match[1] as SwingStrength,
       kind: match[2] as SwingKind,
-      key: `${event.event_type}-${event.event_at}`,
+      key: swingKey(event),
     })
   }
 

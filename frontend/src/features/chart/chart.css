@@ -183,3 +183,79 @@
   stroke: var(--colour-sweep-reclaimed, #a78bfa);
   stroke-width: 1.5;
 }
+
+/* Selection. Announced through `aria-pressed` and shown here -- one channel
+   for a screen reader, one for everyone else, and neither standing in for the
+   other. */
+.is-selected {
+  stroke: var(--colour-selected, #111827);
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+}
+
+[role='button']:focus-visible {
+  outline: 2px solid var(--colour-focus, #111827);
+  outline-offset: 2px;
+}
+
+/* The evidence panel. Deliberately a table: these are label/value facts, a
+   screen reader can navigate them by row, and §15.2 wants the evidence
+   readable rather than pretty. */
+.evidence {
+  border: 1px solid var(--colour-border, #d1d5db);
+  padding: 0.75rem 1rem;
+  margin-top: 1rem;
+  font-size: 0.875rem;
+}
+
+.evidence--empty {
+  color: var(--colour-muted, #6b7280);
+}
+
+.evidence__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.evidence__title {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.evidence__table {
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+  width: 100%;
+}
+
+.evidence__caption {
+  text-align: left;
+  font-weight: 600;
+  padding-top: 0.5rem;
+}
+
+.evidence__table th,
+.evidence__table td {
+  text-align: left;
+  padding: 0.15rem 0.5rem 0.15rem 0;
+  vertical-align: top;
+}
+
+.evidence__table th {
+  font-weight: 400;
+  color: var(--colour-muted, #6b7280);
+  white-space: nowrap;
+}
+
+/* Monospaced so a decimal string is read as the exact value it is. */
+.evidence__value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+}
+
+.evidence__none {
+  color: var(--colour-muted, #6b7280);
+  margin: 0.5rem 0 0;
+}

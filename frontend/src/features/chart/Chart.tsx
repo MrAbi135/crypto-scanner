@@ -2,6 +2,8 @@
 // thing being verified here, and a library that owns the coordinate space
 // would put the part that must be trustworthy behind an abstraction.
 
+import type { KeyboardEvent } from 'react'
+
 import type { Candle, Pool, StructureEvent, Sweep, Zone } from '@entities/market/types'
 import {
   bodyRect,
@@ -12,8 +14,15 @@ import {
   xForTime,
   type Viewport,
 } from '@features/chart/scale'
-import { sweepMarkers } from '@features/chart/sweeps'
-import { swingMarkers } from '@features/chart/swings'
+import {
+  inspectPool,
+  inspectSweep,
+  inspectSwing,
+  inspectZone,
+  type Inspection,
+} from '@features/chart/inspection'
+import { sweepKey, sweepMarkers } from '@features/chart/sweeps'
+import { swingKey, swingMarkers } from '@features/chart/swings'
 
 const VIEWPORT: Viewport = { width: 1200, height: 600, padding: 24 }
 
@@ -23,9 +32,20 @@ export interface ChartProps {
   readonly pools: readonly Pool[]
   readonly structure: readonly StructureEvent[]
   readonly sweeps: readonly Sweep[]
+  /** Optional: a chart with no inspector is still a chart. */
+  readonly onInspect?: (inspection: Inspection) => void
+  readonly selectedId?: string | null
 }
 
-export function Chart({ candles, zones, pools, structure, sweeps }: ChartProps) {
+export function Chart({
+  candles,
+  zones,
+  pools,
+  structure,
+  sweeps,
+  onInspect,
+  selectedId = null,
+}: ChartProps) {
   if (candles.length === 0) {
     // Not an error state and not a blank frame. "No candles" and "the engine
     // found nothing" look identical on an empty chart, and they mean opposite
@@ -45,6 +65,45 @@ export function Chart({ candles, zones, pools, structure, sweeps }: ChartProps) 
   const { shown, clipped } = visibleZones(zones, price)
   const swings = swingMarkers(structure)
   const taken = sweepMarkers(sweeps)
+
+  // Source objects by marker key. The markers do not carry them on purpose --
+  // see `swingKey` -- and inspection needs the whole recorded row.
+  const swingSource = new Map(structure.map((event) => [swingKey(event), event]))
+  const sweepSource = new Map(sweeps.map((sweep) => [sweepKey(sweep), sweep]))
+
+  /**
+   * Make an overlay answer for itself.
+   *
+   * It deliberately returns no `className`. Each overlay writes its own after
+   * this spread, so one here would be overwritten -- selection would reach a
+   * screen reader through `aria-pressed` and be invisible to everyone else.
+   * `selected()` below is what the overlays compose in.
+   *
+   * `role` and `tabIndex` rather than a click handler alone: these are SVG
+   * shapes, which are not focusable and not announced, so a mouse would be the
+   * only way to reach the evidence. S13a's DoD asks for an axe-clean screen,
+   * and an inspector only a mouse can open is not one.
+   */
+  const selectable = (inspection: Inspection) =>
+    onInspect === undefined
+      ? {}
+      : {
+          role: 'button' as const,
+          tabIndex: 0,
+          'aria-label': inspection.title,
+          'aria-pressed': selectedId === inspection.id,
+          onClick: () => onInspect(inspection),
+          onKeyDown: (event: KeyboardEvent) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return
+
+            // Space scrolls the page otherwise, which moves the chart out from
+            // under the thing the reader just selected.
+            event.preventDefault()
+            onInspect(inspection)
+          },
+        }
+
+  const selected = (id: string) => (selectedId === id ? ' is-selected' : '')
 
   return (
     <>
@@ -74,6 +133,7 @@ export function Chart({ candles, zones, pools, structure, sweeps }: ChartProps) 
             return (
               <rect
                 key={zone.zone_id}
+                {...selectable(inspectZone(zone))}
                 data-testid={`zone-${zone.zone_id}`}
                 data-zone-type={zone.zone_type}
                 data-state={zone.state}
@@ -83,7 +143,7 @@ export function Chart({ candles, zones, pools, structure, sweeps }: ChartProps) 
                 height={Math.max(1, bottom - top)}
                 className={`zone zone--${zone.polarity.toLowerCase()}${
                   zone.stale_context ? ' zone--stale' : ''
-                }`}
+                }${selected(`zone:${zone.zone_id}`)}`}
               />
             )
           })}
@@ -93,13 +153,14 @@ export function Chart({ candles, zones, pools, structure, sweeps }: ChartProps) 
           {pools.map((pool) => (
             <line
               key={pool.pool_id}
+              {...selectable(inspectPool(pool))}
               data-testid={`pool-${pool.pool_id}`}
               data-side={pool.side}
               x1={VIEWPORT.padding}
               x2={VIEWPORT.width - VIEWPORT.padding}
               y1={price.y(pool.price)}
               y2={price.y(pool.price)}
-              className={`pool pool--${pool.side.toLowerCase()}`}
+              className={`pool pool--${pool.side.toLowerCase()}${selected(`pool:${pool.pool_id}`)}`}
             />
           ))}
         </g>
@@ -110,16 +171,18 @@ export function Chart({ candles, zones, pools, structure, sweeps }: ChartProps) 
         <g data-testid="sweeps">
           {taken.map((sweep) => {
             const x = xForTime(candles, sweep.at, VIEWPORT, time)
+            const source = sweepSource.get(sweep.key)
 
             return (
               <g
                 key={sweep.key}
+                {...(source === undefined ? {} : selectable(inspectSweep(source, sweep)))}
                 data-testid={`sweep-${sweep.key}`}
                 data-side={sweep.side}
                 data-reclaimed={String(sweep.reclaimed)}
                 className={`sweep sweep--${sweep.side.toLowerCase()}${
                   sweep.reclaimed ? ' sweep--reclaimed' : ''
-                }`}
+                }${selected(`sweep:${sweep.key}`)}`}
               >
                 {/* Level to penetration. §4.6's sweep *is* the reach past the
                     level, so a dot on the level would be a touch. */}
@@ -179,9 +242,12 @@ export function Chart({ candles, zones, pools, structure, sweeps }: ChartProps) 
             // which, and neither is hidden behind the other.
             const radius = swing.strength === 'EXTERNAL' ? 5 : 3
 
+            const source = swingSource.get(swing.key)
+
             return (
               <circle
                 key={swing.key}
+                {...(source === undefined ? {} : selectable(inspectSwing(source, swing)))}
                 data-testid={`swing-${swing.key}`}
                 data-kind={swing.kind}
                 data-strength={swing.strength}
@@ -189,7 +255,7 @@ export function Chart({ candles, zones, pools, structure, sweeps }: ChartProps) 
                 cx={cx}
                 cy={cy}
                 r={radius}
-                className={`swing swing--${swing.kind.toLowerCase()} swing--${swing.strength.toLowerCase()}`}
+                className={`swing swing--${swing.kind.toLowerCase()} swing--${swing.strength.toLowerCase()}${selected(`swing:${swing.key}`)}`}
               >
                 <title>
                   {`${swing.strength} ${swing.kind} at ${swing.price} (${swing.at})`}

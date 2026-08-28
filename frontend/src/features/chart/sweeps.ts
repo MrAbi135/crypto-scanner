@@ -47,6 +47,11 @@ export interface SweepMarker {
  * A transition missing either price is skipped rather than half-drawn. A
  * segment with one end guessed is worse than an absent one: it looks measured.
  */
+/** The marker key for a transition. See `swingKey` for why it is a function. */
+export function sweepKey(sweep: Sweep): string {
+  return `${sweep.pool_id}-${sweep.transitioned_at}`
+}
+
 export function sweepMarkers(sweeps: readonly Sweep[]): readonly SweepMarker[] {
   const markers: SweepMarker[] = []
 
@@ -77,7 +82,7 @@ export function sweepMarkers(sweeps: readonly Sweep[]): readonly SweepMarker[] {
       reclaimed: row.reclaimed !== false,
       depthAtr: decimal(row.sweep_depth_atr),
       poolId: sweep.pool_id,
-      key: `${sweep.pool_id}-${sweep.transitioned_at}`,
+      key: sweepKey(sweep),
     })
   }
 

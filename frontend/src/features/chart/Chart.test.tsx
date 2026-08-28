@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { Candle, Pool, StructureEvent, Sweep, Zone } from '@entities/market/types'
 import { Chart } from './Chart'
@@ -375,5 +375,94 @@ describe('Chart sweeps', () => {
     )
 
     expect(document.querySelectorAll('[data-testid^="sweep-"]')).toHaveLength(0)
+  })
+})
+
+describe('Chart inspection', () => {
+  const swingEvent: StructureEvent = {
+    event_type: 'SWING_EXTERNAL_HIGH',
+    event_at: '2026-08-17T01:00:00+00:00',
+    algo_version: 's4-v8',
+    evidence: { price: '110', index: 400 },
+  }
+
+  function withInspector(onInspect: () => void, selectedId: string | null = null) {
+    return render(
+      <Chart
+        candles={[candle(1)]}
+        zones={[zone('z1')]}
+        pools={[]}
+        structure={[swingEvent]}
+        sweeps={[]}
+        onInspect={onInspect}
+        selectedId={selectedId}
+      />,
+    )
+  }
+
+  it('opens the evidence from the keyboard, not only the mouse', () => {
+    // These are SVG shapes: not focusable and not announced unless made so.
+    // S13a's DoD asks for an axe-clean screen, and an inspector only a mouse
+    // can reach is not one.
+    const onInspect = vi.fn()
+
+    withInspector(onInspect)
+
+    const marker = screen.getByTestId('zone-z1')
+
+    expect(marker.getAttribute('tabindex')).toBe('0')
+    expect(marker.getAttribute('role')).toBe('button')
+
+    fireEvent.keyDown(marker, { key: 'Enter' })
+    fireEvent.keyDown(marker, { key: ' ' })
+
+    expect(onInspect).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores a key that is not an activation', () => {
+    const onInspect = vi.fn()
+
+    withInspector(onInspect)
+
+    fireEvent.keyDown(screen.getByTestId('zone-z1'), { key: 'ArrowRight' })
+
+    expect(onInspect).not.toHaveBeenCalled()
+  })
+
+  it('hands over the object that was activated', () => {
+    const onInspect = vi.fn()
+
+    withInspector(onInspect)
+
+    fireEvent.click(screen.getByTestId(`swing-${swingEvent.event_type}-${swingEvent.event_at}`))
+
+    expect(onInspect).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'swing', id: expect.stringContaining('swing:') }),
+    )
+  })
+
+  it('shows the selection as well as announcing it', () => {
+    // `aria-pressed` alone reaches a screen reader and nobody else. An earlier
+    // draft set the class inside the shared props helper, where each overlay's
+    // own className -- written after the spread -- silently overwrote it.
+    withInspector(vi.fn(), 'zone:z1')
+
+    const marker = screen.getByTestId('zone-z1')
+
+    expect(marker.getAttribute('aria-pressed')).toBe('true')
+    expect(marker.getAttribute('class')).toContain('is-selected')
+  })
+
+  it('is inert when no inspector is wired', () => {
+    // The chart is still a chart without one, and a focusable shape that does
+    // nothing on activation is worse than a plain one.
+    render(
+      <Chart candles={[candle(1)]} zones={[zone('z1')]} pools={[]} structure={[]} sweeps={[]} />,
+    )
+
+    const marker = screen.getByTestId('zone-z1')
+
+    expect(marker.getAttribute('tabindex')).toBeNull()
+    expect(marker.getAttribute('role')).toBeNull()
   })
 })
