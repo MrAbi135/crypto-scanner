@@ -1,0 +1,30 @@
+/* Shell chrome. Tokens only; the design system is S13. */
+
+.app__title {
+  font-size: 1rem;
+  margin: 0.75rem 1rem;
+}
+
+.app__views {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0 1rem;
+  border-bottom: 1px solid var(--colour-border, #e5e7eb);
+}
+
+.app__view {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+/* The selected tab carries an underline as well as `aria-selected` -- one
+   channel for a screen reader, one for everyone else, and neither standing in
+   for the other. */
+.app__view--on {
+  border-bottom-color: var(--colour-tab-on, #111827);
+  font-weight: 600;
+}
