@@ -113,19 +113,15 @@ triage_violations "E. archetype term never met|A1|foo|10|10" > "$OUT"
 check "a CRLF acknowledgement still matches" "0" "$problems"
 rm -f "$ACK_FILE"
 
-# 9. The file that ships. Its patterns contain `|`, which is also the field
-#    separator, and a naive split would truncate every one of them into
-#    something that matches nothing -- silently, and only on the host.
-#
-#     Both lines are fed, because an acknowledgement that matches nothing fires
-#     -- so this doubles as the check that the shipped file has no stale entry
-#     left in it. When one of these is deployed and its line deleted, delete
-#     the matching violation here too and this stays honest.
+# 9. The file that ships is EMPTY of acknowledgements (comments only), which
+#    is the healthy steady state: a violation fed against it counts, and no
+#    stale-acknowledgement alarm fires on an empty file. When a real entry is
+#    added again, extend this to feed its violation too -- the paired test
+#    below is the template.
 ACK_FILE=ops/soak/acknowledged.txt
 problems=0
-triage_violations "I. pool strength component cannot vary|touches|1412|0" > "$OUT"
-check "the shipped file's own patterns match, and none is stale" "0" "$problems"
-
+triage_violations "E. some new violation|X|9|9" > "$OUT"
+check "the shipped file acknowledges nothing" "1" "$problems"
 echo
 echo "check labels vs the row pattern"
 

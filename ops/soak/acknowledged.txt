@@ -24,4 +24,3 @@
 # The pattern is matched against the whole violation line as a fixed substring.
 
 
-I. pool strength component cannot vary|touches | 2026-09-05 | §4.2's `touches` was a hardcoded 0 at both pool-construction sites, so a quarter of the strength score could not vary. Fixed in PR #179, merged 2026-08-28, not yet deployed: the engine is mid-soak until 2026-08-29 11:06Z. This check is the one that found it. Delete this line after the deploy proves the component varies.
