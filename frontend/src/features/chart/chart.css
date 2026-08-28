@@ -289,3 +289,64 @@
 .screen__signout {
   margin-left: auto;
 }
+
+/* §21.5's event timeline. */
+.timeline {
+  margin-top: 1rem;
+  border-top: 1px solid var(--colour-border, #e5e7eb);
+  padding-top: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.timeline__header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.timeline__title {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.timeline__list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+}
+
+.timeline__entry {
+  border-left: 3px solid var(--colour-border, #e5e7eb);
+  padding: 0.15rem 0 0.15rem 0.6rem;
+  margin-bottom: 0.15rem;
+}
+
+/* The class is carried by the border and by the type text, which is verbatim.
+   Colour alone would make a break and a label the same row to anyone who
+   cannot separate the hues. */
+.timeline__entry--break {
+  border-left-color: var(--colour-break, #b91c1c);
+}
+
+.timeline__entry--shift {
+  border-left-color: var(--colour-shift, #7c3aed);
+}
+
+.timeline__entry--label {
+  border-left-color: var(--colour-label, #6b7280);
+}
+
+.timeline__entry time {
+  color: var(--colour-muted, #6b7280);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.timeline__type {
+  font-weight: 600;
+}
+
+.timeline__none {
+  color: var(--colour-muted, #6b7280);
+  margin: 0.25rem 0 0;
+}

@@ -93,6 +93,13 @@ const SWING = {
   evidence: { price: '120', index: 400, kind: 'HIGH', strength: 'EXTERNAL' },
 }
 
+const BREAK = {
+  event_type: 'BOS_UP',
+  event_at: '2026-08-17T01:00:00+00:00',
+  algo_version: 's4-v8',
+  evidence: { swing_price: '118', break_index: 400, candle_close: '120' },
+}
+
 const META = {
   generated_at: '2026-08-17T02:00:00+00:00',
   freshness: { state: 'RECORDED', observed_at: '2026-08-17T02:00:00+00:00' },
@@ -107,7 +114,7 @@ function respond(url: string) {
   if (url.includes('/market/candles')) return envelope(CANDLES)
   if (url.includes('/zones')) return envelope([ZONE])
   if (url.includes('/liquidity')) return envelope({ pools: [POOL], sweeps: [SWEEP] })
-  if (url.includes('/structure')) return envelope([SWING])
+  if (url.includes('/structure')) return envelope([SWING, BREAK])
 
   throw new Error(`unstubbed request: ${url}`)
 }
@@ -238,5 +245,46 @@ describe('ChartScreen', () => {
 
     expect(screen.getByTestId('signin')).toBeDefined()
     expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('ChartScreen event timeline', () => {
+  it('shows what the chart cannot draw', async () => {
+    // A BOS has no shape on the price. The structure endpoint has always
+    // returned it and the screen has always thrown it away.
+    render(<ChartScreen />)
+
+    const timeline = await screen.findByTestId('timeline')
+
+    expect(timeline.textContent).toContain('BOS_UP')
+  })
+
+  it('names the event type verbatim', async () => {
+    // This screen is checked against the SLS. A reader matching `BOS_UP` to
+    // §3.5 cannot do it if the row says "Break upward".
+    render(<ChartScreen />)
+
+    await screen.findByTestId('timeline')
+
+    expect(screen.getByText('BOS_UP')).toBeDefined()
+  })
+
+  it('does not repeat the swings the chart already draws', async () => {
+    render(<ChartScreen />)
+
+    const timeline = await screen.findByTestId('timeline')
+
+    expect(timeline.textContent).not.toContain('SWING_EXTERNAL_HIGH')
+  })
+
+  it('opens the evidence the engine stored for an event', async () => {
+    render(<ChartScreen />)
+
+    const timeline = await screen.findByTestId('timeline')
+    const summary = timeline.querySelector('summary') as HTMLElement
+
+    summary.click()
+
+    await waitFor(() => expect(timeline.textContent).toContain('candle_close'))
   })
 })
