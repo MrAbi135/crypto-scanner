@@ -1,0 +1,137 @@
+/* S14's board (Blueprint §21.4). Tokens only -- the design system is S13. */
+
+.scanner {
+  padding: 1rem;
+}
+
+.scanner__header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.scanner__title {
+  font-size: 1.125rem;
+  margin: 0;
+}
+
+.scanner__freshness {
+  margin-left: auto;
+  color: var(--colour-muted, #6b7280);
+  font-size: 0.8125rem;
+}
+
+.scanner__board {
+  border-collapse: collapse;
+  width: 100%;
+  margin-top: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.scanner__caption {
+  text-align: left;
+  color: var(--colour-muted, #6b7280);
+  padding-bottom: 0.5rem;
+}
+
+.scanner__board th,
+.scanner__board td {
+  text-align: left;
+  padding: 0.35rem 0.75rem 0.35rem 0;
+  vertical-align: top;
+  border-bottom: 1px solid var(--colour-border, #e5e7eb);
+}
+
+/* C1: 32px dense scanner unit. */
+.signal {
+  height: 2rem;
+}
+
+.signal__symbol {
+  font-weight: 600;
+}
+
+.signal__tf {
+  color: var(--colour-muted, #6b7280);
+  font-weight: 400;
+  margin-left: 0.35rem;
+}
+
+.signal__direction--up {
+  color: var(--colour-long, #15803d);
+}
+
+.signal__direction--down {
+  color: var(--colour-short, #b91c1c);
+}
+
+/* C4. Letter plus colour, and the letter is the value -- colour alone would
+   carry the grade to nobody who cannot separate the hues. */
+.grade {
+  font-weight: 700;
+  padding: 0 0.35rem;
+  border: 1px solid currentColor;
+}
+
+.grade--s { color: var(--colour-grade-s, #7c3aed); }
+.grade--a { color: var(--colour-grade-a, #15803d); }
+.grade--b { color: var(--colour-grade-b, #a16207); }
+
+/* C3. Single-hue bar, number beside it, never a bar alone. */
+.meter {
+  display: inline-block;
+  width: 5rem;
+  height: 0.5rem;
+  background: var(--colour-meter-track, #e5e7eb);
+  vertical-align: middle;
+}
+
+.meter__fill {
+  height: 100%;
+  background: var(--colour-meter, #2563eb);
+}
+
+.meter__value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-left: 0.4rem;
+}
+
+.meter__recorded {
+  color: var(--colour-muted, #6b7280);
+  margin-left: 0.4rem;
+  font-size: 0.75rem;
+}
+
+.signal__ladder dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0 0.5rem;
+}
+
+.signal__ladder dt {
+  color: var(--colour-muted, #6b7280);
+}
+
+.signal__ladder dd {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* §21.19. Never failure red, never urgent -- an empty board here is the
+   doctrine working, and the page should read that way. */
+.quiet {
+  max-width: 32rem;
+  margin: 3rem auto;
+  text-align: center;
+}
+
+.quiet__reason {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+
+.quiet__context {
+  color: var(--colour-muted, #6b7280);
+  margin: 0 0 1rem;
+}

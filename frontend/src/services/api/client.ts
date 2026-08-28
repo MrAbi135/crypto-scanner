@@ -12,6 +12,7 @@ import type {
   ApiError,
   Candle,
   Envelope,
+  FeedRow,
   LiquidityMap,
   StructureEvent,
   Zone,
@@ -54,6 +55,13 @@ async function request<T>(path: string, params: Record<string, string>): Promise
   }
 
   return body as Envelope<T>
+}
+
+export function fetchFeed(): Promise<Envelope<readonly FeedRow[]>> {
+  // No parameters. §18.4 fixes the sort and §9.2 is a total order, so there is
+  // nothing here for a caller to reorder; filters arrive in a later piece and
+  // will be the server's, not a client-side narrowing of what it sent.
+  return request<readonly FeedRow[]>('/scanner/feed', {})
 }
 
 export function fetchCandles(
