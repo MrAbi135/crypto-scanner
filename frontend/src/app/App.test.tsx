@@ -55,7 +55,23 @@ function stubFetch(rows: readonly unknown[]) {
       const url = String(input)
       const data = url.includes('/scanner/feed')
         ? rows
-        : url.includes('/dashboard/status')
+        : url.includes('/evidence')
+          ? {
+              signal_id: 'sig-1',
+              symbol: 'ETHUSDT',
+              timeframe: 'H1',
+              evidence_ids: [],
+              entry_zone_id: null,
+              confidence: { final: '75', grade: 'B', factors: { F1: '70' } },
+              reason: null,
+              htf_chain: {},
+              risk: {},
+            }
+          : url.includes('/transitions')
+            ? []
+            : /\/signals\/[^/]+$/.test(url.split('?')[0] ?? '')
+              ? FEED_ROW
+              : url.includes('/dashboard/status')
           ? {
               feeds: [],
               behind_count: 0,
@@ -262,6 +278,25 @@ describe('App shell', () => {
     await waitFor(() =>
       expect((screen.getByLabelText('Symbol') as HTMLInputElement).value).toBe('ETHUSDT'),
     )
+  })
+
+  it('opens a signal’s detail from its feed row, and the address follows', async () => {
+    // J2's second joint: feed row → the conviction surface. Before this the
+    // factor breakdown existed on the server and nothing could reach it.
+    render(<App />)
+
+    fireEvent.click(await screen.findByTestId('detail-sig-1'))
+
+    await waitFor(() => expect(window.location.pathname).toBe('/signal/sig-1'))
+    expect(await screen.findByTestId('signal-screen')).toBeDefined()
+  })
+
+  it('opens the signal the address names', async () => {
+    window.history.replaceState(null, '', '/signal/sig-1')
+
+    render(<App />)
+
+    expect(await screen.findByTestId('signal-screen')).toBeDefined()
   })
 
   it('says which view is selected, in both channels', async () => {
