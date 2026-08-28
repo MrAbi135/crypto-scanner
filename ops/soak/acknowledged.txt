@@ -1,0 +1,26 @@
+# Violations that are known, understood, and already being fixed.
+#
+# **This file makes an hourly alarm quieter. That is a dangerous thing to do,
+# so it is deliberately hard to leave lying around.** An acknowledgement here
+# does three things and every one of them is a check in its own right:
+#
+#   1. The violation is still printed, marked `~~ known`, with this file's
+#      reason beside it. It is never hidden.
+#   2. It stops counting toward the exit code only until its `until` date.
+#      After that it fires again, as "acknowledgement expired" -- because a fix
+#      that has not landed in the time it was given is news.
+#   3. If it matches nothing on a run, *that* fires. A stale acknowledgement is
+#      the worst outcome here: the defect is gone, nobody deleted the line, and
+#      the day the defect returns the alarm stays silent. An acknowledgement
+#      that stops matching must be deleted, and this makes deleting it the only
+#      way to get a clean run.
+#
+# This is not `rare_by_doctrine` in invariants.sql. That list says "doctrine
+# says this is rare, so absence is correct". This one says "this is wrong, we
+# know why, and the fix is in flight". Never move a row from here to there to
+# make it quiet.
+#
+# Format: pattern | until (UTC date) | why
+# The pattern is matched against the whole violation line as a fixed substring.
+
+E. archetype term never met|A1|mss_origin_zone_retested | 2026-09-05 | §3.6 MSS spans were compared on window-local indices, so the retest test could never pass. Fixed in PR #148, merged 2026-08-27, not yet deployed: the engine is mid-soak until 2026-08-29 11:06Z and only an engine deploy resets that clock. Delete this line after the deploy proves the count falls.
