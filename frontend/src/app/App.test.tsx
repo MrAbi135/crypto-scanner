@@ -32,6 +32,11 @@ const FEED_ROW = {
 }
 
 beforeEach(() => {
+  // The shell reads the address, and `pushState` in one test is still there in
+  // the next -- jsdom keeps one Location per file. Without this reset the
+  // second test in the file starts wherever the first navigated to.
+  window.history.replaceState(null, '', '/')
+
   setSession({
     accessToken: 't',
     userId: 'u1',
@@ -173,6 +178,86 @@ describe('App shell', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Live feed' }))
     fireEvent.click(await screen.findByTestId('open-sig-1'))
+
+    await waitFor(() =>
+      expect((screen.getByLabelText('Symbol') as HTMLInputElement).value).toBe('ETHUSDT'),
+    )
+  })
+
+  it('puts the screen in the address bar', async () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Rankings' }))
+
+    await waitFor(() => expect(window.location.pathname).toBe('/rankings'))
+  })
+
+  it('opens on the screen the address names', async () => {
+    // The half that makes a link worth sending. Writing to the address bar
+    // without reading from it is a URL that only ever describes where somebody
+    // else already was.
+    window.history.replaceState(null, '', '/universe')
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Universe' })).toBeDefined()
+  })
+
+  it('opens the chart on the context the address names', async () => {
+    window.history.replaceState(null, '', '/chart/ETHUSDT/H4')
+
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByLabelText('Symbol')).toBeDefined())
+
+    expect((screen.getByLabelText('Symbol') as HTMLInputElement).value).toBe('ETHUSDT')
+    expect((screen.getByLabelText('Timeframe') as HTMLSelectElement).value).toBe('H4')
+  })
+
+  it('follows the chart’s own context into the address bar', async () => {
+    render(<App />)
+
+    fireEvent.click(await screen.findByTestId('open-sig-1'))
+
+    await waitFor(() => expect(window.location.pathname).toBe('/chart/ETHUSDT/H1'))
+
+    fireEvent.change(screen.getByLabelText('Symbol'), { target: { value: 'SOLUSDT' } })
+
+    await waitFor(() => expect(window.location.pathname).toBe('/chart/SOLUSDT/H1'))
+  })
+
+  it('goes back', async () => {
+    // The whole reason to write to the address bar. A `pushState` with no
+    // `popstate` listener fills the history stack with entries that do nothing
+    // when the reader returns to them -- worse than no history, because the
+    // button looks like it works.
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Rankings' }))
+
+    await waitFor(() => expect(window.location.pathname).toBe('/rankings'))
+
+    window.history.back()
+
+    // jsdom dispatches popstate asynchronously.
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Live feed' })).toBeDefined())
+  })
+
+  it('takes the chart back to the context it came from', async () => {
+    // The case the chart's own state would break: it seeds from `openOn` and
+    // then owns the value, so a history entry arriving from outside has to
+    // re-seed it or the address and the screen part company.
+    window.history.replaceState(null, '', '/chart/ETHUSDT/H4')
+
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByLabelText('Symbol')).toBeDefined())
+
+    fireEvent.change(screen.getByLabelText('Symbol'), { target: { value: 'SOLUSDT' } })
+
+    await waitFor(() => expect(window.location.pathname).toBe('/chart/SOLUSDT/H4'))
+
+    window.history.back()
 
     await waitFor(() =>
       expect((screen.getByLabelText('Symbol') as HTMLInputElement).value).toBe('ETHUSDT'),
