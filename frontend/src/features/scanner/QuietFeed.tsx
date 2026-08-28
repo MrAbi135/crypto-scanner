@@ -24,6 +24,8 @@ export interface QuietFeedProps {
   readonly liveTotal: number
   /** Whether the emptiness could be the reader's own filter. */
   readonly filtered: boolean
+  /** What is switched on, for the context line to name (§21.19). */
+  readonly filterSummary?: string
   readonly onShowFloors: () => void
   readonly onClearFilter: () => void
 }
@@ -31,6 +33,7 @@ export interface QuietFeedProps {
 export function QuietFeed({
   liveTotal,
   filtered,
+  filterSummary,
   onShowFloors,
   onClearFilter,
 }: QuietFeedProps) {
@@ -48,7 +51,10 @@ export function QuietFeed({
 
       <p className="quiet__context">
         {hiddenByFilter
-          ? `${liveTotal} signal${liveTotal === 1 ? ' is' : 's are'} live and hidden by it.`
+          ? // §21.19: "state the filter, offer clear". Naming it is the
+            // difference between a user knowing what to undo and guessing.
+            `${liveTotal} signal${liveTotal === 1 ? ' is' : 's are'} live` +
+              `${filterSummary === undefined || filterSummary === '' ? '' : `, hidden by ${filterSummary}`}.`
           : 'Nothing is live. Silence is the doctrine holding, not the scanner failing — §8.6 publishes a setup only above its archetype floor.'}
       </p>
 
