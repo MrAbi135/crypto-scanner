@@ -6,6 +6,7 @@ Every error leaving the API is built here, so the closed code enum and the
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import structlog
@@ -124,6 +125,30 @@ def not_found(request: Request, message: str) -> HTTPException:
     )
 
 
+def _with_budget(
+    request: Request,
+    headers: Mapping[str, str] | None,
+) -> dict[str, str] | None:
+    """§11's budget on an error response too.
+
+    The rate-limit dependency sets these on the injected `Response`, which
+    FastAPI carries onto a served reply and nowhere else -- an endpoint that
+    raises is rendered here, from a fresh response that never saw it. §11 says
+    "every response carries" the budget, and a 401 is a response; a client
+    refused for one reason should not have to guess whether it is also near
+    the other limit.
+
+    The exception's own headers win. `WWW-Authenticate` on a 401 is required by
+    RFC 6750 and is not ours to overwrite.
+    """
+    budget = getattr(request.state, "rate_limit_headers", None)
+
+    if not budget:
+        return dict(headers) if headers else None
+
+    return {**budget, **(dict(headers) if headers else {})}
+
+
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(HTTPException)
     async def _http_error(request: Request, exc: HTTPException) -> JSONResponse:
@@ -147,7 +172,7 @@ def install_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=payload,
-            headers=exc.headers,
+            headers=_with_budget(request, exc.headers),
         )
 
     @app.exception_handler(QueryRejectedError)
@@ -161,7 +186,11 @@ def install_error_handlers(app: FastAPI) -> None:
         """
         rejection = semantic_rejection(request, exc.message, field=exc.field)
 
-        return JSONResponse(status_code=422, content=rejection.detail)
+        return JSONResponse(
+            status_code=422,
+            content=rejection.detail,
+            headers=_with_budget(request, None),
+        )
 
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:

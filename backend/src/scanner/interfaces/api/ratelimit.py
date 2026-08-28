@@ -285,7 +285,16 @@ def enforce_rate_limit(request: Request, response: Response) -> None:
     limit = FREE_PER_MINUTE[limit_class]
     decision = store.take(f"{caller_key(request)}|{limit_class}", limit=limit, now=now)
 
-    response.headers.update(decision.headers(now))
+    headers = decision.headers(now)
+
+    response.headers.update(headers)
+
+    # Also on `request.state`, because the headers just set on `response` are
+    # only carried onto a *served* reply. A row that raises -- a 401 from
+    # `require_user`, a 422 from a bad filter -- is rendered by the exception
+    # handler, which builds a fresh response and never sees this one. §11 says
+    # every response carries the budget, and those are responses.
+    request.state.rate_limit_headers = headers
 
     if not decision.allowed:
         raise HTTPException(
