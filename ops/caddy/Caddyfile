@@ -15,9 +15,18 @@
 		-Server
 	}
 
-	# Internal endpoints are never publicly routable.
-	@internal path /internal/*
-	respond @internal 403
+	# API Spec §18.18: internal endpoints are never publicly routable.
+	#
+	# Inside a `handle` block, not a bare `respond` with a matcher. Caddy orders
+	# directives rather than reading them top to bottom, and `handle` runs
+	# before `respond` -- so the catch-all `handle` below matched
+	# `/internal/metrics` first, proxied it, and the guard never ran. Verified
+	# against the running host: 200 before, 403 after. `handle` blocks are
+	# mutually exclusive and evaluated in written order, which is the property
+	# this needs.
+	handle /internal/* {
+		respond 403
+	}
 
 	# Request body limit (abuse guard).
 	request_body {
