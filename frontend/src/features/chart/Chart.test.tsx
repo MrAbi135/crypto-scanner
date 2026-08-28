@@ -130,7 +130,7 @@ describe('Chart', () => {
     // "1 of 1 in view" rather than "1 zones": when objects are clipped for
     // being outside the price range, a screen-reader user has to hear that
     // too, or the chart quietly under-reports what the engine found.
-    expect(screen.getByRole('img').getAttribute('aria-label')).toBe(
+    expect(screen.getByRole('group').getAttribute('aria-label')).toBe(
       'Price chart with 1 candles, 1 of 1 zones in view, 1 liquidity pools, 0 swings and 0 sweeps',
     )
   })

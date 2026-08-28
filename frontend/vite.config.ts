@@ -13,6 +13,10 @@ export default defineConfig({
       '@entities': fileURLToPath(new URL('./src/entities', import.meta.url)),
       '@services': fileURLToPath(new URL('./src/services', import.meta.url)),
       '@shared': fileURLToPath(new URL('./src/shared', import.meta.url)),
+      // Test-only helpers. Aliased because the lint rule forbids deep
+      // relative imports, and `src/test` is not one of the architectural
+      // layers `boundaries` governs -- it is scaffolding for the ones that are.
+      '@test': fileURLToPath(new URL('./src/test', import.meta.url)),
     },
   },
   server: {

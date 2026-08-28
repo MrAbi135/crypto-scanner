@@ -115,7 +115,13 @@ export function Chart({
       <svg
         viewBox={`0 0 ${VIEWPORT.width} ${VIEWPORT.height}`}
         className="chart"
-        role="img"
+        // `group`, not `img`. An `img` is a single indivisible picture, and
+        // the overlays inside this one are focusable buttons -- axe calls that
+        // `nested-interactive`, and it is right: a reader told "image" has no
+        // way to understand why there are controls inside it. A labelled group
+        // is what this actually is, in both modes; without an inspector it is
+        // a group whose children happen to be inert.
+        role="group"
         aria-label={`Price chart with ${candles.length} candles, ${shown.length} of ${zones.length} zones in view, ${pools.length} liquidity pools, ${swings.length} swings and ${taken.length} sweeps`}
         data-testid="chart"
       >

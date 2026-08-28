@@ -52,6 +52,18 @@ describe('EvidencePanel', () => {
     expect(panel.getAttribute('aria-label')).toContain('OB OB_A — FRESH')
   })
 
+  it('names each row so a value is never read on its own', () => {
+    // A `th scope="row"` is what lets a screen reader read "band: 100 – 101.20"
+    // instead of two unrelated cells. axe does not flag its absence -- a table
+    // without row headers is poor practice rather than a WCAG failure -- so
+    // the axe run does not cover this and an explicit assertion has to.
+    render(<EvidencePanel inspection={inspection()} onClose={vi.fn()} />)
+
+    const header = screen.getByRole('rowheader', { name: 'band' })
+
+    expect(header.getAttribute('scope')).toBe('row')
+  })
+
   it('closes', () => {
     const onClose = vi.fn()
 
