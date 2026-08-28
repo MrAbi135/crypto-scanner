@@ -8,7 +8,16 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { FeedRow, Meta } from '@entities/market/types'
 import { ApiRequestError, fetchFeed } from '@services/api/client'
+import { FilterChips } from '@features/scanner/FilterChips'
 import { QuietFeed } from '@features/scanner/QuietFeed'
+import {
+  describe,
+  isFiltered,
+  toQuery,
+  toggle,
+  type FilterField,
+  type Selection,
+} from '@features/scanner/filters'
 import { SignalRow } from '@features/scanner/SignalRow'
 
 import './scanner.css'
@@ -28,13 +37,14 @@ export function ScannerScreen({ onShowFloors }: ScannerScreenProps) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(true)
+  const [selection, setSelection] = useState<Selection>({})
 
   const load = useCallback(async () => {
     setBusy(true)
     setError(null)
 
     try {
-      const feed = await fetchFeed()
+      const feed = await fetchFeed(toQuery(selection))
 
       setLoaded({
         rows: feed.data,
@@ -53,7 +63,7 @@ export function ScannerScreen({ onShowFloors }: ScannerScreenProps) {
     } finally {
       setBusy(false)
     }
-  }, [])
+  }, [selection])
 
   useEffect(() => {
     void load()
@@ -77,6 +87,15 @@ export function ScannerScreen({ onShowFloors }: ScannerScreenProps) {
         )}
       </header>
 
+      <FilterChips
+        selection={selection}
+        onToggle={(field: FilterField, value: string) =>
+          setSelection((current) => toggle(current, field, value))
+        }
+        onClear={() => setSelection({})}
+        busy={busy}
+      />
+
       {error !== null && (
         <p role="alert" data-testid="scanner-error">
           {error}
@@ -86,12 +105,10 @@ export function ScannerScreen({ onShowFloors }: ScannerScreenProps) {
       {loaded !== null && loaded.rows.length === 0 && error === null && (
         <QuietFeed
           liveTotal={loaded.liveTotal}
-          // No filters in this piece, so the emptiness can only be the market.
-          // Passed explicitly rather than defaulted: when filters land, the
-          // compiler asks the question here.
-          filtered={false}
+          filtered={isFiltered(selection)}
+          filterSummary={describe(selection)}
           onShowFloors={onShowFloors ?? (() => undefined)}
-          onClearFilter={() => undefined}
+          onClearFilter={() => setSelection({})}
         />
       )}
 

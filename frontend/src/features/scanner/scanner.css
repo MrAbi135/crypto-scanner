@@ -135,3 +135,56 @@
   color: var(--colour-muted, #6b7280);
   margin: 0 0 1rem;
 }
+
+/* §21.4's filter chips. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.chips__group {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.chips__legend {
+  float: left;
+  padding: 0 0.4rem 0 0;
+  color: var(--colour-muted, #6b7280);
+  font-size: 0.75rem;
+}
+
+.chip {
+  border: 1px solid var(--colour-border, #d1d5db);
+  background: transparent;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+/* On-state carries a border weight and a background, not colour alone: a chip
+   whose pressed state is only a hue is unreadable to anyone who cannot
+   separate the two, and `aria-pressed` reaches only a screen reader. */
+.chip--on {
+  border-color: var(--colour-chip-on, #111827);
+  border-width: 2px;
+  background: var(--colour-chip-on-bg, #f3f4f6);
+  font-weight: 600;
+}
+
+.chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chips__clear {
+  margin-left: auto;
+  font-size: 0.75rem;
+}

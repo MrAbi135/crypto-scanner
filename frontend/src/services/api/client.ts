@@ -57,11 +57,17 @@ async function request<T>(path: string, params: Record<string, string>): Promise
   return body as Envelope<T>
 }
 
-export function fetchFeed(): Promise<Envelope<readonly FeedRow[]>> {
-  // No parameters. §18.4 fixes the sort and §9.2 is a total order, so there is
-  // nothing here for a caller to reorder; filters arrive in a later piece and
-  // will be the server's, not a client-side narrowing of what it sent.
-  return request<readonly FeedRow[]>('/scanner/feed', {})
+export function fetchFeed(
+  filters: Record<string, string> = {},
+): Promise<Envelope<readonly FeedRow[]>> {
+  // Filters go to the server and nothing narrows the rows after they arrive.
+  // §9 calls a filter the server did not apply "a lie the client believes",
+  // and `page.live_total` is only an honest denominator because the server
+  // reports what it filtered out.
+  //
+  // Still no sort: §18.4 fixes it and §9.2 is a total order, so there is
+  // nothing here for a caller to reorder.
+  return request<readonly FeedRow[]>('/scanner/feed', filters)
 }
 
 export function fetchCandles(

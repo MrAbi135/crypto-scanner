@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ScannerScreen } from './ScannerScreen'
@@ -136,9 +136,12 @@ describe('ScannerScreen', () => {
 
     render(<ScannerScreen />)
 
-    await screen.findByTestId('quiet-feed')
+    const quiet = await screen.findByTestId('quiet-feed')
 
-    expect(screen.getAllByRole('button')).toHaveLength(1)
+    // Scoped to the empty state. Counting every button on the screen made this
+    // fail the moment filter chips arrived, which is the test being wrong
+    // about what it was asserting rather than the screen being wrong.
+    expect(within(quiet).getAllByRole('button')).toHaveLength(1)
   })
 
   it('shows the freshness the envelope carried', async () => {
@@ -233,5 +236,101 @@ describe('QuietFeed distinguishes its two emptinesses', () => {
     await waitFor(() =>
       expect(screen.getByTestId('quiet-feed').textContent).toContain('floors held'),
     )
+  })
+})
+
+describe('ScannerScreen filters', () => {
+  function lastUrl(): string {
+    const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+
+    return String(calls[calls.length - 1]?.[0])
+  }
+
+  it('sends the filter to the server rather than narrowing the rows here', async () => {
+    // §9: a filter the server did not apply "is a lie the client believes".
+    // Filtering client-side would also break `live_total`, which is only an
+    // honest denominator because the server reports what it did not send.
+    stubFeed([ROW])
+
+    render(<ScannerScreen />)
+
+    await screen.findByTestId('feed-board')
+
+    fireEvent.click(screen.getByTestId('chip-grade-B'))
+
+    await waitFor(() => expect(decodeURIComponent(lastUrl())).toContain('filter[grade]=B'))
+  })
+
+  it('uses the [in] operator only when there is more than one value', async () => {
+    // A request should say what it means, and `[in]` with one member reads as
+    // a list that happens to be short.
+    stubFeed([ROW])
+
+    render(<ScannerScreen />)
+
+    await screen.findByTestId('feed-board')
+
+    fireEvent.click(screen.getByTestId('chip-grade-B'))
+    await waitFor(() => expect(decodeURIComponent(lastUrl())).toContain('filter[grade]=B'))
+
+    fireEvent.click(screen.getByTestId('chip-grade-A'))
+    await waitFor(() =>
+      expect(decodeURIComponent(lastUrl())).toContain('filter[grade][in]=B,A'),
+    )
+  })
+
+  it('announces which chips are on', async () => {
+    // `aria-pressed`, because a chip whose state is carried only by a border
+    // is invisible to a screen reader -- and the board cannot be read at all
+    // without knowing what narrowed it.
+    stubFeed([ROW])
+
+    render(<ScannerScreen />)
+
+    await screen.findByTestId('feed-board')
+
+    const chip = screen.getByTestId('chip-direction-UP')
+
+    expect(chip.getAttribute('aria-pressed')).toBe('false')
+
+    fireEvent.click(chip)
+
+    await waitFor(() => expect(chip.getAttribute('aria-pressed')).toBe('true'))
+  })
+
+  it('names the filter when it is the filter that emptied the board', async () => {
+    // §21.19: "state the filter, offer clear". The difference between a user
+    // knowing what to undo and guessing.
+    stubFeed([], 12)
+
+    render(<ScannerScreen />)
+
+    await screen.findByTestId('quiet-feed')
+
+    fireEvent.click(screen.getByTestId('chip-grade-S'))
+
+    await waitFor(() => {
+      const quiet = screen.getByTestId('quiet-feed')
+
+      expect(quiet.textContent).toContain('12 signals are live')
+      expect(quiet.textContent).toContain('grade S')
+    })
+
+    expect(screen.getByRole('button', { name: 'Clear the filter' })).toBeDefined()
+  })
+
+  it('clears back to the unfiltered request', async () => {
+    stubFeed([ROW])
+
+    render(<ScannerScreen />)
+
+    await screen.findByTestId('feed-board')
+
+    fireEvent.click(screen.getByTestId('chip-grade-B'))
+    await waitFor(() => expect(decodeURIComponent(lastUrl())).toContain('filter[grade]'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear all' }))
+
+    await waitFor(() => expect(decodeURIComponent(lastUrl())).not.toContain('filter['))
   })
 })
