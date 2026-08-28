@@ -9,9 +9,18 @@ import type { FeedRow } from '@entities/market/types'
 
 export interface SignalRowProps {
   readonly row: FeedRow
+  /**
+   * Open this row's own context on the chart.
+   *
+   * Until this existed, a reader who saw `ETHUSDT H1` here had to switch tabs
+   * and retype both -- which is a transcription step between a signal and the
+   * evidence for it, in a product whose entire claim is that the evidence is
+   * one click away.
+   */
+  readonly onOpenChart?: ((symbol: string, timeframe: string) => void) | undefined
 }
 
-export function SignalRow({ row }: SignalRowProps) {
+export function SignalRow({ row, onOpenChart }: SignalRowProps) {
   const long = row.direction === 'UP'
 
   return (
@@ -66,6 +75,22 @@ export function SignalRow({ row }: SignalRowProps) {
             signal 20 candles into a 24-candle life and one 2 into a 6 are both
             "4 left" and are not the same thing. */}
         {row.age_candles}/{row.ttl_candles}
+      </td>
+
+      <td className="signal__open">
+        {onOpenChart !== undefined && (
+          <button
+            type="button"
+            className="signal__chart"
+            data-testid={`open-${row.signal_id}`}
+            // Named, not "Open": a table of twenty identical "Open" buttons is
+            // a screen reader's list of twenty identical destinations.
+            aria-label={`Open ${row.symbol} ${row.timeframe} on the chart`}
+            onClick={() => onOpenChart(row.symbol, row.timeframe)}
+          >
+            Chart
+          </button>
+        )}
       </td>
     </tr>
   )
