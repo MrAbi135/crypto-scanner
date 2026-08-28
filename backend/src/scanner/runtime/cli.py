@@ -27,6 +27,7 @@ from scanner.application.marketdata import (
     verify_continuity,
 )
 from scanner.application.marketdata.warmth import ENGINE_TIMEFRAMES, assess_all
+from scanner.application.ports.sessions import RevokeReason
 from scanner.application.ranking import RankingSnapshotService
 from scanner.application.signal_audit import verify_seals
 from scanner.config import (
@@ -50,6 +51,7 @@ from scanner.infrastructure.persistence.repositories import (
     PgIncidentRepository,
     PgSymbolRepository,
 )
+from scanner.infrastructure.persistence.session_repository import PgSessionRepository
 from scanner.infrastructure.persistence.setup_repository import PgSetupRepository
 from scanner.infrastructure.persistence.signal_repository import PgSignalRepository
 from scanner.infrastructure.persistence.signal_transition_repository import (
@@ -675,6 +677,76 @@ async def _run_users_create(
         await engine.dispose()
 
 
+async def _run_users_set_password(
+    args: argparse.Namespace,
+) -> int:
+    """Replace an account's password, and end every session it had.
+
+    `users create` refuses an address that already exists, and rightly -- a
+    provisioning script re-run must not silently overwrite a live credential.
+    This is the deliberate version, which is why it is a separate verb rather
+    than a `--force` on that one.
+
+    **Sessions are revoked by default.** A password is changed because the old
+    one should stop working; leaving the refresh families alive means it
+    effectively has not, since anything already signed in stays signed in and
+    can keep renewing indefinitely. `--keep-sessions` exists for the case where
+    that is genuinely wanted, and has to be asked for.
+
+    Revoked *after* the hash is stored. The other order would end the sessions
+    and then fail the write on a policy refusal, leaving the account with its
+    old password and no way in.
+    """
+    password = os.environ.get(args.password_env)
+
+    if not password:
+        password = getpass.getpass("new password (not echoed): ")
+
+    settings = get_settings("api")
+
+    engine = build_engine(settings.db_dsn)
+
+    try:
+        sessions = build_session_factory(engine)
+
+        service = AccountService(
+            PgUserRepository(sessions),
+            PgTenantRepository(sessions),
+        )
+
+        try:
+            user = await service.set_password(args.email, password)
+        except PasswordPolicyError as refused:
+            print(f"users set-password: refused -- {refused}")
+
+            return 2
+
+        if user is None:
+            # Distinct from create's "already exists" for the mirror reason:
+            # this one needs an account and there is none. Non-zero so a script
+            # cannot read a typo'd address as success.
+            print(f"users set-password: no account for {args.email}")
+
+            return 1
+
+        ended = 0
+
+        if not args.keep_sessions:
+            ended = await PgSessionRepository(sessions).revoke_all_for_user(
+                user.user_id,
+                reason=RevokeReason.USER_REVOKED,
+                revoked_at=SystemClock().now(),
+            )
+
+        print(
+            f"users set-password: {user.email} ({user.user_id}); {ended} session family(ies) ended"
+        )
+
+        return 0
+    finally:
+        await engine.dispose()
+
+
 async def _run_users_list(
     args: argparse.Namespace,
 ) -> int:
@@ -726,6 +798,9 @@ async def _dispatch(
     if args.command == "users":
         if args.users_command == "create":
             return await _run_users_create(args)
+
+        if args.users_command == "set-password":
+            return await _run_users_set_password(args)
 
         if args.users_command == "list":
             return await _run_users_list(args)

@@ -123,6 +123,39 @@ def test_users_create_takes_an_email_and_a_password_env_var() -> None:
     assert not hasattr(args, "password")
 
 
+def test_users_set_password_takes_no_password_argument_either() -> None:
+    """Same reason as `create`: argv is visible in `ps`, lands in shell history
+    and is captured by process accounting."""
+
+    args = build_parser().parse_args(["users", "set-password", "--email", "ops@example.com"])
+
+    assert (args.command, args.users_command) == ("users", "set-password")
+    assert args.password_env == "SCANNER_NEW_PASSWORD"
+    assert not hasattr(args, "password")
+
+
+def test_users_set_password_ends_sessions_unless_told_otherwise() -> None:
+    """Opt-out, not opt-in.
+
+    A password is changed because the old one should stop working. Leaving the
+    refresh families alive means it effectively has not -- anything already
+    signed in stays signed in and keeps renewing. So revoking is the default
+    and keeping them is the flag someone has to reach for and mean.
+    """
+    default = build_parser().parse_args(["users", "set-password", "--email", "a@b.c"])
+    kept = build_parser().parse_args(
+        ["users", "set-password", "--email", "a@b.c", "--keep-sessions"]
+    )
+
+    assert default.keep_sessions is False
+    assert kept.keep_sessions is True
+
+
+def test_users_set_password_requires_an_email() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["users", "set-password"])
+
+
 def test_users_create_requires_an_email() -> None:
     with pytest.raises(SystemExit):
         build_parser().parse_args(["users", "create"])

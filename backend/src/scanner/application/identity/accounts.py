@@ -119,6 +119,35 @@ class AccountService:
 
         return user
 
+    async def set_password(self, email: str, password: str) -> UserRecord | None:
+        """Replace an account's password. None when there is no such account.
+
+        Separate from `create`, which refuses an address that already exists --
+        and rightly, because silently overwriting a live account's credential
+        on a re-run is how a provisioning script locks its owner out. This is
+        the deliberate version of the same act.
+
+        Raises `PasswordPolicyError` for a password that cannot be accepted,
+        like `create`: the same policy and the same hashing, because a password
+        set here has to be one `authenticate` will take.
+
+        **It does not revoke sessions, and the caller must.** The service owns
+        no session store, and a method that silently left them standing would
+        be the more dangerous shape -- so the omission is stated here and the
+        CLI does the revoking where the store is in hand.
+        """
+        user = await self.users.get_by_email(fold_email(email))
+
+        if user is None:
+            return None
+
+        # Hashed before the write and outside the repository, so a policy
+        # refusal happens before anything is stored.
+        if not await self.users.set_password_hash(user.user_id, hash_password(password)):
+            return None
+
+        return user
+
     async def authenticate(self, email: str, password: str) -> UserRecord | None:
         """The credential check. None for every failure, without saying which.
 
