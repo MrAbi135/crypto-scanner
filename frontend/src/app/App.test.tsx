@@ -55,6 +55,8 @@ function stubFetch(rows: readonly unknown[]) {
       const url = String(input)
       const data = url.includes('/scanner/feed')
         ? rows
+        : url.includes('/dashboard/overview')
+          ? { top_signals: [], live_total: 0, recent_sweeps: [], not_measured: [] }
         : url.includes('/signals/statistics')
           ? []
           : url.includes('/signals/history')
@@ -65,7 +67,7 @@ function stubFetch(rows: readonly unknown[]) {
               symbol: 'ETHUSDT',
               timeframe: 'H1',
               evidence_ids: [],
-              entry_zone_id: null,
+              entry_zone_id: 'zone-9',
               confidence: { final: '75', grade: 'B', factors: { F1: '70' } },
               reason: null,
               htf_chain: {},
@@ -137,6 +139,9 @@ describe('App shell', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Track record' }))
     expect(await screen.findByRole('heading', { name: 'Track record' })).toBeDefined()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Dashboard' }))
+    expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeDefined()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Live feed' }))
     expect(await screen.findByRole('heading', { name: 'Live feed' })).toBeDefined()
@@ -304,6 +309,25 @@ describe('App shell', () => {
     render(<App />)
 
     expect(await screen.findByTestId('signal-screen')).toBeDefined()
+  })
+
+  it('walks J2: feed row → detail → chart, with the zone in the address', async () => {
+    // S16's DoD names this journey. The last joint — detail to chart — must
+    // carry the entry zone into the URL, or the reader lands on the right
+    // chart with nothing selected and the deep link the seal paid for is
+    // wasted.
+    render(<App />)
+
+    fireEvent.click(await screen.findByTestId('detail-sig-1'))
+
+    fireEvent.click(await screen.findByTestId('signal-open-chart'))
+
+    await waitFor(() =>
+      expect(window.location.pathname + window.location.search).toBe(
+        '/chart/ETHUSDT/H1?object=zone%3Azone-9',
+      ),
+    )
+    expect((screen.getByLabelText('Symbol') as HTMLInputElement).value).toBe('ETHUSDT')
   })
 
   it('says which view is selected, in both channels', async () => {

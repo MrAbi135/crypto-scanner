@@ -185,6 +185,9 @@ class EmptySignals:
     async def outcome_counts(self, *, group_by, since=None, until=None):
         return ()
 
+    async def list_recent_sweeps(self, *, limit):
+        return ()
+
 
 class EmptyRankings:
     """§9.2 over nothing: a quiet close, which is a real answer."""

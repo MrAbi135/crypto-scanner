@@ -1,9 +1,12 @@
-"""§18.3's dashboard group.
+"""§18.3's dashboard group: the status strip, and the overview's honest subset.
 
-The status strip only. §18.3's `overview` is an aggregation of rows that mostly
-do not exist yet, and `regime` needs breadth statistics no engine computes --
-neither is served, and neither is stubbed with a plausible shape, because a
-dashboard that renders invented numbers is worse than one that renders none.
+`/overview` serves the two things the hub can answer from recorded facts --
+the ranked board's head, and the platform's latest consumed levels -- and
+names what it cannot in `not_measured`, same contract as `/status`. The regime
+ribbon needs breadth statistics no engine computes, compression has no
+aggregation, and the watchlist pulse needs S17's tables; none of the three is
+stubbed with a plausible shape, because a dashboard that renders invented
+numbers is worse than one that renders none.
 """
 
 from __future__ import annotations
@@ -13,10 +16,19 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 
+from scanner.application.feed import FeedRow as LiveRow
+from scanner.application.feed import LiveFeedService
 from scanner.application.ports import CandleRepository, Clock
+from scanner.application.ports.ict_evidence import IctEvidenceRepository, RecentSweepRecord
 from scanner.application.ports.repositories import IncidentRecord, IncidentRepository
 from scanner.domain.common.coverage import Coverage, candles_behind, coverage_of
-from scanner.interfaces.api.deps import get_candles, get_clock, get_incidents
+from scanner.interfaces.api.deps import (
+    get_candles,
+    get_clock,
+    get_evidence,
+    get_feed,
+    get_incidents,
+)
 from scanner.interfaces.api.envelope import Freshness, success
 from scanner.interfaces.api.security import CurrentUser, require_user
 
@@ -90,6 +102,85 @@ async def status(
             observed_at=max((newest for _, _, newest in series), default=None),
         ),
     )
+
+
+# The board's head, not a different ranking: the same §9.2 order the feed
+# serves, cut at the hub's size. A second "top" computed here would eventually
+# disagree with the feed about what is on top.
+TOP_SIGNALS = 5
+RECENT_SWEEPS = 10
+
+
+@router.get("/overview")
+async def overview(
+    _: Annotated[CurrentUser, Depends(require_user)],
+    feed: Annotated[LiveFeedService, Depends(get_feed)],
+    evidence: Annotated[IctEvidenceRepository, Depends(get_evidence)],
+    clock: Annotated[Clock, Depends(get_clock)],
+) -> dict[str, Any]:
+    """§18.3's hub, restricted to what is measurable (Blueprint §21.6).
+
+    Two lists and a set of named absences. `top_signals` is the live board's
+    head in the board's own order; `recent_sweeps` is the platform's latest
+    consumed levels, which is the one piece of the hub the feed and the chart
+    do not already show somewhere.
+    """
+    now = clock.now()
+
+    board = await feed.read()
+    sweeps = await evidence.list_recent_sweeps(limit=RECENT_SWEEPS)
+
+    return success(
+        {
+            "top_signals": [_top_row(row) for row in board.rows[:TOP_SIGNALS]],
+            # The feed's denominator travels with the head for the feed's own
+            # reason: five rows out of five and out of ninety are different
+            # markets.
+            "live_total": board.live_total,
+            "recent_sweeps": [_sweep_row(row) for row in sweeps],
+            "not_measured": [
+                "regime ribbon — needs breadth statistics no engine computes",
+                "compression — no aggregation exists",
+                "watchlist pulse — needs S17's workspace tables",
+            ],
+        },
+        generated_at=now,
+        freshness=Freshness(
+            state="RECORDED",
+            observed_at=sweeps[0].transitioned_at if sweeps else None,
+        ),
+    )
+
+
+def _top_row(row: LiveRow) -> dict[str, Any]:
+    signal = row.signal
+
+    return {
+        "rank": row.position,
+        "signal_id": signal.signal_id,
+        "symbol": signal.symbol,
+        "timeframe": signal.timeframe.value,
+        "direction": signal.direction,
+        "archetype": signal.archetype,
+        "grade": signal.grade,
+        "confidence": str(signal.final_confidence),
+        "display_rank": str(row.display),
+        "lifecycle_state": row.lifecycle_state,
+    }
+
+
+def _sweep_row(row: RecentSweepRecord) -> dict[str, Any]:
+    return {
+        "symbol": row.symbol,
+        "timeframe": row.timeframe.value,
+        "pool_id": row.pool_id,
+        # None when the pool row no longer exists -- the transition outlives
+        # the object on purpose, and a vanished side must not be guessed.
+        "side": row.side,
+        "event": row.to_state,
+        "reason": row.reason,
+        "at": row.transitioned_at.isoformat(),
+    }
 
 
 def _degraded(row: IncidentRecord) -> dict[str, Any]:

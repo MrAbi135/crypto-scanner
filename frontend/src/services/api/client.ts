@@ -11,6 +11,7 @@ import { currentSession, setSession, type Session } from '@services/api/session'
 import type {
   ApiError,
   ArchivedSignal,
+  DashboardOverview,
   Candle,
   Envelope,
   FeedRow,
@@ -125,6 +126,10 @@ export function fetchStatistics(
     group_by: groupBy,
     window,
   })
+}
+
+export function fetchOverview(): Promise<Envelope<DashboardOverview>> {
+  return request<DashboardOverview>('/dashboard/overview', {})
 }
 
 export function fetchStatus(): Promise<Envelope<PlatformStatus>> {

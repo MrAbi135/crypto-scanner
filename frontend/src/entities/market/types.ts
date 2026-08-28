@@ -314,6 +314,34 @@ export interface StatsGroup {
   }
 }
 
+/** §18.3's hub, restricted to what is measurable. */
+export interface DashboardOverview {
+  readonly top_signals: readonly {
+    readonly rank: number
+    readonly signal_id: string
+    readonly symbol: string
+    readonly timeframe: string
+    readonly direction: string
+    readonly archetype: string
+    readonly grade: string
+    readonly confidence: string
+    readonly display_rank: string
+    readonly lifecycle_state: string
+  }[]
+  readonly live_total: number
+  readonly recent_sweeps: readonly {
+    readonly symbol: string
+    readonly timeframe: string
+    readonly pool_id: string
+    /** Null when the pool row no longer exists — never guessed. */
+    readonly side: string | null
+    readonly event: string
+    readonly reason: string
+    readonly at: string
+  }[]
+  readonly not_measured: readonly string[]
+}
+
 // §13. `freshness` is always present; `versions` only on doctrine-derived rows.
 export interface Freshness {
   readonly state: string
