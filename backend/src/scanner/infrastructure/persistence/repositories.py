@@ -522,6 +522,22 @@ class PgCandleRepository:
             rows,
         )
 
+    async def newest_per_series(self) -> Sequence[tuple[str, Timeframe, datetime]]:
+        stmt = (
+            select(
+                CandleRow.symbol,
+                CandleRow.timeframe,
+                func.max(CandleRow.open_time),
+            )
+            .group_by(CandleRow.symbol, CandleRow.timeframe)
+            .order_by(CandleRow.symbol.asc(), CandleRow.timeframe.asc())
+        )
+
+        async with self._sessions() as session:
+            rows = await session.execute(stmt)
+
+            return [(symbol, Timeframe(timeframe), newest) for symbol, timeframe, newest in rows]
+
     async def latest_open_time(
         self,
         symbol: str,
