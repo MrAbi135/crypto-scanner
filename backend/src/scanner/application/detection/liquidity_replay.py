@@ -42,6 +42,7 @@ from scanner.domain.liquidity import (
     PoolState,
     PoolStrength,
     SweepEvent,
+    count_pool_touches,
     detect_equal_level_clusters,
     detect_single_candle_sweep,
     detect_stop_hunt,
@@ -375,11 +376,31 @@ class LiquidityReplayService:
         if levels.absorbs(side.value, swing.price, pool_id, epsilon):
             return False
 
+        # §4.2's fourth component, counted rather than assumed.
+        #
+        # Both call sites passed a literal `0` until now, so `touches_component`
+        # was exactly zero on all 1,411 pools on the host and no pool could
+        # score above 75 of 100 -- a quarter of a formula whose only job is to
+        # rank, contributing nothing to the ranking. Same shape as the
+        # `cluster_factor` defect `pool_from_cluster` documents.
+        #
+        # Counted from the confirmation candle forward, which is also why it
+        # belongs here rather than at construction: the pool is re-upserted on
+        # every pass (see `_LevelMap`), so the count follows the market instead
+        # of freezing at the moment of birth, when it is zero by definition.
+        touches = count_pool_touches(
+            candles[confirmation_index + 1 :],
+            side=side,
+            band_low=swing.price,
+            band_high=swing.price,
+            epsilon=epsilon,
+        )
+
         pool = pool_from_swing(
             swing,
             pool_id=pool_id,
             liquidity_class=liquidity_class,
-            touches=0,
+            touches=touches,
             timeframe_rank=timeframe_rank,
             max_timeframe_rank=max_rank,
             age_candles=age_candles,
@@ -396,7 +417,7 @@ class LiquidityReplayService:
                 "swing_strength": swing.strength.value,
                 "swing_kind": swing.kind.value,
                 "source_price": str(swing.price),
-                "touches": 0,
+                "touches": touches,
                 "age_candles": age_candles,
                 "strength_components": {
                     "touches": str(pool.strength.touches_component),
@@ -465,6 +486,17 @@ class LiquidityReplayService:
         if levels.absorbs(cluster.side.value, cluster.extreme, pool_id, epsilon):
             return False
 
+        # The band, not the extreme. §4.2 keeps a cluster's band "for sweep
+        # tolerance" precisely because the stops sit across it, so an approach
+        # that turns anywhere inside it was rejected by this pool.
+        touches = count_pool_touches(
+            candles[cluster.confirmed_index + 1 :],
+            side=cluster.side,
+            band_low=cluster.band_low,
+            band_high=cluster.band_high,
+            epsilon=epsilon,
+        )
+
         pool = pool_from_cluster(
             cluster,
             pool_id=pool_id,
@@ -477,7 +509,7 @@ class LiquidityReplayService:
             # it.
             liquidity_class=liquidity_class,
             created_at=confirmation_candle.close_time,
-            touches=0,
+            touches=touches,
             timeframe_rank=timeframe_rank,
             max_timeframe_rank=max_rank,
             age_candles=age_candles,
@@ -495,7 +527,7 @@ class LiquidityReplayService:
                 "confirmation_close_time": (confirmation_candle.close_time.isoformat()),
                 "band_low": str(cluster.band_low),
                 "band_high": str(cluster.band_high),
-                "touches": 0,
+                "touches": touches,
                 "age_candles": age_candles,
                 "strength_components": {
                     "touches": str(pool.strength.touches_component),

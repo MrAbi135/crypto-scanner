@@ -34,8 +34,13 @@ from scanner.domain.liquidity.sweeps import (
     mark_displaced_after,
     sweep_reclaimed,
 )
+from scanner.domain.liquidity.touches import (
+    MAX_COUNTED_TOUCHES,
+    count_pool_touches,
+)
 
 __all__ = [
+    "MAX_COUNTED_TOUCHES",
     "MAX_POOLS",
     "POOL_MAX_AGE",
     "SWEEP_SETUP_EXPIRY_CANDLES",
@@ -49,6 +54,7 @@ __all__ = [
     "PoolStrength",
     "StopHuntEvent",
     "SweepEvent",
+    "count_pool_touches",
     "detect_equal_level_clusters",
     "detect_single_candle_sweep",
     "detect_stop_hunt",
