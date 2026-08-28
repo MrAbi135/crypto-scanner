@@ -14,9 +14,12 @@ import {
   fetchLiquidity,
   fetchStructure,
   fetchZones,
+  logout,
 } from '@services/api/client'
+import { currentSession } from '@services/api/session'
 import { Chart } from '@features/chart/Chart'
 import { EvidencePanel } from '@features/chart/EvidencePanel'
+import { SignIn } from '@features/chart/SignIn'
 import type { Inspection } from '@features/chart/inspection'
 
 import './chart.css'
@@ -40,8 +43,11 @@ export function ChartScreen() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [inspection, setInspection] = useState<Inspection | null>(null)
+  const [signedIn, setSignedIn] = useState(currentSession() !== null)
 
   useEffect(() => {
+    if (!signedIn) return
+
     let cancelled = false
 
     async function load() {
@@ -92,7 +98,15 @@ export function ChartScreen() {
     return () => {
       cancelled = true
     }
-  }, [symbol, timeframe])
+  }, [symbol, timeframe, signedIn])
+
+  if (!signedIn) {
+    return (
+      <section className="screen">
+        <SignIn onSignedIn={() => setSignedIn(true)} />
+      </section>
+    )
+  }
 
   return (
     <section className="screen">
@@ -122,6 +136,16 @@ export function ChartScreen() {
         </label>
 
         {busy && <span role="status">Loading…</span>}
+
+        <button
+          type="button"
+          className="screen__signout"
+          onClick={() => {
+            void logout().finally(() => setSignedIn(false))
+          }}
+        >
+          Sign out
+        </button>
       </header>
 
       {error && (
