@@ -180,6 +180,44 @@ def advance_fvg(
     return fvg
 
 
+def replay_fvg_to(
+    fvg: FairValueGap,
+    candles: Sequence[Candle],
+    *,
+    at_index: int,
+) -> FairValueGap:
+    """The FVG's state as of `at_index`, by replaying its own lifecycle.
+
+    Exists for SLS §5.6's validation: "Both parents must **still** be
+    OPEN/TOUCHED at registration". The word *still* requires knowing what has
+    happened to a parent between its creation and the moment its partner
+    formed -- and the detection loop's snapshots cannot say, because they are
+    all OPEN by construction. That is exactly how the guard in `compose_bpr`
+    spent months unable to fail: every parent it ever saw was a birth
+    certificate.
+
+    Pure fold of `advance_fvg`, stopping early on a terminal state because
+    `advance_fvg` refuses to advance one (a terminal state is permanent, and
+    asking it to move is a bug worth raising, not absorbing).
+    """
+    if at_index < fvg.created_index:
+        raise ValueError("cannot replay an FVG to before it existed")
+
+    current = fvg
+
+    for index in range(fvg.created_index + 1, min(at_index, len(candles) - 1) + 1):
+        if current.state in {FvgState.FILLED, FvgState.INVERTED, FvgState.EXPIRED}:
+            return current
+
+        current = advance_fvg(
+            current,
+            candles[index],
+            candle_index=index,
+        )
+
+    return current
+
+
 def _touches(
     candle: Candle,
     band: ZoneBand,

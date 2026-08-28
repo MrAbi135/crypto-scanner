@@ -19,6 +19,7 @@ from scanner.domain.ict.fvg import (
     FairValueGap,
     advance_fvg,
     detect_fvg,
+    replay_fvg_to,
 )
 from scanner.domain.ict.ifvg import (
     InverseFairValueGap,
@@ -120,4 +121,5 @@ __all__ = [
     "detect_ote",
     "evaluate_pd_context",
     "evaluate_zone_interaction",
+    "replay_fvg_to",
 ]

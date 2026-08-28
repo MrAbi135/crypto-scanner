@@ -37,10 +37,14 @@ from scanner.domain.ict import (
     create_ifvg,
     detect_displacement,
     detect_fvg,
+    replay_fvg_to,
 )
 from scanner.shared import Timeframe
 
-ICT_ALGO_VERSION = "s6-v2"
+# v3: BPR parents are replayed to the registration index before composing, so
+# §5.6's "still OPEN/TOUCHED" can actually refuse a consumed parent. Detector
+# output changes (fewer BPRs), so Constitution §44.5 makes this a version bump.
+ICT_ALGO_VERSION = "s6-v3"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")
@@ -297,9 +301,17 @@ class IctReplayService:
             if current_index < 0 or current_index >= len(candles):
                 continue
 
+            # §5.6: "Both parents must *still* be OPEN/TOUCHED at
+            # registration." The snapshots in `fvgs` are all OPEN by
+            # construction -- they were appended the moment each gap was
+            # detected, before any lifecycle ran -- so for months the guard in
+            # `compose_bpr` could not fail and a BPR could compose from a
+            # parent FILLED fifteen candles before its partner existed.
+            # Replaying each parent to the registration index is what the word
+            # "still" costs.
             bpr = compose_bpr(
-                first,
-                second,
+                replay_fvg_to(first, candles, at_index=current_index),
+                replay_fvg_to(second, candles, at_index=current_index),
                 current_index=current_index,
                 created_at=(candles[current_index].close_time),
             )
