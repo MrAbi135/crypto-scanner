@@ -75,6 +75,7 @@ IMPLEMENTED_ROWS: tuple[str, ...] = (
     "GET /api/v1/market/incidents",
     "GET /api/v1/scanner/universe",
     "GET /api/v1/dashboard/status",
+    "GET /api/v1/dashboard/overview",
     "GET /api/v1/rankings/weights",
     "GET /api/v1/signals/history",
     "GET /api/v1/signals/statistics",

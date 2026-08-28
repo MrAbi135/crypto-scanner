@@ -1,0 +1,55 @@
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.dashboard__title {
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+.dashboard__subtitle {
+  font-size: 1rem;
+  margin: 0 0 0.35rem;
+}
+
+.dashboard__count {
+  font-size: 0.8125rem;
+  font-weight: normal;
+  color: var(--colour-muted, #6b7280);
+}
+
+.dashboard__signals,
+.dashboard__sweeps {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.dashboard__mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--colour-muted, #6b7280);
+}
+
+.dashboard__link {
+  font: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  color: inherit;
+}
+
+.dashboard__gap {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--colour-muted, #6b7280);
+  border-top: 1px solid var(--colour-border, #e5e7eb);
+  padding-top: 0.5rem;
+}

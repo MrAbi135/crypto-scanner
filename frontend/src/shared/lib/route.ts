@@ -11,7 +11,7 @@
 // that disagree, so the address bar says one thing and the screen shows
 // another. That is worse than no routing at all.
 
-export type ViewId = 'feed' | 'rankings' | 'chart' | 'universe' | 'history' | 'signal'
+export type ViewId = 'feed' | 'dashboard' | 'rankings' | 'chart' | 'universe' | 'history' | 'signal'
 
 export interface Route {
   readonly view: ViewId
@@ -32,7 +32,7 @@ export interface Route {
   readonly signalId?: string
 }
 
-const VIEWS: readonly ViewId[] = ['feed', 'rankings', 'chart', 'universe', 'history', 'signal']
+const VIEWS: readonly ViewId[] = ['feed', 'dashboard', 'rankings', 'chart', 'universe', 'history', 'signal']
 
 /** The address for a route. Always absolute, always starts with `/`. */
 export function toPath(route: Route): string {

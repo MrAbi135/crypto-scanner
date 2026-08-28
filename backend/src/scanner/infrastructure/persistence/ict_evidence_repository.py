@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import (
 from scanner.application.ports.ict_evidence import (
     IctEvidenceRepository,
     LiquidityEvidenceRecord,
+    RecentSweepRecord,
     ShiftEvidenceRecord,
     StructureEvidenceRecord,
 )
@@ -21,6 +22,7 @@ from scanner.infrastructure.persistence.detection_models import (
     EngineEventRow,
 )
 from scanner.infrastructure.persistence.liquidity_detection_models import (
+    LiquidityPoolRow,
     LiquidityTransitionRow,
 )
 from scanner.shared import Timeframe
@@ -156,4 +158,51 @@ class PgIctEvidenceRepository(IctEvidenceRepository):
                     evidence=row.evidence,
                 )
                 for row in rows
+            )
+
+    async def list_recent_sweeps(
+        self,
+        *,
+        limit: int,
+    ) -> tuple[RecentSweepRecord, ...]:
+        """The platform's latest consumed levels, newest first (§18.3).
+
+        Terminal consumption states only: SWEPT and its stop-hunt cousin.
+        BROKEN is a level absorbed by structure and EXPIRED is bookkeeping --
+        neither is the "what got taken lately" a dashboard reader is asking.
+
+        The side comes from an outer join to the pool: a transition whose pool
+        row is gone (truncated, or from an older algo version) still lists,
+        with `side` as None rather than the row silently vanishing -- the
+        transitions table is append-only precisely so the record outlives the
+        object.
+        """
+        async with self._sessions() as session:
+            result = await session.execute(
+                select(LiquidityTransitionRow, LiquidityPoolRow.side)
+                .join(
+                    LiquidityPoolRow,
+                    LiquidityPoolRow.pool_id == LiquidityTransitionRow.pool_id,
+                    isouter=True,
+                )
+                .where(LiquidityTransitionRow.to_state.in_(("SWEPT", "STOP_HUNT")))
+                .order_by(
+                    LiquidityTransitionRow.transitioned_at.desc(),
+                    LiquidityTransitionRow.transition_id.desc(),
+                )
+                .limit(limit)
+            )
+
+            return tuple(
+                RecentSweepRecord(
+                    symbol=row.symbol,
+                    timeframe=Timeframe(row.timeframe),
+                    pool_id=row.pool_id,
+                    side=side,
+                    to_state=row.to_state,
+                    reason=row.reason,
+                    transitioned_at=row.transitioned_at,
+                    evidence=row.evidence,
+                )
+                for row, side in result.all()
             )

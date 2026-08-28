@@ -40,6 +40,27 @@ class LiquidityEvidenceRecord:
     evidence: str
 
 
+@dataclass(frozen=True, slots=True)
+class RecentSweepRecord:
+    """One platform-wide sweep row for §18.3's dashboard.
+
+    Carries its own symbol and timeframe because, unlike `list_liquidity`,
+    nothing upstream has already fixed the context -- and the side comes from
+    the pool the transition consumed, because "BSL swept" and "SSL swept" are
+    opposite market statements and the transition row alone cannot tell them
+    apart.
+    """
+
+    symbol: str
+    timeframe: Timeframe
+    pool_id: str
+    side: str | None
+    to_state: str
+    reason: str
+    transitioned_at: datetime
+    evidence: str
+
+
 class IctEvidenceRepository(Protocol):
     async def list_structure(
         self,
@@ -67,3 +88,9 @@ class IctEvidenceRepository(Protocol):
         start: datetime,
         end: datetime,
     ) -> tuple[LiquidityEvidenceRecord, ...]: ...
+
+    async def list_recent_sweeps(
+        self,
+        *,
+        limit: int,
+    ) -> tuple[RecentSweepRecord, ...]: ...

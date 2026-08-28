@@ -19,6 +19,7 @@ import { useCallback } from 'react'
 
 import { ChartScreen } from '@features/chart/ChartScreen'
 import { RankingsScreen } from '@features/scanner/RankingsScreen'
+import { DashboardScreen } from '@features/dashboard/DashboardScreen'
 import { HistoryScreen } from '@features/history/HistoryScreen'
 import { SignalScreen } from '@features/signal/SignalScreen'
 import { ScannerScreen } from '@features/scanner/ScannerScreen'
@@ -32,6 +33,7 @@ import './app.css'
 
 const VIEWS = [
   { id: 'feed', label: 'Live feed' },
+  { id: 'dashboard', label: 'Dashboard' },
   { id: 'rankings', label: 'Rankings' },
   { id: 'chart', label: 'Chart' },
   { id: 'universe', label: 'Universe' },
@@ -139,6 +141,12 @@ export function App() {
             box lands in the address bar and does not bounce. */}
         {view === 'chart' && <ChartScreen openOn={chartContext} onContext={onChartContext} />}
         {view === 'universe' && <UniverseScreen />}
+        {view === 'dashboard' && (
+          <DashboardScreen
+            onOpenSignal={(signalId) => navigate({ view: 'signal', signalId })}
+            onOpenChart={openChart}
+          />
+        )}
         {view === 'history' && (
           <HistoryScreen onOpenSignal={(signalId) => navigate({ view: 'signal', signalId })} />
         )}
