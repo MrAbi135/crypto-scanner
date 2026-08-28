@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.6
-**Ratified:** 2026-07-12 · **Last amended:** 2026-08-28 (see Amendment History)
+**Version:** 1.0.7
+**Ratified:** 2026-07-12 · **Last amended:** 2026-08-28 (v1.0.7; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -409,7 +409,7 @@ Doctrine premise: price is drawn toward resting liquidity and reacts after consu
 
 **Inputs.** Confirmed swings (with strength class), equal-extreme clusters (§3.1), dealing ranges (§5.7), candle series, `ε`.
 
-**Detection Logic.** A pool is created for: (a) each unconsumed external swing extreme; (b) each equal-extreme cluster (§4.3) — cluster pools rank above single-swing pools; (c) each dealing-range extreme (range high = BSL pool, range low = SSL pool). Pool price = exact extreme (clusters: the extreme of the member candles; the cluster band `[min, max]` of member extremes is retained for sweep tolerance).
+**Detection Logic.** A pool is created for: (a) each unconsumed external swing extreme; (b) each equal-extreme cluster (§4.3) — cluster pools rank above single-swing pools; (c) each dealing-range extreme (range high = BSL pool, range low = SSL pool). Pool price = exact extreme (clusters: the extreme of the member candles; the cluster band `[min, max]` of member extremes is retained for sweep tolerance). Clause (c) is a **guarantee, not a third builder** (v1.0.7): a dealing-range extreme is by construction a confirmed external extreme (§5.7), so wherever the range exists, clause (a) has already made its pool at exactly that price — (c) asserts that this is so, and creates nothing of its own. A second pool on the level would violate this section's own one-level-one-pool Edge Case; recreating one whose pool was consumed would violate "terminal states are permanent; no resurrection". An extreme whose pool has been consumed therefore stands without one — the market took that liquidity, and a target selector finding no pool overhead is reading the map correctly.
 
 **Pool strength score (0–100, deterministic):** `strength = 25×min(touches,3)/3 + 25×tf_weight + 25×age_factor + 25×cluster_factor`, where `touches` = number of separate approaches that reversed within `ε` without breaching; `tf_weight` = TF rank / max rank (W1 = 1.0); `age_factor = min(age_candles, 200)/200`; `cluster_factor` = 1 for ≥ 3-member cluster, 0.5 for 2-member, 0.25 for single swing. Every component is recomputable from stored evidence.
 
@@ -1159,6 +1159,36 @@ Every parameter change increments `param_set_version` and requires golden-datase
 
 ## Amendment History
 
+### v1.0.7 — 2026-08-28
+
+One clarification, ruled by the product owner on 2026-08-28: §4.2's clause (c)
+is a guarantee, not a third pool builder.
+
+**The question.** (c) reads "a pool is created for each dealing-range
+extreme". Measured on the host (2026-08-21), every live dealing-range extreme
+already carried clause (a)'s pool at exactly its price — a range extreme *is*
+a confirmed external extreme (§5.7 defines the range from them). So an
+implementation of (c) as a builder could only ever (1) duplicate a level,
+which this section's own Edge Case forbids; (2) recreate a consumed pool,
+which "terminal states are permanent; no resurrection" forbids; or (3) build
+nothing, where price sits outside the bracket and §5.7 yields no range at
+all. All three readings were wrong or empty, so nothing was built, and the
+clause sat as an open question recorded against PR #65.
+
+**The ruling.** (c) asserts what (a) already guarantees. An extreme whose pool
+was consumed stands without one — that liquidity is gone, and a §15.6 target
+selector finding no pool overhead is reading the map correctly, not missing
+data.
+
+**Impact review.** No behaviour change: the implementation has never had a
+range-pool builder, and this makes its absence correct rather than pending.
+§4.4 (positional classification), §4.5 (the liquidity map), §15.6 (target
+selection) all read pools from (a)/(b) and are untouched. No parameter, no
+golden dataset, no `algo_version` bump — the v1.0.3 precedent applies: the
+document said less than it meant, and the implementation already followed the
+meaning.
+
+
 ### v1.0.6 — 2026-08-28
 
 Two clarifications. **Neither changes detection behaviour**: the first records
@@ -1392,4 +1422,4 @@ belongs in its own amendment, not folded into an unrelated one.
 
 *This document is the complete detection doctrine of the Institutional AI Crypto Scanner. An engineering team implementing it makes zero trading-logic decisions: where a question is not answered here, the answer is an amendment to this document — never a guess in code.*
 
-**— End of Scanner Logic Specification v1.0.6 —**
+**— End of Scanner Logic Specification v1.0.7 —**
