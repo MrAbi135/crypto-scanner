@@ -151,6 +151,29 @@ where n >= 10 and best = 0;
 -- Reported per archetype, because A1's terms and A3's fail for different
 -- reasons and a pooled count would hide whichever is rarer.
 
+--
+-- **One term is exempt, with a reason and a count.** A2's `breaker_formed`
+-- is unmet on every setup because breakers are genuinely rare, not because
+-- anything is broken. Measured on the host 2026-08-27, the funnel narrows for
+-- reasons §5.1 and §5.4 each state:
+--
+--     OB zones ever                        234
+--       ... INVALIDATED                    162
+--       ... AND origin_swept = true         18
+--       ... AND external structure break      8
+--     BREAKER zones ever                     4
+--
+-- Eight candidates, four breakers, one live. `breaker_formed` wants a BRK_A
+-- among the zones at price and of the right polarity, so it will be unmet for
+-- long stretches of any ordinary market. Left in, this check would fire every
+-- hour forever, and a check that cries wolf hourly is not a weak check -- it
+-- is one that gets ignored, taking the rest of the file with it.
+--
+-- The exemption is by (archetype, term) and not by term, so the same word
+-- under a different archetype still fires; and a *new* never-met term fires
+-- however rare anyone believes it to be. If breakers are ever wired
+-- differently, delete the row rather than widening it.
+
 with unmet as (
     select a.key as archetype, term.value #>> '{}' as term, count(*) as times
     from detection.setups s,
@@ -158,11 +181,19 @@ with unmet as (
          lateral json_array_elements(a.value) term
     group by 1, 2
 ),
-total as (select count(*) as n from detection.setups)
+total as (select count(*) as n from detection.setups),
+rare_by_doctrine(archetype, term) as (
+    values ('A2', 'breaker_formed')
+)
 select 'E. archetype term never met' as check,
        u.archetype, u.term, u.times, t.n as setups_seen
 from unmet u, total t
-where t.n >= 10 and u.times = t.n;
+where t.n >= 10
+  and u.times = t.n
+  and not exists (
+        select 1 from rare_by_doctrine r
+         where r.archetype = u.archetype and r.term = u.term
+      );
 
 
 -- ===========================================================================
