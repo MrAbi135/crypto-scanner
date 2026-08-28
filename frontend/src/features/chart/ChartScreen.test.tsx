@@ -16,6 +16,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ChartScreen } from './ChartScreen'
+import { setSession } from '@services/api/session'
 import { axeViolations, describeViolations } from '@test/axe'
 
 // One hour of BTCUSDT H1, with one of everything the chart draws. Prices are
@@ -112,6 +113,15 @@ function respond(url: string) {
 }
 
 beforeEach(() => {
+  // The read rows require a bearer token, so the screen shows sign-in without
+  // one. These tests are about the chart, so they start already signed in.
+  setSession({
+    accessToken: 'test-token',
+    userId: 'u1',
+    tenantId: 't1',
+    expiresAt: Date.now() + 900_000,
+  })
+
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) =>
@@ -127,6 +137,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  setSession(null)
 })
 
 describe('ChartScreen', () => {
@@ -203,5 +214,29 @@ describe('ChartScreen', () => {
     const violations = await axeViolations(container)
 
     expect(violations, describeViolations(violations)).toEqual([])
+  })
+
+  it('sends the bearer token the read rows require', async () => {
+    // Without this every overlay is a 401, which is how the chart came to be
+    // built, tested and merged while being unusable against the real API.
+    render(<ChartScreen />)
+
+    await screen.findByTestId('chart')
+
+    const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+    const init = calls[0]?.[1] as RequestInit
+
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer test-token')
+  })
+
+  it('does not call the API at all when signed out', async () => {
+    // Fetching first and rendering the 401 would report a failure the reader
+    // has not caused yet.
+    setSession(null)
+
+    render(<ChartScreen />)
+
+    expect(screen.getByTestId('signin')).toBeDefined()
+    expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 })

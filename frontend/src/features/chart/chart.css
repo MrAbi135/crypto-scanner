@@ -259,3 +259,33 @@
   color: var(--colour-muted, #6b7280);
   margin: 0.5rem 0 0;
 }
+
+/* Sign-in. The smallest thing that makes the chart usable; S13 owns the real
+   auth surface. */
+.signin {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 20rem;
+  margin: 3rem auto;
+}
+
+.signin__title {
+  font-size: 1.125rem;
+  margin: 0;
+}
+
+.signin__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.signin__error {
+  color: var(--colour-error, #b91c1c);
+  margin: 0;
+}
+
+.screen__signout {
+  margin-left: auto;
+}
