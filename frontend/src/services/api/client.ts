@@ -16,6 +16,7 @@ import type {
   LiquidityMap,
   RankedRow,
   StructureEvent,
+  UniverseSymbol,
   Weights,
   Zone,
 } from '@entities/market/types'
@@ -70,6 +71,14 @@ export function fetchFeed(
   // Still no sort: §18.4 fixes it and §9.2 is a total order, so there is
   // nothing here for a caller to reorder.
   return request<readonly FeedRow[]>('/scanner/feed', filters)
+}
+
+export function fetchUniverse(
+  filters: Record<string, string> = {},
+): Promise<Envelope<readonly UniverseSymbol[]>> {
+  // Filters go to the server, as everywhere: §9 refuses one it cannot apply
+  // rather than letting a client narrow a list it was already sent.
+  return request<readonly UniverseSymbol[]>('/scanner/universe', filters)
 }
 
 export function fetchWeights(): Promise<Envelope<Weights>> {

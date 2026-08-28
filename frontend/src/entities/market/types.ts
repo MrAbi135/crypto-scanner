@@ -147,6 +147,23 @@ export interface RankedRow {
   readonly display_rank: string
 }
 
+/** One row of §18.4's universe view (DDD T1/T2). */
+export interface UniverseSymbol {
+  readonly symbol: string
+  readonly base_asset: string
+  readonly quote_asset: string
+  readonly status: string
+  readonly tier: string
+  readonly candidate_tier: string | null
+  readonly consecutive_passes: number
+  readonly consecutive_failures: number
+  /** Daily liquidity observations. §1.4 needs seven before evaluating at all. */
+  readonly observation_days: number
+  /** collecting, evaluating or failing -- the server's word, not a derivation. */
+  readonly assessment: string
+  readonly first_seen_at: string
+}
+
 // §13. `freshness` is always present; `versions` only on doctrine-derived rows.
 export interface Freshness {
   readonly state: string
@@ -185,6 +202,9 @@ export interface Envelope<T> {
      */
     readonly gate_passers?: number
     readonly below_floor?: number
+    /** §1.4's two sevens, published so a counter has a denominator. */
+    readonly required_observation_days?: number
+    readonly required_promotion_days?: number
   }
 }
 

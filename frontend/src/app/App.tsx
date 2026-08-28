@@ -15,6 +15,7 @@ import { useState } from 'react'
 import { ChartScreen } from '@features/chart/ChartScreen'
 import { RankingsScreen } from '@features/scanner/RankingsScreen'
 import { ScannerScreen } from '@features/scanner/ScannerScreen'
+import { UniverseScreen } from '@features/scanner/UniverseScreen'
 
 import './app.css'
 
@@ -22,6 +23,7 @@ const VIEWS = [
   { id: 'feed', label: 'Live feed' },
   { id: 'rankings', label: 'Rankings' },
   { id: 'chart', label: 'Chart' },
+  { id: 'universe', label: 'Universe' },
 ] as const
 
 type ViewId = (typeof VIEWS)[number]['id']
@@ -57,6 +59,7 @@ export function App() {
         {view === 'feed' && <ScannerScreen onShowFloors={() => setView('rankings')} />}
         {view === 'rankings' && <RankingsScreen />}
         {view === 'chart' && <ChartScreen />}
+        {view === 'universe' && <UniverseScreen />}
       </div>
     </main>
   )
