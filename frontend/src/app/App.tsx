@@ -16,6 +16,7 @@ import { ChartScreen } from '@features/chart/ChartScreen'
 import { RankingsScreen } from '@features/scanner/RankingsScreen'
 import { ScannerScreen } from '@features/scanner/ScannerScreen'
 import { UniverseScreen } from '@features/scanner/UniverseScreen'
+import { CommandPalette } from '@features/palette/CommandPalette'
 import { StatusStrip } from '@features/status/StatusStrip'
 
 import './app.css'
@@ -38,6 +39,10 @@ export function App() {
     setView('chart')
   }
 
+  function isView(id: string): id is ViewId {
+    return VIEWS.some((view) => view.id === id)
+  }
+
   return (
     <main>
       <h1 className="app__title">Institutional AI Crypto Scanner</h1>
@@ -46,6 +51,18 @@ export function App() {
           covered is not a property of the panel you happen to be looking at,
           and a board of stale rows looks identical to a board of fresh ones. */}
       <StatusStrip />
+
+      {/* Chrome, not a screen: it is reachable from every view and renders
+          nothing until someone presses the shortcut. A symbol chosen here opens
+          on H1 -- the palette has no timeframe to offer and the chart's own
+          selector is one control away, which beats four rows per symbol. */}
+      <CommandPalette
+        views={VIEWS}
+        onScreen={(id) => {
+          if (isView(id)) setView(id)
+        }}
+        onSymbol={(symbol) => openChart(symbol, 'H1')}
+      />
 
       {/* `tablist` and not a nav of links: these are panels swapped in place,
           and calling them links would promise a back button that does not
