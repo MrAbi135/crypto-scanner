@@ -1,0 +1,47 @@
+.status {
+  border: 1px solid var(--colour-border, #e5e7eb);
+  border-left-width: 4px;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  margin: 0 0 1rem;
+  font-size: 0.8125rem;
+}
+
+.status--ok {
+  border-left-color: var(--colour-ok, #16a34a);
+}
+
+.status--troubled {
+  border-left-color: var(--colour-warn, #d97706);
+}
+
+/* Unknown is neither. A grey strip is read as "nothing to report"; this one
+   has to read as "we could not look". */
+.status--unknown {
+  border-left-color: var(--colour-unknown, #6b7280);
+  background: var(--colour-unknown-bg, #f9fafb);
+}
+
+.status__line {
+  margin: 0;
+}
+
+.status__more {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.status__list {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.status__gap {
+  margin: 0.4rem 0 0;
+  color: var(--colour-muted, #6b7280);
+}

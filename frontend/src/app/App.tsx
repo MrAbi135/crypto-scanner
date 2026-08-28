@@ -16,6 +16,7 @@ import { ChartScreen } from '@features/chart/ChartScreen'
 import { RankingsScreen } from '@features/scanner/RankingsScreen'
 import { ScannerScreen } from '@features/scanner/ScannerScreen'
 import { UniverseScreen } from '@features/scanner/UniverseScreen'
+import { StatusStrip } from '@features/status/StatusStrip'
 
 import './app.css'
 
@@ -34,6 +35,11 @@ export function App() {
   return (
     <main>
       <h1 className="app__title">Institutional AI Crypto Scanner</h1>
+
+      {/* Above the views and outside the switcher: whether the platform is
+          covered is not a property of the panel you happen to be looking at,
+          and a board of stale rows looks identical to a board of fresh ones. */}
+      <StatusStrip />
 
       {/* `tablist` and not a nav of links: these are panels swapped in place,
           and calling them links would promise a back button that does not

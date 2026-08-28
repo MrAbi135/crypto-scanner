@@ -22,7 +22,15 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
-      const data = url.includes('/rankings/weights')
+      const data = url.includes('/dashboard/status')
+        ? {
+            feeds: [],
+            behind_count: 0,
+            degraded: [],
+            degraded_count: 0,
+            not_measured: ['storm_mode — lives in the engine process'],
+          }
+        : url.includes('/rankings/weights')
         ? { param_set_version: 'v', factors: [], grades: [], below_lowest_floor: 'not published' }
         : url.includes('/liquidity')
           ? { pools: [], sweeps: [] }
@@ -83,6 +91,19 @@ describe('App shell', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'See the floors' }))
 
     expect(await screen.findByRole('heading', { name: 'Rankings' })).toBeDefined()
+  })
+
+  it('keeps the status strip outside the switcher', async () => {
+    // Whether the platform is covered is not a property of the panel you
+    // happen to be looking at. A board of stale rows looks identical to a
+    // board of fresh ones, on every tab.
+    render(<App />)
+
+    expect(await screen.findByTestId('status-not-measured')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Rankings' }))
+
+    expect(screen.getByTestId('status-not-measured')).toBeDefined()
   })
 
   it('says which view is selected, in both channels', async () => {

@@ -14,6 +14,7 @@ import type {
   Envelope,
   FeedRow,
   LiquidityMap,
+  PlatformStatus,
   RankedRow,
   StructureEvent,
   UniverseSymbol,
@@ -79,6 +80,12 @@ export function fetchUniverse(
   // Filters go to the server, as everywhere: §9 refuses one it cannot apply
   // rather than letting a client narrow a list it was already sent.
   return request<readonly UniverseSymbol[]>('/scanner/universe', filters)
+}
+
+export function fetchStatus(): Promise<Envelope<PlatformStatus>> {
+  // No filters and no paging: §18.3's strip is the whole platform's state, and
+  // a paged one would report "0 behind" for the page it happened to fetch.
+  return request<PlatformStatus>('/dashboard/status', {})
 }
 
 export function fetchWeights(): Promise<Envelope<Weights>> {
