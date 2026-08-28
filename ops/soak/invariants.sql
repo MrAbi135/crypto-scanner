@@ -256,3 +256,45 @@ from newest n
 join tf on tf.name = n.timeframe
 where n.last_event is null
    or n.last_candle - n.last_event > tf.step * 12;
+
+
+-- ===========================================================================
+-- H. The daily universe loop, still running
+-- ===========================================================================
+-- §1.4 promotes a symbol on seven consecutive daily evaluations, and the
+-- snapshot refuses to build under seven daily observations -- two sevens in
+-- series. Until the first completes, every symbol sits at
+-- `INELIGIBLE / QUARANTINE` with `consecutive_passes = 0`.
+--
+-- **That is indistinguishable from the loop being dead**, which is the whole
+-- reason for this check. If the worker's midnight job stopped, the table would
+-- look exactly as it does today and nothing would notice: no error, no
+-- backlog, no stale pass -- just a promotion that never arrives, weeks later.
+--
+-- Two days of grace. The job runs at UTC midnight, so one missed day could be
+-- a restart landing across it; two consecutive is the loop.
+
+with newest as (
+    select max(observed_at)::date as last_day from market.liquidity_history
+)
+select 'H. daily universe loop has stopped' as check,
+       coalesce(last_day::text, '(no observations at all)') as last_observation,
+       (current_date - coalesce(last_day, date '2000-01-01')) as days_ago
+from newest
+where last_day is null or current_date - last_day > 2;
+
+-- H2. Accumulating, but not for everything it syncs.
+--
+-- The loop iterates `list_observable()`; a symbol that is observable and has
+-- no history is one the collector is failing on, and it would wait for its
+-- seven days forever while its neighbours advance.
+
+select 'H2. observable symbol with no history' as check,
+       s.exchange_symbol, s.status
+from market.symbols s
+left join market.liquidity_history h on h.exchange_symbol = s.exchange_symbol
+where s.status = 'QUARANTINE'
+  and h.exchange_symbol is null
+  -- Only once the loop has had a night to reach them.
+  and exists (select 1 from market.liquidity_history)
+limit 10;
