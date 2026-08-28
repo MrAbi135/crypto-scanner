@@ -213,3 +213,62 @@ def test_two_hashes_of_one_password_differ() -> None:
     table is a rainbow-table lookup."""
     assert hash_password(GOOD) != hash_password(GOOD)
     assert verify_password(GOOD, hash_password(GOOD))
+
+
+@pytest.mark.asyncio
+async def test_set_password_replaces_the_credential() -> None:
+    """`create` refuses an address that already exists, and rightly -- a
+    provisioning re-run must not silently overwrite a live credential. This is
+    the deliberate version, which is why it is a separate verb."""
+
+    svc, _, _ = service()
+
+    await svc.create("ops@example.com", GOOD, now=NOW)
+
+    changed = await svc.set_password("ops@example.com", "a-different-passphrase")
+
+    assert changed is not None
+    assert await svc.authenticate("ops@example.com", "a-different-passphrase") is not None
+    # The old one stops working, which is the entire point.
+    assert await svc.authenticate("ops@example.com", GOOD) is None
+
+
+@pytest.mark.asyncio
+async def test_set_password_folds_the_address_like_every_other_lookup() -> None:
+    """Otherwise the operator who created `Ops@Example.COM` cannot reset it
+    without remembering the capitalisation they used."""
+
+    svc, _, _ = service()
+
+    await svc.create("Ops@Example.COM", GOOD, now=NOW)
+
+    assert await svc.set_password("OPS@example.com", "a-different-passphrase") is not None
+
+
+@pytest.mark.asyncio
+async def test_set_password_refuses_an_address_with_no_account() -> None:
+    """Distinct from `create`'s "already exists" for the mirror reason: this
+    one needs an account and there is none. Creating it here would turn a
+    typo'd address into a second account nobody asked for."""
+
+    svc, users, _ = service()
+
+    assert await svc.set_password("nobody@example.com", GOOD) is None
+    assert users.rows == {}
+
+
+@pytest.mark.asyncio
+async def test_set_password_applies_the_same_policy_as_create() -> None:
+    """A password set here has to be one `authenticate` will take, so it goes
+    through the same gate. Refused *before* anything is written."""
+
+    svc, _, _ = service()
+
+    await svc.create("ops@example.com", GOOD, now=NOW)
+
+    with pytest.raises(PasswordPolicyError):
+        await svc.set_password("ops@example.com", "x" * (MIN_PASSWORD_LENGTH - 1))
+
+    # The old credential survives a refusal; a half-applied reset would lock
+    # the account out with no way back in.
+    assert await svc.authenticate("ops@example.com", GOOD) is not None

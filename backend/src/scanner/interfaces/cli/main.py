@@ -272,6 +272,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="environment variable holding the password (default: SCANNER_NEW_PASSWORD)",
     )
 
+    users_set_password = users_sub.add_parser(
+        "set-password",
+        help="Replace an existing account's password and end its sessions",
+    )
+
+    users_set_password.add_argument(
+        "--email",
+        required=True,
+    )
+
+    # Same reason as `create`: never an argument.
+    users_set_password.add_argument(
+        "--password-env",
+        default="SCANNER_NEW_PASSWORD",
+        help="environment variable holding the password (default: SCANNER_NEW_PASSWORD)",
+    )
+
+    # Opt-out rather than opt-in. A password change that leaves old sessions
+    # standing does not lock anyone out of anything, which is the whole point
+    # of changing it; so revoking is the default and keeping them is the flag
+    # someone has to reach for and mean.
+    users_set_password.add_argument(
+        "--keep-sessions",
+        action="store_true",
+        help="leave existing sessions alive (default: end them all)",
+    )
+
     users_sub.add_parser(
         "list",
         help="Accounts on this database",
