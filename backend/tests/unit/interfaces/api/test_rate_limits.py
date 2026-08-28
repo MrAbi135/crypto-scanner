@@ -107,6 +107,40 @@ def test_the_budget_is_reported_on_a_served_response() -> None:
     assert int(response.headers["X-RateLimit-Reset"]) == 60
 
 
+def test_the_budget_is_reported_on_a_refused_one_too() -> None:
+    """§11 says *every* response, and a 401 is a response.
+
+    The dependency sets these on the injected `Response`, which FastAPI carries
+    onto a served reply and nowhere else -- an endpoint that raises is rendered
+    by the exception handler from a fresh response. Asserting only the 200 path
+    left that hole open, and it was open on the host: an unauthenticated call
+    to a live endpoint came back with no budget headers at all.
+    """
+    client, _ = build()
+
+    unauthenticated = client.get(LIGHT)
+
+    assert unauthenticated.status_code == 401
+    assert unauthenticated.headers["X-RateLimit-Limit"] == str(FREE_PER_MINUTE["read:light"])
+    # Charged, not merely reported: an unauthenticated flood must cost its
+    # sender something.
+    assert (
+        int(unauthenticated.headers["X-RateLimit-Remaining"]) == FREE_PER_MINUTE["read:light"] - 1
+    )
+
+
+def test_a_refusal_keeps_the_authenticate_header_it_was_given() -> None:
+    """RFC 6750 requires `WWW-Authenticate` on a 401 from a bearer-protected
+    resource. Merging the budget in must not displace it."""
+
+    client, _ = build()
+
+    unauthenticated = client.get(LIGHT)
+
+    assert "WWW-Authenticate" in unauthenticated.headers
+    assert "X-RateLimit-Limit" in unauthenticated.headers
+
+
 def test_the_budget_counts_down() -> None:
     client, clock = build()
 
