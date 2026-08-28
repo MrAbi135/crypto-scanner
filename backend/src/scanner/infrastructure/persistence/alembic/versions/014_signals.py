@@ -20,10 +20,9 @@ with the other four "exactly once, atomically" (§12.2). The index makes that
 query cheap; the database cannot make it a constraint without a mutable
 column, and adding one would cost the immutability the table exists for.
 
-**Worth a ruling.** Either the DDD's index requirement is amended to match, or
-T17 gains a closed-at column and stops being append-only. I have taken the
-first reading because immutability is the stronger promise — Constitution
-§45.5 calls it constitutional — but the document should say which.
+**Ruled.** DDD v1.0.1 (2026-08-28) amends the index requirement to match this
+migration: write-time uniqueness, plain index, no mutable column. Immutability
+(Constitution §45.5) outranks a database-level constraint.
 
 Naming follows the detection schema as migrations 012 and 013 did: `symbol`
 and `algo_version` as plain columns rather than T17's `symbol_id` and
