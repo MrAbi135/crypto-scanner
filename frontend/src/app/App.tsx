@@ -19,6 +19,7 @@ import { useCallback } from 'react'
 
 import { ChartScreen } from '@features/chart/ChartScreen'
 import { RankingsScreen } from '@features/scanner/RankingsScreen'
+import { HistoryScreen } from '@features/history/HistoryScreen'
 import { SignalScreen } from '@features/signal/SignalScreen'
 import { ScannerScreen } from '@features/scanner/ScannerScreen'
 import { UniverseScreen } from '@features/scanner/UniverseScreen'
@@ -34,6 +35,7 @@ const VIEWS = [
   { id: 'rankings', label: 'Rankings' },
   { id: 'chart', label: 'Chart' },
   { id: 'universe', label: 'Universe' },
+  { id: 'history', label: 'Track record' },
 ] as const
 
 export function App() {
@@ -137,6 +139,9 @@ export function App() {
             box lands in the address bar and does not bounce. */}
         {view === 'chart' && <ChartScreen openOn={chartContext} onContext={onChartContext} />}
         {view === 'universe' && <UniverseScreen />}
+        {view === 'history' && (
+          <HistoryScreen onOpenSignal={(signalId) => navigate({ view: 'signal', signalId })} />
+        )}
         {/* Not a tab: a detail screen reached from a row or a link. While it
             is open no tab reads selected, which is true -- the reader is not
             on any of the four boards. */}
