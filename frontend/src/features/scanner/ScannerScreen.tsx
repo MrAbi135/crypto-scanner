@@ -31,9 +31,11 @@ interface Loaded {
 export interface ScannerScreenProps {
   /** Where "See the floors" goes. Supplied so this screen owns no routing. */
   readonly onShowFloors?: () => void
+  /** Open a row's own context on the chart. Absent: the column is not drawn. */
+  readonly onOpenChart?: (symbol: string, timeframe: string) => void
 }
 
-export function ScannerScreen({ onShowFloors }: ScannerScreenProps) {
+export function ScannerScreen({ onShowFloors, onOpenChart }: ScannerScreenProps) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(true)
@@ -127,11 +129,18 @@ export function ScannerScreen({ onShowFloors }: ScannerScreenProps) {
               <th scope="col">Confidence</th>
               <th scope="col">Entry / invalid / target</th>
               <th scope="col">Age</th>
+              {onOpenChart !== undefined && (
+                <th scope="col">
+                  {/* A header the column needs to exist in the table's own
+                      terms; the buttons under it name their destination. */}
+                  Evidence
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
             {loaded.rows.map((row) => (
-              <SignalRow key={row.signal_id} row={row} />
+              <SignalRow key={row.signal_id} row={row} onOpenChart={onOpenChart} />
             ))}
           </tbody>
         </table>

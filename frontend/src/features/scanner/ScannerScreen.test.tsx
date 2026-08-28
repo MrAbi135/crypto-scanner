@@ -192,6 +192,57 @@ describe('ScannerScreen', () => {
     expect(violations, describeViolations(violations)).toEqual([])
   })
 
+  it('offers a way from a row to its own chart', async () => {
+    // The transcription step this removes: a reader who saw ETHUSDT H1 here
+    // had to switch tabs and retype both.
+    const opened: string[][] = []
+
+    stubFeed([ROW])
+
+    render(<ScannerScreen onOpenChart={(symbol, tf) => opened.push([symbol, tf])} />)
+
+    fireEvent.click(await screen.findByTestId(`open-${ROW.signal_id}`))
+
+    expect(opened).toEqual([[ROW.symbol, ROW.timeframe]])
+  })
+
+  it('names each row’s destination rather than twenty identical Opens', async () => {
+    stubFeed([ROW])
+
+    render(<ScannerScreen onOpenChart={() => undefined} />)
+
+    expect(
+      await screen.findByRole('button', {
+        name: `Open ${ROW.symbol} ${ROW.timeframe} on the chart`,
+      }),
+    ).toBeDefined()
+  })
+
+  it('draws no column when there is nowhere to go', async () => {
+    // A header over an empty cell in every row is a column that promises an
+    // action the screen does not have.
+    stubFeed([ROW])
+
+    render(<ScannerScreen />)
+
+    await screen.findByTestId('feed-board')
+
+    expect(screen.queryByTestId(`open-${ROW.signal_id}`)).toBeNull()
+    expect(screen.queryByRole('columnheader', { name: 'Evidence' })).toBeNull()
+  })
+
+  it('is axe-clean with the chart column', async () => {
+    stubFeed([ROW])
+
+    const { container } = render(<ScannerScreen onOpenChart={() => undefined} />)
+
+    await screen.findByTestId('feed-board')
+
+    const violations = await axeViolations(container)
+
+    expect(violations, describeViolations(violations)).toEqual([])
+  })
+
   it('is axe-clean when quiet', async () => {
     stubFeed([], 0)
 

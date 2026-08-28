@@ -12,7 +12,7 @@
 // shape, scale, draw. Every layer between the wire and the pixel is the real
 // one, which is where the mistakes in this feature have actually been.
 
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ChartScreen } from './ChartScreen'
@@ -286,5 +286,62 @@ describe('ChartScreen event timeline', () => {
     summary.click()
 
     await waitFor(() => expect(timeline.textContent).toContain('candle_close'))
+  })
+})
+
+describe('ChartScreen opening context', () => {
+  it('opens on the context it was given', async () => {
+    render(<ChartScreen openOn={{ symbol: 'ETHUSDT', timeframe: 'H4' }} />)
+
+    await waitFor(() => expect(screen.getByLabelText('Symbol')).toBeDefined())
+
+    expect((screen.getByLabelText('Symbol') as HTMLInputElement).value).toBe('ETHUSDT')
+    expect((screen.getByLabelText('Timeframe') as HTMLSelectElement).value).toBe('H4')
+  })
+
+  it('asks the API for that context, not the default one', async () => {
+    render(<ChartScreen openOn={{ symbol: 'ETHUSDT', timeframe: 'H4' }} />)
+
+    await screen.findByTestId('chart')
+
+    const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+    const urls = calls.map((call) => decodeURIComponent(String(call[0])))
+
+    expect(urls.some((url) => url.includes('ETHUSDT') && url.includes('H4'))).toBe(true)
+    expect(urls.some((url) => url.includes('BTCUSDT'))).toBe(false)
+  })
+
+  it('does not drag the reader back when they change context themselves', async () => {
+    // The seeded value is an opening position, not a leash. An effect that
+    // pushed the prop back in on every render would make the symbol box
+    // unusable on this screen.
+    render(<ChartScreen openOn={{ symbol: 'ETHUSDT', timeframe: 'H4' }} />)
+
+    await waitFor(() => expect(screen.getByLabelText('Symbol')).toBeDefined())
+
+    fireEvent.change(screen.getByLabelText('Symbol'), { target: { value: 'SOLUSDT' } })
+
+    await waitFor(() =>
+      expect((screen.getByLabelText('Symbol') as HTMLInputElement).value).toBe('SOLUSDT'),
+    )
+  })
+
+  it('offers a timeframe it was opened on even when it is not one of the four', async () => {
+    // A `select` whose value is not among its options renders blank, and a
+    // blank timeframe beside a loaded chart is a lie about which context is
+    // on screen.
+    render(<ChartScreen openOn={{ symbol: 'BTCUSDT', timeframe: 'D1' }} />)
+
+    await waitFor(() => expect(screen.getByLabelText('Timeframe')).toBeDefined())
+
+    expect((screen.getByLabelText('Timeframe') as HTMLSelectElement).value).toBe('D1')
+  })
+
+  it('still opens on BTCUSDT H1 when nothing sent it anywhere', async () => {
+    render(<ChartScreen />)
+
+    await waitFor(() => expect(screen.getByLabelText('Symbol')).toBeDefined())
+
+    expect((screen.getByLabelText('Symbol') as HTMLInputElement).value).toBe('BTCUSDT')
   })
 })

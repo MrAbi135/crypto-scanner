@@ -37,9 +37,21 @@ interface Loaded {
   readonly doctrineMeta: Meta
 }
 
-export function ChartScreen() {
-  const [symbol, setSymbol] = useState('BTCUSDT')
-  const [timeframe, setTimeframe] = useState<string>('H1')
+export interface ChartScreenProps {
+  /**
+   * The context to open on, when something sent the reader here.
+   *
+   * Read once, as the initial state, and deliberately not synchronised
+   * afterwards: the reader is free to type another symbol, and an effect that
+   * pushed the prop back in would drag them home on every re-render. A caller
+   * that wants to re-open a context remounts this screen -- see App's key.
+   */
+  readonly openOn?: { readonly symbol: string; readonly timeframe: string } | undefined
+}
+
+export function ChartScreen({ openOn }: ChartScreenProps = {}) {
+  const [symbol, setSymbol] = useState(openOn?.symbol ?? 'BTCUSDT')
+  const [timeframe, setTimeframe] = useState<string>(openOn?.timeframe ?? 'H1')
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -128,7 +140,11 @@ export function ChartScreen() {
             onChange={(event) => setTimeframe(event.target.value)}
             aria-label="Timeframe"
           >
-            {TIMEFRAMES.map((option) => (
+            {/* Whatever we were opened on is offered even if it is not one of
+                the four: a `select` whose value is not among its options
+                renders blank, and a blank timeframe beside a loaded chart is a
+                lie about which context is on screen. */}
+            {timeframes(timeframe).map((option) => (
               <option key={option} value={option}>
                 {option}
               </option>
@@ -192,4 +208,10 @@ export function ChartScreen() {
       )}
     </section>
   )
+}
+
+function timeframes(selected: string): readonly string[] {
+  return TIMEFRAMES.includes(selected as (typeof TIMEFRAMES)[number])
+    ? TIMEFRAMES
+    : [...TIMEFRAMES, selected]
 }

@@ -244,3 +244,16 @@
   max-width: 48ch;
   color: var(--colour-muted, #374151);
 }
+
+/* The way out of a row. Sized as a control rather than a link: it is the one
+   thing in the table a reader is meant to hit. */
+.signal__chart {
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--colour-border, #e5e7eb);
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+  white-space: nowrap;
+}

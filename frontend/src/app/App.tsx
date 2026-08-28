@@ -31,6 +31,12 @@ type ViewId = (typeof VIEWS)[number]['id']
 
 export function App() {
   const [view, setView] = useState<ViewId>('feed')
+  const [chart, setChart] = useState<{ symbol: string; timeframe: string } | null>(null)
+
+  function openChart(symbol: string, timeframe: string) {
+    setChart({ symbol, timeframe })
+    setView('chart')
+  }
 
   return (
     <main>
@@ -62,9 +68,19 @@ export function App() {
       </div>
 
       <div id={`panel-${view}`} role="tabpanel" aria-labelledby={`tab-${view}`}>
-        {view === 'feed' && <ScannerScreen onShowFloors={() => setView('rankings')} />}
+        {view === 'feed' && (
+          <ScannerScreen onShowFloors={() => setView('rankings')} onOpenChart={openChart} />
+        )}
         {view === 'rankings' && <RankingsScreen />}
-        {view === 'chart' && <ChartScreen />}
+        {/* The panels are unmounted when they are not shown, and that is what
+            makes `openOn` enough on its own: every arrival at the chart is a
+            fresh mount, so the requested context is read afresh each time.
+            A request nonce and an explicit `key` were written here first and
+            removed -- two mutations to them changed no test, because nothing
+            could reach the chart without remounting it anyway. If the chart
+            ever stays mounted while the feed is visible, this is the line that
+            has to change. */}
+        {view === 'chart' && <ChartScreen openOn={chart ?? undefined} />}
         {view === 'universe' && <UniverseScreen />}
       </div>
     </main>
