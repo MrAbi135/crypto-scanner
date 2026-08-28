@@ -91,7 +91,8 @@ if (-not $NoUpload) {
     $install = @'
 cd ~/crypto-scanner || exit 2
 cp /tmp/invariants.sql /tmp/check_invariants.sh /tmp/leg_invariant.py ops/soak/
-sed -i 's/\r$//' ops/soak/check_invariants.sh
+sed -i 's/\r$//' ops/soak/check_invariants.sh ops/soak/acknowledged.txt
+$//' ops/soak/check_invariants.sh ops/soak/acknowledged.txt
 chmod +x ops/soak/check_invariants.sh
 bash -n ops/soak/check_invariants.sh
 '@ -replace "`r`n", "`n"

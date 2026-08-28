@@ -16,12 +16,115 @@
 
 set -uo pipefail
 
+problems=0
+flag() { echo "  !! $*"; problems=$((problems + 1)); }
+
+trim() { printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
+
+ACK_FILE=ops/soak/acknowledged.txt
+
+# ---------------------------------------------------------------------------
+# Acknowledged violations: quieter, never hidden, and impossible to forget.
+# ---------------------------------------------------------------------------
+# Before this existed, check E fired every hour for twenty hours on one known
+# defect whose fix was already merged and waiting on a soak window. Twenty
+# identical "INVARIANTS FIRED" lines is not twenty warnings; it is one warning
+# and nineteen reasons to stop reading -- and the twenty-first would have been
+# a new defect nobody looked at.
+#
+# So an acknowledgement silences the *count*, never the line, and it rots
+# loudly: past its date it fires again, and if it ever matches nothing it fires
+# too. The second is the one that matters. A stale acknowledgement leaves the
+# check permanently blind to that defect's return, and the only way back to a
+# clean run is for somebody to delete the line.
+triage_violations() {
+  local all="$1" line i j matched acked=0 unacked=0 today
+  local -a patterns=() untils=() whys=() hits=()
+
+  if [ -f "$ACK_FILE" ]; then
+    # Parsed from the right, in bash, with no field splitting at all.
+    # The patterns are themselves pipe-separated violation lines, so `read`
+    # with IFS='|' took the first two fields and dumped the whole rest into
+    # the third: every pattern was truncated to its first field -- silently
+    # widened to match anything with that prefix -- and the date variable
+    # held "A1", so nothing could ever expire. Neither failure looked like
+    # one; the check had simply stopped discriminating.
+    # No explicit CR strip: an earlier line here did that, and removing it
+    # broke no test, because `trim` runs on every extracted field and
+    # `[[:space:]]` already covers a carriage return. The CRLF case is
+    # still tested -- the file is edited on Windows and copied to the host
+    # -- but by the code that actually handles it.
+    while IFS= read -r raw; do
+      case "$(trim "$raw")" in ''|'#'*) continue ;; esac
+
+      # why = after the last pipe, until = before it, pattern = the rest.
+      case "$raw" in *'|'*'|'*) ;; *) continue ;; esac
+
+      rest_why=${raw##*|}
+      head=${raw%|*}
+      rest_until=${head##*|}
+      pattern=${head%|*}
+
+      patterns+=("$(trim "$pattern")")
+      untils+=("$(trim "$rest_until")")
+      whys+=("$(trim "$rest_why")")
+      hits+=(0)
+    done < "$ACK_FILE"
+  fi
+
+  today=$(date -u +%F)
+
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+
+    matched=-1
+
+    for i in "${!patterns[@]}"; do
+      case "$line" in
+        *"${patterns[$i]}"*) matched=$i; hits[$i]=1; break ;;
+      esac
+    done
+
+    if [ "$matched" -lt 0 ]; then
+      echo "  $line"
+      unacked=$((unacked + 1))
+    elif [[ "$today" > "${untils[$matched]}" ]]; then
+      # Not a grace period that renews itself. A fix that missed the date it
+      # was given is news, which is the whole reason a date is required.
+      echo "  $line"
+      flag "acknowledgement expired ${untils[$matched]}: ${whys[$matched]}"
+    else
+      echo "  ~~ known (until ${untils[$matched]}): $line"
+      acked=$((acked + 1))
+    fi
+  done <<< "$all"
+
+  [ "$unacked" -gt 0 ] && flag "$unacked database invariant violation(s)"
+
+  for j in "${!patterns[@]}"; do
+    if [ "${hits[$j]}" -eq 0 ]; then
+      # The defect is gone and the line is still here. Left alone, this check
+      # is now blind to that defect coming back.
+      flag "acknowledgement matched nothing -- delete it from $ACK_FILE: ${patterns[$j]}"
+    fi
+  done
+
+  [ "$acked" -gt 0 ] && echo "  ($acked acknowledged; see $ACK_FILE)"
+
+  return 0
+}
+
+# Sourced by `test_check_invariants.sh` to reach the helpers above without
+# running any check. Placed here rather than at the top so the helpers are
+# defined and nothing below -- which needs docker, a database and the repo --
+# is even parsed for a caller that only wants to test the triage rules.
+if [ "${INVARIANTS_LIB_ONLY:-}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 cd ~/crypto-scanner || exit 2
 C="docker compose -f ops/compose/docker-compose.dev.yml"
 PSQL="docker exec -i scanner-dev-db-1 psql -U scanner -d scanner"
-
-problems=0
-flag() { echo "  !! $*"; problems=$((problems + 1)); }
 
 release=$(grep -h '^SCANNER_RELEASE' ops/env/dev.env | cut -d= -f2)
 echo "invariants @ $(date -u +%Y-%m-%dT%H:%M:%SZ)  release=${release}"
@@ -150,9 +253,7 @@ else
   violations=$(echo "$out" | grep -E '^[A-G]\. ' || true)
 
   if [ -n "$violations" ]; then
-    echo "$violations" | sed 's/^/  /'
-    n=$(echo "$violations" | grep -c .)
-    flag "$n database invariant violation(s)"
+    triage_violations "$violations"
   else
     echo "  clean"
   fi
