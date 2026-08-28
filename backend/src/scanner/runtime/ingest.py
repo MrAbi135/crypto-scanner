@@ -25,6 +25,7 @@ from scanner.application.ports import CandleRepository, Clock
 from scanner.config import get_settings
 from scanner.config.processes import IngestSettings
 from scanner.domain.common import Candle, TradePrint
+from scanner.domain.common.coverage import Coverage, coverage_of
 from scanner.infrastructure.clock import SystemClock
 from scanner.infrastructure.exchanges.binance import BinanceRestAdapter, RateBudget
 from scanner.infrastructure.exchanges.binance.ws.adapter import (
@@ -190,30 +191,22 @@ def build_readiness_probe(
 
                 continue
 
-            latest = await candles.latest_open_time(symbol, timeframe)
+            # `coverage_of` rather than the arithmetic inline: §18.3's status
+            # row asks the same question of the same table, and two copies of
+            # it would drift into a dashboard calling a feed healthy while
+            # this probe holds the process unready.
+            state = coverage_of(
+                await candles.latest_open_time(symbol, timeframe),
+                timeframe,
+                now,
+            )
 
-            if latest is None:
-                details[key] = "NO_DATA"
+            details[key] = state.value
+
+            # AWAITING_CLOSE is ready: the engine reads stored candles, and
+            # this is what it will read.
+            if state is not Coverage.AWAITING_CLOSE:
                 all_ready = False
-                continue
-
-            # `latest` is an open time, so the candle it names closed
-            # one interval later. One further interval of slack is the
-            # window in which the next close has not happened yet --
-            # normal for every timeframe, all the time.
-            closed_at = latest + timeframe.duration
-
-            if now - closed_at <= timeframe.duration:
-                # Covered, and lag not yet measured. Ready: the engine
-                # reads stored candles, and this is what it will read.
-                details[key] = "AWAITING_CLOSE"
-                continue
-
-            # Covered but behind. Distinguished from `NO_DATA` because
-            # "nothing has ever arrived" and "arrivals stopped" call
-            # for different investigations.
-            details[key] = "BEHIND"
-            all_ready = False
 
         return all_ready, details
 

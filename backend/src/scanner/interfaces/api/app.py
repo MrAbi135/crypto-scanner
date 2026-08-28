@@ -46,6 +46,7 @@ from scanner.application.ports.track_record import (
 from scanner.application.ranking import RankingSnapshotService
 from scanner.interfaces.api.auth import router as auth_router
 from scanner.interfaces.api.coins import router as coins_router
+from scanner.interfaces.api.dashboard import router as dashboard_router
 from scanner.interfaces.api.errors import install_error_handlers
 from scanner.interfaces.api.market import router as market_router
 from scanner.interfaces.api.me import router as me_router
@@ -73,6 +74,7 @@ IMPLEMENTED_ROWS: tuple[str, ...] = (
     "GET /api/v1/scanner/feed",
     "GET /api/v1/market/incidents",
     "GET /api/v1/scanner/universe",
+    "GET /api/v1/dashboard/status",
     "GET /api/v1/rankings/weights",
     "GET /api/v1/signals/history",
     "GET /api/v1/signals/statistics",
@@ -180,5 +182,6 @@ def build_read_api(
     app.include_router(signals_router, dependencies=protected)
     app.include_router(market_router, dependencies=protected)
     app.include_router(coins_router, dependencies=protected)
+    app.include_router(dashboard_router, dependencies=protected)
 
     return app

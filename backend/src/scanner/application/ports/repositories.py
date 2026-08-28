@@ -167,6 +167,17 @@ class CandleRepository(Protocol):
         timeframe: Timeframe,
     ) -> datetime | None: ...
 
+    async def newest_per_series(self) -> Sequence[tuple[str, Timeframe, datetime]]:
+        """Every stored series and its newest open time, in one query.
+
+        §18.3's status row asks about all of them at once, and a call per
+        series would make the strip cost grow with the universe rather than
+        with the answer. The set is derived from the candles rather than from
+        configuration on purpose: the question is what has actually arrived,
+        and a configured feed with no rows is exactly the thing worth seeing.
+        """
+        ...
+
     async def fetch_series(
         self,
         symbol: str,
