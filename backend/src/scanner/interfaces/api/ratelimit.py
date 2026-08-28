@@ -1,8 +1,16 @@
-"""§11's token buckets, and the middleware that enforces them.
+"""§11's token buckets, and the dependency that enforces them.
 
 §11 puts this "at API layer with edge backstop (TAD §23)", so it is policy
 about requests rather than doctrine about markets, and it lives here rather
 than in `domain`.
+
+**A dependency, not middleware.** `enforce_rate_limit` is declared once on the
+app so no router can be mounted outside it. It has to run after the router and
+after `require_user`, because it needs the matched template to know the class
+and the verified caller to know the bucket -- and `BaseHTTPMiddleware` runs
+before both. A first draft was middleware and had to re-implement route
+matching, then keyed every authenticated caller by address because no user had
+been resolved yet.
 
 **Two things §11 states that are easy to half-do.** Every response carries
 `X-RateLimit-Limit/Remaining/Reset` -- every response, not only the refused
@@ -19,9 +27,9 @@ of component and would fail the same way.
 **Buckets are per process.** One API container runs today, so this is the whole
 enforcement; behind two it would be twice the stated limit. `RateLimitStore` is
 a protocol for exactly that reason -- the Redis implementation is a store, not
-a rewrite -- and `build_read_api` logs which store it was given so a deployment
-cannot quietly scale past what this can enforce. §11's own answer to the
-residue is the edge backstop.
+a rewrite. Nothing here detects a second instance, so that constraint lives in
+this paragraph and in the deployment, which is the weakest part of the piece.
+§11's own answer to the residue is the edge backstop.
 """
 
 from __future__ import annotations
