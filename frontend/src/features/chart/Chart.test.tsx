@@ -466,3 +466,82 @@ describe('Chart inspection', () => {
     expect(marker.getAttribute('role')).toBeNull()
   })
 })
+
+describe('Chart zone states', () => {
+  it('carries the state so the stylesheet can treat it', () => {
+    render(
+      <Chart
+        candles={[candle(1)]}
+        zones={[zone('z1', { state: 'MITIGATED' })]}
+        pools={[]}
+        structure={[]}
+        sweeps={[]}
+      />,
+    )
+
+    expect(screen.getByTestId('zone-z1').getAttribute('data-state')).toBe('MITIGATED')
+  })
+
+  it('marks a state it has no treatment for instead of drawing it as fresh', () => {
+    // The failure this guards: an unknown state matches no rule, inherits the
+    // base `.zone` wash -- which is the FRESH treatment -- and the chart quietly
+    // asserts a zone is untouched. That is what shipped before §16.3 was
+    // implemented, and it comes back on its own the next time the server grows
+    // a state.
+    render(
+      <Chart
+        candles={[candle(1)]}
+        zones={[zone('z1', { state: 'SOMETHING_NEW' })]}
+        pools={[]}
+        structure={[]}
+        sweeps={[]}
+      />,
+    )
+
+    expect(screen.getByTestId('zone-z1').getAttribute('class')).toContain('zone--untreated')
+  })
+
+  it('does not mark a state it does know', () => {
+    render(
+      <Chart
+        candles={[candle(1)]}
+        zones={[zone('z1', { state: 'TOUCHED' })]}
+        pools={[]}
+        structure={[]}
+        sweeps={[]}
+      />,
+    )
+
+    expect(screen.getByTestId('zone-z1').getAttribute('class')).not.toContain('untreated')
+  })
+
+  it('counts untreated zones in the label a screen reader hears', () => {
+    // Otherwise the loud outline is visible only to someone looking at it, and
+    // the chart's own description says everything is fine.
+    render(
+      <Chart
+        candles={[candle(1)]}
+        zones={[zone('z1', { state: 'SOMETHING_NEW' })]}
+        pools={[]}
+        structure={[]}
+        sweeps={[]}
+      />,
+    )
+
+    expect(screen.getByTestId('chart').getAttribute('aria-label')).toContain('no treatment for')
+  })
+
+  it('says nothing about treatments when every state is known', () => {
+    render(
+      <Chart
+        candles={[candle(1)]}
+        zones={[zone('z1', { state: 'FRESH' })]}
+        pools={[]}
+        structure={[]}
+        sweeps={[]}
+      />,
+    )
+
+    expect(screen.getByTestId('chart').getAttribute('aria-label')).not.toContain('treatment')
+  })
+})

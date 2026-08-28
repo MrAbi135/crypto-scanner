@@ -23,6 +23,7 @@ import {
 } from '@features/chart/inspection'
 import { sweepKey, sweepMarkers } from '@features/chart/sweeps'
 import { swingKey, swingMarkers } from '@features/chart/swings'
+import { isTreated } from '@features/chart/zoneState'
 
 const VIEWPORT: Viewport = { width: 1200, height: 600, padding: 24 }
 
@@ -63,6 +64,12 @@ export function Chart({
   // Objects far from price are clipped so the candles stay readable, and
   // the count is surfaced so nothing vanishes without the chart saying so.
   const { shown, clipped } = visibleZones(zones, price)
+
+  // A state this build has no treatment for is drawn loudly and counted, not
+  // quietly rendered as though it were FRESH. See `zoneState.ts`: the silent
+  // default is exactly the failure §16.3's scale was added to end, and it comes
+  // back on its own the next time the server grows a state.
+  const untreated = shown.filter((zone) => !isTreated(zone.state))
   const swings = swingMarkers(structure)
   const taken = sweepMarkers(sweeps)
 
@@ -122,7 +129,11 @@ export function Chart({
         // is what this actually is, in both modes; without an inspector it is
         // a group whose children happen to be inert.
         role="group"
-        aria-label={`Price chart with ${candles.length} candles, ${shown.length} of ${zones.length} zones in view, ${pools.length} liquidity pools, ${swings.length} swings and ${taken.length} sweeps`}
+        aria-label={`Price chart with ${candles.length} candles, ${shown.length} of ${zones.length} zones in view, ${pools.length} liquidity pools, ${swings.length} swings and ${taken.length} sweeps${
+          untreated.length === 0
+            ? ''
+            : `; ${untreated.length} zones are in a state this chart has no treatment for`
+        }`}
         data-testid="chart"
       >
         {/* Zones first: they are context and belong behind the price. */}
@@ -149,7 +160,9 @@ export function Chart({
                 height={Math.max(1, bottom - top)}
                 className={`zone zone--${zone.polarity.toLowerCase()}${
                   zone.stale_context ? ' zone--stale' : ''
-                }${selected(`zone:${zone.zone_id}`)}`}
+                }${isTreated(zone.state) ? '' : ' zone--untreated'}${selected(
+                  `zone:${zone.zone_id}`,
+                )}`}
               />
             )
           })}

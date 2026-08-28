@@ -80,6 +80,93 @@
   stroke-dasharray: 6 4;
 }
 
+/* Blueprint §16.3's zone-state scale.
+   ----------------------------------
+   The chart already carried `data-state` and nothing read it, so a MITIGATED
+   zone was drawn exactly like a FRESH one. That is not a cosmetic gap on this
+   screen: it exists so the developer can judge a marked-up chart by eye, and an
+   instrument that renders two different facts identically is one that cannot be
+   used for the judgement it was built for.
+
+   §16.3 gives five values. Opacity carries the ordering -- fresher is more
+   present -- and each step also changes something that is not opacity, because
+   a reader cannot rank two washes side by side and colour is never the sole
+   carrier (Blueprint §158). */
+
+/* Untouched, and the strongest statement the chart makes. `OPEN` is the FVG
+   family's word for the same thing -- §8.3.1's scoring table was once written
+   in only one of the two vocabularies and every FVG scored zero for spelling
+   "untouched" differently, which is a mistake worth not repeating in CSS. */
+.zone[data-state='FRESH'],
+.zone[data-state='OPEN'] {
+  fill-opacity: 0.14;
+  stroke-opacity: 0.6;
+}
+
+/* Price has been in it and it held. Still live, visibly used. */
+.zone[data-state='TESTED'],
+.zone[data-state='TOUCHED'] {
+  fill-opacity: 0.1;
+  stroke-opacity: 0.45;
+  stroke-dasharray: 2 3;
+}
+
+/* Spent. §16.3 puts it in muted text; here that is a wash with no fill left to
+   speak of and a solid thin edge, so its geometry is still checkable. */
+/* CE_FILLED is the FVG family's spent-but-present state: §5's consequent
+   encroachment has been filled, so what remains is history with geometry. */
+.zone[data-state='MITIGATED'],
+.zone[data-state='CE_FILLED'] {
+  fill-opacity: 0.04;
+  stroke-opacity: 0.35;
+}
+
+/* §16.3 asks for a strikethrough. An SVG rect has no text to strike, so the
+   equivalent that survives greyscale is a cross-hatched edge: dotted outline at
+   full contrast, no wash at all. */
+.zone[data-state='INVALIDATED'],
+.zone[data-state='INVERTED'] {
+  fill-opacity: 0;
+  stroke-opacity: 0.55;
+  stroke-dasharray: 1 3;
+}
+
+/* "Ghost 30%". Present enough to explain a gap in the record, quiet enough
+   never to be mistaken for something price can still react to. */
+.zone[data-state='EXPIRED'],
+.zone[data-state='DEAD'],
+.zone[data-state='FILLED'] {
+  fill-opacity: 0.03;
+  stroke-opacity: 0.2;
+  stroke-dasharray: 1 5;
+}
+
+/* An inverse FVG that has not yet been proven is not a fresh zone and not a
+   dead one; it is a candidate. Quieter than FRESH, still fully outlined. */
+.zone[data-state='UNPROVEN'] {
+  fill-opacity: 0.06;
+  stroke-opacity: 0.5;
+  stroke-dasharray: 4 2;
+}
+
+/* A state this stylesheet has never heard of. Without this rule it would
+   inherit `.zone` and be drawn exactly like a FRESH one -- the silent-default
+   failure this whole block exists to end, reintroduced by the next enum value
+   anybody adds on the server. */
+.zone--untreated {
+  fill-opacity: 0;
+  stroke-opacity: 0.9;
+  stroke-dasharray: 8 2 1 2;
+}
+
+/* Stale context wins over state, so it is repeated after the state rules: §8.2
+   G3 suspends the zone whatever state it is in, and that is the fact a reader
+   most needs not to miss. */
+.zone--stale {
+  fill-opacity: 0.05;
+  stroke-dasharray: 6 4;
+}
+
 .pool {
   stroke-width: 1;
   stroke-opacity: 0.7;
