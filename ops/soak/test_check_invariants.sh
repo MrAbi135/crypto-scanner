@@ -116,10 +116,39 @@ rm -f "$ACK_FILE"
 # 9. The file that ships. Its patterns contain `|`, which is also the field
 #    separator, and a naive split would truncate every one of them into
 #    something that matches nothing -- silently, and only on the host.
+#
+#     Both lines are fed, because an acknowledgement that matches nothing fires
+#     -- so this doubles as the check that the shipped file has no stale entry
+#     left in it. When one of these is deployed and its line deleted, delete
+#     the matching violation here too and this stays honest.
 ACK_FILE=ops/soak/acknowledged.txt
 problems=0
-triage_violations "E. archetype term never met|A1|mss_origin_zone_retested|80|80" > "$OUT"
-check "the shipped file's own pattern matches" "0" "$problems"
+triage_violations "$(printf 'E. archetype term never met|A1|mss_origin_zone_retested|80|80
+I. pool strength component cannot vary|touches|1412|0')" > "$OUT"
+check "the shipped file's own patterns match, and none is stale" "0" "$problems"
+
+echo
+echo "check labels vs the row pattern"
+
+# 10. Every label in the shipped SQL is one the runner will actually count.
+#     The pattern said `[A-G]` while the file had grown H, H2 and I; their rows
+#     were emitted by psql and dropped here, so three checks were switched off
+#     and nothing said so.
+problems=0
+verify_check_labels
+check "the shipped SQL's labels all match" "0" "$problems"
+
+# 11. And the guard can fail. `verify_check_labels` reads a fixed path, so the
+#     negative case is asserted against the pattern the guard uses rather than
+#     by moving the file the runner needs. Without this, test 10 passes on a
+#     pattern that matches everything.
+if printf '%s
+' "Zed. something" | grep -qE "$VIOLATION_ROW"; then
+  echo "  FAIL  a label the pattern cannot match is treated as matching"
+  failures=$((failures + 1))
+else
+  echo "  ok    a label the pattern cannot match is rejected"
+fi
 
 echo
 if [ "$failures" -eq 0 ]; then

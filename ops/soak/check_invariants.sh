@@ -21,7 +21,33 @@ flag() { echo "  !! $*"; problems=$((problems + 1)); }
 
 trim() { printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
 
+# What a violation row looks like: a check letter, an optional digit, a dot.
+VIOLATION_ROW='^[A-Z][0-9]?\. '
+
 ACK_FILE=ops/soak/acknowledged.txt
+
+# ---------------------------------------------------------------------------
+# The pattern and the SQL, kept in step.
+# ---------------------------------------------------------------------------
+# Every query in `invariants.sql` labels itself `select '<label>' as check`. If
+# a label does not match `VIOLATION_ROW`, its rows are emitted and silently
+# discarded here -- which is exactly what happened to H, H2 and I when the
+# pattern still said `[A-G]`. Nothing failed; the suite just stopped watching
+# three of its checks.
+verify_check_labels() {
+  local file=ops/soak/invariants.sql label missing=0
+
+  [ -f "$file" ] || return 0
+
+  while IFS= read -r label; do
+    if ! printf '%s\n' "$label" | grep -qE "$VIOLATION_ROW"; then
+      flag "check label '$label' does not match the row pattern -- its rows would be ignored"
+      missing=1
+    fi
+  done < <(grep -oE "select '[^']+' as check" "$file" | sed "s/select '//; s/' as check//")
+
+  return $missing
+}
 
 # ---------------------------------------------------------------------------
 # Acknowledged violations: quieter, never hidden, and impossible to forget.
@@ -241,7 +267,11 @@ echo
 # banners of its own, and a banner read as data is exactly how a watcher
 # earlier the same day reported a result it had not found.
 
-echo "-- B-G. database invariants --"
+# Named for the range it covered when it was written; it runs whatever the SQL
+# file contains.
+echo "-- database invariants --"
+
+verify_check_labels
 
 out=$($PSQL -At -F'|' -v ON_ERROR_STOP=1 < ops/soak/invariants.sql 2>&1)
 rc=$?
@@ -250,7 +280,17 @@ if [ "$rc" -ne 0 ]; then
   echo "$out" | tail -5 | sed 's/^/  /'
   flag "invariants.sql failed to run (exit $rc) -- the checks did not happen"
 else
-  violations=$(echo "$out" | grep -E '^[A-G]\. ' || true)
+  # `[A-Z]` and an optional digit, not `[A-G]`.
+  #
+  # The pattern was written when the file ended at G, and H, H2 and I were
+  # added after it. Their rows were emitted by psql and dropped on the floor
+  # here: a violation nobody counted, printed nowhere, exiting zero. None of
+  # them happened to be firing, so the suite looked clean and was blind --
+  # which is this file's own recurring defect, in its own runner.
+  #
+  # `verify_check_labels` below keeps the pattern and the SQL in step, so the
+  # next letter cannot go missing the same way.
+  violations=$(echo "$out" | grep -E "$VIOLATION_ROW" || true)
 
   if [ -n "$violations" ]; then
     triage_violations "$violations"

@@ -298,3 +298,56 @@ where s.status = 'QUARANTINE'
   -- Only once the loop has had a night to reach them.
   and exists (select 1 from market.liquidity_history)
 limit 10;
+
+
+-- ===========================================================================
+-- I. A scoring component that cannot vary
+-- ===========================================================================
+-- §4.2's pool strength is four components that exist to rank pools against
+-- each other. Two of them were constants for months and nothing noticed:
+-- `cluster_factor` sat at 6.25 on every pool because §4.3 had no caller, and
+-- `touches` sat at 0 on all 1,411 because both construction sites passed a
+-- literal zero. Neither produced a wrong-looking number -- a pool scored 54
+-- instead of 79, which is a perfectly ordinary score.
+--
+-- The general shape is the one this file keeps finding: a term that is always
+-- the same value reads as a working formula. So rather than test the two known
+-- ones, this asks the question of every component the engine writes, and will
+-- fire for the next one without anybody adding a check.
+--
+-- **`timeframe` is exempt.** It is `25 x tf_rank / max_rank`, fixed per
+-- timeframe by construction. It is a constant on purpose.
+--
+-- **Asked platform-wide, not per context, and the first draft got this wrong.**
+-- Grouped per symbol-timeframe it fired on BTCUSDT H4's `cluster`, where 94
+-- pools are all single swings -- and that is rarity, not a defect: equal
+-- extremes inside `epsilon` with §4.3's gap and depth constraints produce 1 to
+-- 6 cluster pools per context, and one context having none yet is an ordinary
+-- market. Both real defects were global. A check that cries wolf on rarity is
+-- one that gets ignored, taking the rest of the file with it -- the same
+-- argument `rare_by_doctrine` makes in check E.
+--
+-- The floor keeps a young platform from firing on a component that has simply
+-- not had the chance to vary yet.
+
+with components as (
+    select c.key as component,
+           c.value #>> '{}' as value
+    from detection.liquidity_pools p,
+         lateral json_each(p.evidence::json -> 'strength_components') c
+    where c.key <> 'timeframe'
+),
+spread as (
+    select component,
+           count(*) as pools,
+           count(distinct value) as distinct_values,
+           min(value) as only_value
+    from components
+    group by 1
+)
+select 'I. pool strength component cannot vary' as check,
+       component, pools, only_value
+from spread
+where pools >= 200
+  and distinct_values = 1
+order by component;
