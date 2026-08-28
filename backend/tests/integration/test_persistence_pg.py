@@ -375,9 +375,20 @@ async def test_the_universe_read_joins_the_registry_to_its_counters(engine) -> N
     # endpoint decides what silence means.
     assert other not in counts
 
-    # Filtered in the query.
-    assert all(row.status == "QUARANTINE" for row in await repo.list_universe(status="QUARANTINE"))
-    assert await repo.list_universe(status="DELISTED", limit=500) == []
+    # Filtered in the query, asserted against what this test seeded rather
+    # than against the whole table: the integration database is shared and
+    # other tests leave DELISTED rows in it. `== []` passed locally, where this
+    # test ran alone, and failed in CI -- which is the test asserting the order
+    # its suite happened to run in.
+    delisted = await repo.list_universe(status="DELISTED", limit=500)
+
+    assert all(row.status == "DELISTED" for row in delisted)
+    assert {row.exchange_symbol for row in delisted}.isdisjoint({watched, other})
+
+    quarantined = await repo.list_universe(status="QUARANTINE", limit=500)
+
+    assert all(row.status == "QUARANTINE" for row in quarantined)
+    assert {watched, other} <= {row.exchange_symbol for row in quarantined}
 
 
 async def test_incident_roundtrip(engine) -> None:
