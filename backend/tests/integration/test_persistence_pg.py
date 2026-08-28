@@ -385,10 +385,19 @@ async def test_the_universe_read_joins_the_registry_to_its_counters(engine) -> N
     assert all(row.status == "DELISTED" for row in delisted)
     assert {row.exchange_symbol for row in delisted}.isdisjoint({watched, other})
 
-    quarantined = await repo.list_universe(status="QUARANTINE", limit=500)
+    # §1.4's tier decides whether a symbol is in the scanned universe, so
+    # `save_universe_state` moves the status with it -- giving `watched` a real
+    # tier made it ACTIVE, and only the untouched one is still QUARANTINE.
+    # Asserting the opposite is what failed here twice: the first time I
+    # assumed an empty table, the second I assumed the status stood still.
+    quarantined = {
+        row.exchange_symbol for row in await repo.list_universe(status="QUARANTINE", limit=500)
+    }
+    active = {row.exchange_symbol for row in await repo.list_universe(status="ACTIVE", limit=500)}
 
-    assert all(row.status == "QUARANTINE" for row in quarantined)
-    assert {watched, other} <= {row.exchange_symbol for row in quarantined}
+    assert watched in active
+    assert other in quarantined
+    assert watched not in quarantined
 
 
 async def test_incident_roundtrip(engine) -> None:
