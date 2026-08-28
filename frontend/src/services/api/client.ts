@@ -14,7 +14,9 @@ import type {
   Envelope,
   FeedRow,
   LiquidityMap,
+  RankedRow,
   StructureEvent,
+  Weights,
   Zone,
 } from '@entities/market/types'
 
@@ -68,6 +70,23 @@ export function fetchFeed(
   // Still no sort: §18.4 fixes it and §9.2 is a total order, so there is
   // nothing here for a caller to reorder.
   return request<readonly FeedRow[]>('/scanner/feed', filters)
+}
+
+export function fetchWeights(): Promise<Envelope<Weights>> {
+  return request<Weights>('/rankings/weights', {})
+}
+
+export function fetchRankings(
+  symbols: readonly string[],
+  timeframe: string,
+): Promise<Envelope<readonly RankedRow[]>> {
+  // No `at`. §18.6 floors the moment to the last close on the server, and a
+  // client passing its own clock would ask for a board between closes and be
+  // told, correctly, that nothing was ranked there.
+  return request<readonly RankedRow[]>('/rankings', {
+    symbols: symbols.join(','),
+    timeframe,
+  })
 }
 
 export function fetchCandles(
