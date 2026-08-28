@@ -112,6 +112,41 @@ export interface FeedRow {
   readonly versions: Versions
 }
 
+/** §9.1's weight table, published verbatim (§18.6's "doctrine transparency"). */
+export interface FactorWeight {
+  readonly factor: string
+  readonly name: string
+  readonly weight: string
+  readonly weight_pct: string
+  /** §9.1's own prose. Transcribed, never paraphrased. */
+  readonly justification: string
+}
+
+export interface GradeBand {
+  readonly grade: string
+  readonly min_confidence: string
+}
+
+export interface Weights {
+  readonly param_set_version: string
+  readonly factors: readonly FactorWeight[]
+  readonly grades: readonly GradeBand[]
+  /** §9.4: below the lowest floor is not a weak grade, it is not published. */
+  readonly below_lowest_floor: string
+}
+
+/** One row of §18.6's deterministic board. */
+export interface RankedRow {
+  readonly rank: number
+  readonly symbol: string
+  readonly timeframe: string
+  readonly direction: string
+  readonly archetype: string
+  readonly tier: string
+  readonly confidence: string
+  readonly display_rank: string
+}
+
 // §13. `freshness` is always present; `versions` only on doctrine-derived rows.
 export interface Freshness {
   readonly state: string
@@ -143,6 +178,13 @@ export interface Envelope<T> {
      * being handed a zero it cannot distinguish from a real one.
      */
     readonly live_total?: number
+    /**
+     * §18.6's denominators. Present on the rankings row only, and optional
+     * for the same reason `live_total` is: a screen must decide what an absent
+     * count means rather than be handed a zero it cannot tell from a real one.
+     */
+    readonly gate_passers?: number
+    readonly below_floor?: number
   }
 }
 

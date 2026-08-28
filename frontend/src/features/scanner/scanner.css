@@ -188,3 +188,59 @@
   margin-left: auto;
   font-size: 0.75rem;
 }
+
+/* §18.6's board and §9.1's table. */
+.scanner__denominator {
+  color: var(--colour-muted, #6b7280);
+  font-size: 0.8125rem;
+  margin: 0.75rem 0 0;
+}
+
+.weights {
+  margin-top: 2rem;
+  border-top: 1px solid var(--colour-border, #e5e7eb);
+  padding-top: 1rem;
+}
+
+.weights__title {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+
+.weights__subtitle {
+  font-size: 0.875rem;
+  margin: 1.25rem 0 0.35rem;
+}
+
+.weights__table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.8125rem;
+}
+
+.weights__table caption {
+  text-align: left;
+  color: var(--colour-muted, #6b7280);
+  padding-bottom: 0.35rem;
+}
+
+.weights__table th,
+.weights__table td {
+  text-align: left;
+  padding: 0.3rem 0.75rem 0.3rem 0;
+  vertical-align: top;
+  border-bottom: 1px solid var(--colour-border, #e5e7eb);
+}
+
+.weights__pct {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+}
+
+/* §9.1's prose, at a readable measure. Not truncated and not clamped: the
+   justification is the point of publishing the table, and a "show more" would
+   hide the half a sceptical reader came for. */
+.weights__why {
+  max-width: 48ch;
+  color: var(--colour-muted, #374151);
+}
