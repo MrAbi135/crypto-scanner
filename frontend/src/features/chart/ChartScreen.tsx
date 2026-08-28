@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react'
 
-import type { Meta, Candle, Pool, StructureEvent, Zone } from '@entities/market/types'
+import type { Meta, Candle, Pool, StructureEvent, Sweep, Zone } from '@entities/market/types'
 import {
   ApiRequestError,
   fetchCandles,
@@ -26,6 +26,7 @@ interface Loaded {
   readonly zones: readonly Zone[]
   readonly pools: readonly Pool[]
   readonly structure: readonly StructureEvent[]
+  readonly sweeps: readonly Sweep[]
   readonly meta: Meta
   readonly doctrineMeta: Meta
 }
@@ -58,6 +59,7 @@ export function ChartScreen() {
           candles: candles.data,
           zones: zones.data,
           pools: liquidity.data.pools,
+          sweeps: liquidity.data.sweeps,
           structure: structure.data,
           meta: candles.meta,
           doctrineMeta: zones.meta,
@@ -127,6 +129,7 @@ export function ChartScreen() {
             zones={loaded.zones}
             pools={loaded.pools}
             structure={loaded.structure}
+            sweeps={loaded.sweeps}
           />
 
           {/* Provenance on screen, not buried in a network tab. A chart whose

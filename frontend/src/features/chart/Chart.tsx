@@ -2,7 +2,7 @@
 // thing being verified here, and a library that owns the coordinate space
 // would put the part that must be trustworthy behind an abstraction.
 
-import type { Candle, Pool, StructureEvent, Zone } from '@entities/market/types'
+import type { Candle, Pool, StructureEvent, Sweep, Zone } from '@entities/market/types'
 import {
   bodyRect,
   isUp,
@@ -12,6 +12,7 @@ import {
   xForTime,
   type Viewport,
 } from '@features/chart/scale'
+import { sweepMarkers } from '@features/chart/sweeps'
 import { swingMarkers } from '@features/chart/swings'
 
 const VIEWPORT: Viewport = { width: 1200, height: 600, padding: 24 }
@@ -21,9 +22,10 @@ export interface ChartProps {
   readonly zones: readonly Zone[]
   readonly pools: readonly Pool[]
   readonly structure: readonly StructureEvent[]
+  readonly sweeps: readonly Sweep[]
 }
 
-export function Chart({ candles, zones, pools, structure }: ChartProps) {
+export function Chart({ candles, zones, pools, structure, sweeps }: ChartProps) {
   if (candles.length === 0) {
     // Not an error state and not a blank frame. "No candles" and "the engine
     // found nothing" look identical on an empty chart, and they mean opposite
@@ -42,6 +44,7 @@ export function Chart({ candles, zones, pools, structure }: ChartProps) {
   // the count is surfaced so nothing vanishes without the chart saying so.
   const { shown, clipped } = visibleZones(zones, price)
   const swings = swingMarkers(structure)
+  const taken = sweepMarkers(sweeps)
 
   return (
     <>
@@ -54,7 +57,7 @@ export function Chart({ candles, zones, pools, structure }: ChartProps) {
         viewBox={`0 0 ${VIEWPORT.width} ${VIEWPORT.height}`}
         className="chart"
         role="img"
-        aria-label={`Price chart with ${candles.length} candles, ${shown.length} of ${zones.length} zones in view, ${pools.length} liquidity pools and ${swings.length} swings`}
+        aria-label={`Price chart with ${candles.length} candles, ${shown.length} of ${zones.length} zones in view, ${pools.length} liquidity pools, ${swings.length} swings and ${taken.length} sweeps`}
         data-testid="chart"
       >
         {/* Zones first: they are context and belong behind the price. */}
@@ -99,6 +102,43 @@ export function Chart({ candles, zones, pools, structure }: ChartProps) {
               className={`pool pool--${pool.side.toLowerCase()}`}
             />
           ))}
+        </g>
+
+        {/* After the pools they consume and before the candles: a sweep is
+            what happened *to* a level, so it reads against the line it took,
+            and it must not cover the wick that made it. */}
+        <g data-testid="sweeps">
+          {taken.map((sweep) => {
+            const x = xForTime(candles, sweep.at, VIEWPORT, time)
+
+            return (
+              <g
+                key={sweep.key}
+                data-testid={`sweep-${sweep.key}`}
+                data-side={sweep.side}
+                data-reclaimed={String(sweep.reclaimed)}
+                className={`sweep sweep--${sweep.side.toLowerCase()}${
+                  sweep.reclaimed ? ' sweep--reclaimed' : ''
+                }`}
+              >
+                {/* Level to penetration. §4.6's sweep *is* the reach past the
+                    level, so a dot on the level would be a touch. */}
+                <line
+                  x1={x}
+                  x2={x}
+                  y1={price.y(sweep.level)}
+                  y2={price.y(sweep.penetration)}
+                  className="sweep__reach"
+                />
+                <circle cx={x} cy={price.y(sweep.penetration)} r={3} className="sweep__tip" />
+                <title>
+                  {`${sweep.side} sweep to ${sweep.penetration} from ${sweep.level}` +
+                    `${sweep.depthAtr === null ? '' : ` (${sweep.depthAtr} ATR)`}` +
+                    `${sweep.reclaimed ? ' — reclaimed, contrary evidence' : ''}`}
+                </title>
+              </g>
+            )
+          })}
         </g>
 
         <g data-testid="candles">
