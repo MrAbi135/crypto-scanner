@@ -121,3 +121,35 @@
   color: var(--sem-caution);
   font-size: 0.85rem;
 }
+
+
+/* Swings (SLS §3.1). Size carries strength and fill carries kind, so the two
+   questions a reader asks -- is this a high or a low, is it internal or
+   external -- are answered by different visual channels and neither has to be
+   decoded from the other. Colour alone would answer neither for a viewer who
+   cannot distinguish it, which is why the shape differs too. */
+.swing {
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.swing--high {
+  fill: var(--colour-swing-high, #d97706);
+  stroke: var(--colour-swing-high-edge, #78350f);
+}
+
+.swing--low {
+  fill: var(--colour-swing-low, #2563eb);
+  stroke: var(--colour-swing-low-edge, #1e3a8a);
+}
+
+/* Internal swings are the denser series and would otherwise crowd the price.
+   Held back rather than hidden: §3.1 nests them under the external ones and a
+   chart that dropped them would not be showing what the engine recorded. */
+.swing--internal {
+  fill-opacity: 0.35;
+}
+
+.swing--external {
+  fill-opacity: 0.9;
+}

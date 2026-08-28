@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import type { Candle, Pool, Zone } from '@entities/market/types'
+import type { Candle, Pool, StructureEvent, Zone } from '@entities/market/types'
 import { Chart } from './Chart'
 
 function candle(index: number, close = '105'): Candle {
@@ -61,19 +61,19 @@ describe('Chart', () => {
   it('says there are no candles rather than showing a blank frame', () => {
     // "No data" and "the engine found nothing" are opposite claims, and an
     // empty chart makes them look identical.
-    render(<Chart candles={[]} zones={[]} pools={[]} />)
+    render(<Chart candles={[]} zones={[]} pools={[]} structure={[]} />)
 
     expect(screen.getByTestId('chart-empty')).toBeDefined()
   })
 
   it('draws one group per candle', () => {
-    render(<Chart candles={[candle(0), candle(1), candle(2)]} zones={[]} pools={[]} />)
+    render(<Chart candles={[candle(0), candle(1), candle(2)]} zones={[]} pools={[]} structure={[]} />)
 
     expect(screen.getByTestId('candles').children).toHaveLength(3)
   })
 
   it('marks direction so up and down are distinguishable without colour', () => {
-    render(<Chart candles={[candle(0, '105'), candle(1, '95')]} zones={[]} pools={[]} />)
+    render(<Chart candles={[candle(0, '105'), candle(1, '95')]} zones={[]} pools={[]} structure={[]} />)
 
     expect(screen.getByTestId('candle-0').getAttribute('class')).toContain('candle--up')
     expect(screen.getByTestId('candle-1').getAttribute('class')).toContain('candle--down')
@@ -86,7 +86,7 @@ describe('Chart', () => {
       <Chart
         candles={[candle(0)]}
         zones={[zone('z1'), zone('z2', { zone_type: 'OB', state: 'TESTED' })]}
-        pools={[]}
+        pools={[]} structure={[]}
       />,
     )
 
@@ -95,13 +95,13 @@ describe('Chart', () => {
   })
 
   it('flags a stale zone rather than drawing it like a live one', () => {
-    render(<Chart candles={[candle(0)]} zones={[zone('z1', { stale_context: true })]} pools={[]} />)
+    render(<Chart candles={[candle(0)]} zones={[zone('z1', { stale_context: true })]} pools={[]} structure={[]} />)
 
     expect(screen.getByTestId('zone-z1').getAttribute('class')).toContain('zone--stale')
   })
 
   it('draws pools as levels carrying their side', () => {
-    render(<Chart candles={[candle(0)]} zones={[]} pools={[pool('p1'), pool('p2', 'SSL')]} />)
+    render(<Chart candles={[candle(0)]} zones={[]} pools={[pool('p1'), pool('p2', 'SSL')]} structure={[]} />)
 
     expect(screen.getByTestId('pool-p1').getAttribute('data-side')).toBe('BSL')
     expect(screen.getByTestId('pool-p2').getAttribute('data-side')).toBe('SSL')
@@ -110,7 +110,7 @@ describe('Chart', () => {
   it('places a zone band at the same y as the price it represents', () => {
     // The assertion that matters: an overlay two pixels off is a zone that
     // appears to sit above a candle it actually cuts through.
-    render(<Chart candles={[candle(0)]} zones={[zone('z1')]} pools={[pool('p1')]} />)
+    render(<Chart candles={[candle(0)]} zones={[zone('z1')]} pools={[pool('p1')]} structure={[]} />)
 
     const band = screen.getByTestId('zone-z1')
     const level = screen.getByTestId('pool-p1')
@@ -125,13 +125,13 @@ describe('Chart', () => {
   })
 
   it('describes its contents for a screen reader', () => {
-    render(<Chart candles={[candle(0)]} zones={[zone('z1')]} pools={[pool('p1')]} />)
+    render(<Chart candles={[candle(0)]} zones={[zone('z1')]} pools={[pool('p1')]} structure={[]} />)
 
     // "1 of 1 in view" rather than "1 zones": when objects are clipped for
     // being outside the price range, a screen-reader user has to hear that
     // too, or the chart quietly under-reports what the engine found.
     expect(screen.getByRole('img').getAttribute('aria-label')).toBe(
-      'Price chart with 1 candles, 1 of 1 zones in view and 1 liquidity pools',
+      'Price chart with 1 candles, 1 of 1 zones in view, 1 liquidity pools and 0 swings',
     )
   })
 })
@@ -145,7 +145,7 @@ describe('zone placement', () => {
       <Chart
         candles={[candle(0), candle(1), candle(2), candle(3)]}
         zones={[zone('z1', { created_at: '2026-08-17T02:00:00+00:00' })]}
-        pools={[]}
+        pools={[]} structure={[]}
       />,
     )
 
@@ -162,7 +162,7 @@ describe('zone placement', () => {
       <Chart
         candles={[candle(1), candle(2)]}
         zones={[zone('z1', { created_at: '2020-01-01T00:00:00+00:00' })]}
-        pools={[]}
+        pools={[]} structure={[]}
       />,
     )
 
@@ -184,7 +184,7 @@ describe('clipping', () => {
           zone('near', { band_low: '95', band_high: '100' }),
           zone('far', { band_low: '10', band_high: '12' }),
         ]}
-        pools={[]}
+        pools={[]} structure={[]}
       />,
     )
 
@@ -194,8 +194,89 @@ describe('clipping', () => {
   })
 
   it('stays quiet when everything is in view', () => {
-    render(<Chart candles={[candle(0)]} zones={[zone('z1')]} pools={[]} />)
+    render(<Chart candles={[candle(0)]} zones={[zone('z1')]} pools={[]} structure={[]} />)
 
     expect(screen.queryByTestId('chart-clipped')).toBeNull()
+  })
+})
+
+describe('Chart swings', () => {
+  function swing(
+    event_type: string,
+    event_at: string,
+    price: string,
+  ): StructureEvent {
+    return {
+      event_type,
+      event_at,
+      algo_version: 's4-v8',
+      evidence: { index: 400, price, kind: 'HIGH', strength: 'EXTERNAL' },
+    }
+  }
+
+  it('places a swing at the price the engine recorded', () => {
+    // The chart's whole job is to be checkable against the SLS by eye, so the
+    // marker has to sit on the number the engine wrote down. Asserted through
+    // the same price scale the candles use rather than a hard-coded pixel: a
+    // literal here would pass while the scale was wrong for everything.
+    render(
+      <Chart
+        candles={[candle(1)]}
+        zones={[]}
+        pools={[]}
+        structure={[swing('SWING_EXTERNAL_HIGH', '2026-08-17T01:00:00+00:00', '110')]}
+      />,
+    )
+
+    const marker = screen.getByTestId('swing-SWING_EXTERNAL_HIGH-2026-08-17T01:00:00+00:00')
+    const high = document.querySelector('.candle__wick') as SVGLineElement
+
+    expect(marker.getAttribute('data-price')).toBe('110')
+    // '110' is this candle's high, so the marker sits on the top of its wick.
+    expect(marker.getAttribute('cy')).toBe(high.getAttribute('y1'))
+  })
+
+  it('distinguishes internal from external without hiding either', () => {
+    render(
+      <Chart
+        candles={[candle(1), candle(2)]}
+        zones={[]}
+        pools={[]}
+        structure={[
+          swing('SWING_INTERNAL_HIGH', '2026-08-17T01:00:00+00:00', '105'),
+          swing('SWING_EXTERNAL_HIGH', '2026-08-17T02:00:00+00:00', '105'),
+        ]}
+      />,
+    )
+
+    const drawn = document.querySelectorAll('[data-testid^="swing-"]')
+    const radii = [...drawn].map((node) => node.getAttribute('r'))
+
+    expect(drawn).toHaveLength(2)
+    expect(new Set(radii).size).toBe(2)
+  })
+
+  it('names the swing in text, not only in colour', () => {
+    // A marker whose meaning is carried only by fill is unreadable to anyone
+    // who cannot distinguish it, and unreadable to a screen reader entirely.
+    render(
+      <Chart
+        candles={[candle(1)]}
+        zones={[]}
+        pools={[]}
+        structure={[swing('SWING_EXTERNAL_HIGH', '2026-08-17T01:00:00+00:00', '110')]}
+      />,
+    )
+
+    expect(screen.getByText(/EXTERNAL HIGH at 110/)).toBeDefined()
+  })
+
+  it('draws nothing when the engine recorded no swings', () => {
+    // Distinct from an error. A quiet window and a broken fetch must not look
+    // the same, which is why the count is in the chart's own label.
+    render(<Chart candles={[candle(1)]} zones={[]} pools={[]} structure={[]} />)
+
+    expect(document.querySelectorAll('[data-testid^="swing-"]')).toHaveLength(0)
+    expect(screen.getByTestId('chart').getAttribute('aria-label')).toContain('0 swings')
   })
 })

@@ -7,8 +7,14 @@
 
 import { useEffect, useState } from 'react'
 
-import type { Meta, Candle, Pool, Zone } from '@entities/market/types'
-import { ApiRequestError, fetchCandles, fetchLiquidity, fetchZones } from '@services/api/client'
+import type { Meta, Candle, Pool, StructureEvent, Zone } from '@entities/market/types'
+import {
+  ApiRequestError,
+  fetchCandles,
+  fetchLiquidity,
+  fetchStructure,
+  fetchZones,
+} from '@services/api/client'
 import { Chart } from '@features/chart/Chart'
 
 import './chart.css'
@@ -19,6 +25,7 @@ interface Loaded {
   readonly candles: readonly Candle[]
   readonly zones: readonly Zone[]
   readonly pools: readonly Pool[]
+  readonly structure: readonly StructureEvent[]
   readonly meta: Meta
   readonly doctrineMeta: Meta
 }
@@ -38,10 +45,11 @@ export function ChartScreen() {
       setError(null)
 
       try {
-        const [candles, zones, liquidity] = await Promise.all([
+        const [candles, zones, liquidity, structure] = await Promise.all([
           fetchCandles(symbol, timeframe),
           fetchZones(symbol, timeframe),
           fetchLiquidity(symbol, timeframe),
+          fetchStructure(symbol, timeframe),
         ])
 
         if (cancelled) return
@@ -50,6 +58,7 @@ export function ChartScreen() {
           candles: candles.data,
           zones: zones.data,
           pools: liquidity.data.pools,
+          structure: structure.data,
           meta: candles.meta,
           doctrineMeta: zones.meta,
         })
@@ -113,7 +122,12 @@ export function ChartScreen() {
 
       {loaded && (
         <>
-          <Chart candles={loaded.candles} zones={loaded.zones} pools={loaded.pools} />
+          <Chart
+            candles={loaded.candles}
+            zones={loaded.zones}
+            pools={loaded.pools}
+            structure={loaded.structure}
+          />
 
           {/* Provenance on screen, not buried in a network tab. A chart whose
               algo_version the viewer cannot see is a chart they cannot use to

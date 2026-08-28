@@ -2,7 +2,7 @@
 // thing being verified here, and a library that owns the coordinate space
 // would put the part that must be trustworthy behind an abstraction.
 
-import type { Candle, Pool, Zone } from '@entities/market/types'
+import type { Candle, Pool, StructureEvent, Zone } from '@entities/market/types'
 import {
   bodyRect,
   isUp,
@@ -12,6 +12,7 @@ import {
   xForTime,
   type Viewport,
 } from '@features/chart/scale'
+import { swingMarkers } from '@features/chart/swings'
 
 const VIEWPORT: Viewport = { width: 1200, height: 600, padding: 24 }
 
@@ -19,9 +20,10 @@ export interface ChartProps {
   readonly candles: readonly Candle[]
   readonly zones: readonly Zone[]
   readonly pools: readonly Pool[]
+  readonly structure: readonly StructureEvent[]
 }
 
-export function Chart({ candles, zones, pools }: ChartProps) {
+export function Chart({ candles, zones, pools, structure }: ChartProps) {
   if (candles.length === 0) {
     // Not an error state and not a blank frame. "No candles" and "the engine
     // found nothing" look identical on an empty chart, and they mean opposite
@@ -39,6 +41,7 @@ export function Chart({ candles, zones, pools }: ChartProps) {
   // Objects far from price are clipped so the candles stay readable, and
   // the count is surfaced so nothing vanishes without the chart saying so.
   const { shown, clipped } = visibleZones(zones, price)
+  const swings = swingMarkers(structure)
 
   return (
     <>
@@ -51,7 +54,7 @@ export function Chart({ candles, zones, pools }: ChartProps) {
         viewBox={`0 0 ${VIEWPORT.width} ${VIEWPORT.height}`}
         className="chart"
         role="img"
-        aria-label={`Price chart with ${candles.length} candles, ${shown.length} of ${zones.length} zones in view and ${pools.length} liquidity pools`}
+        aria-label={`Price chart with ${candles.length} candles, ${shown.length} of ${zones.length} zones in view, ${pools.length} liquidity pools and ${swings.length} swings`}
         data-testid="chart"
       >
         {/* Zones first: they are context and belong behind the price. */}
@@ -119,6 +122,39 @@ export function Chart({ candles, zones, pools }: ChartProps) {
                 />
                 <rect x={body.x} y={body.y} width={body.width} height={body.height} />
               </g>
+            )
+          })}
+        </g>
+
+        {/* Last, so they sit above the candles: a swing marks a specific
+            high or low, and a marker hidden behind the wick it names is
+            worse than no marker. */}
+        <g data-testid="swings">
+          {swings.map((swing) => {
+            const cx = xForTime(candles, swing.at, VIEWPORT, time)
+            const cy = price.y(swing.price)
+
+            // External swings are drawn larger. §3.1 nests the two series --
+            // every external swing is also an internal one -- so size says
+            // which, and neither is hidden behind the other.
+            const radius = swing.strength === 'EXTERNAL' ? 5 : 3
+
+            return (
+              <circle
+                key={swing.key}
+                data-testid={`swing-${swing.key}`}
+                data-kind={swing.kind}
+                data-strength={swing.strength}
+                data-price={swing.price}
+                cx={cx}
+                cy={cy}
+                r={radius}
+                className={`swing swing--${swing.kind.toLowerCase()} swing--${swing.strength.toLowerCase()}`}
+              >
+                <title>
+                  {`${swing.strength} ${swing.kind} at ${swing.price} (${swing.at})`}
+                </title>
+              </circle>
             )
           })}
         </g>
