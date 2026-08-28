@@ -1,0 +1,51 @@
+# The soak host's edge (S13a: "the developer opens a browser").
+#
+# **Bound to loopback, on purpose.** The host firewall allows port 22 and
+# rejects everything else, which is why the API's published 8000 has never been
+# reachable from outside either. Opening a port would mean changing the host
+# firewall and the Oracle security list -- a security change, and the console
+# is the developer's to drive.
+#
+# It does not need opening. An SSH tunnel reaches this over the connection that
+# is already there and already encrypted:
+#
+#     ssh -i <key> -L 8080:127.0.0.1:8080 ubuntu@<host>
+#     # then open http://localhost:8080
+#
+# That is better than opening a port, not merely easier: the sign-in form posts
+# a password, and on an IP-only box the alternative is either plain HTTP across
+# the internet or a self-signed certificate the developer has to click past
+# every time. The tunnel gives real encryption and no warning.
+#
+# No TLS here for the same reason -- the traffic is already inside SSH by the
+# time it arrives, and a second layer of self-signed TLS would add a browser
+# warning and nothing else.
+
+:8080 {
+	encode gzip
+
+	# Cheap and true even on loopback: these cost nothing and mean the staging
+	# box does not teach habits the edge config would have to unteach.
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# API Spec §18.18: internal endpoints are never publicly routable. Enforced
+	# here rather than hoped for, exactly as the staging edge does it -- a rule
+	# that exists in one environment and not the other is a rule nobody has
+	# tested.
+	@internal path /internal/*
+	respond @internal 403
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Everything else is the SPA, with the client-side routing fallback.
+	handle {
+		reverse_proxy frontend:80
+	}
+}

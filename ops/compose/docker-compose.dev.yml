@@ -1,8 +1,13 @@
 name: scanner-dev
 
 # One file runs the entire dev platform (S0.2 §6). PostgreSQL + TimescaleDB are
-# one container by design (TDR §8). The frontend runs on the host in dev
-# (`pnpm dev`) for hot-reload speed. Observability is opt-in via `--profile obs`.
+# one container by design (TDR §8). Observability is opt-in via `--profile obs`.
+#
+# `pnpm dev` on the host is still the way to work on the frontend. The
+# `frontend` + `caddy` pair below is for the soak box, where there is no host
+# to run it on and S13a's whole point -- the developer looking at the doctrine
+# on a chart -- has otherwise been unreachable. Both are in the `ui` profile so
+# an ordinary `up` does not start them.
 
 services:
   db:
@@ -111,6 +116,30 @@ services:
       retries: 6
 
   # --- observability (opt-in: `docker compose --profile obs up`) ---
+  # S13a's screen, for hosts with no developer machine attached.
+  frontend:
+    profiles: ["ui"]
+    build:
+      context: ../..
+      dockerfile: ops/docker/frontend.Dockerfile
+    restart: unless-stopped
+
+  caddy:
+    profiles: ["ui"]
+    image: caddy:2-alpine
+    # **Loopback only.** The host firewall allows 22 and rejects the rest, so
+    # binding 0.0.0.0 would publish a port nothing can reach while looking as
+    # though it had opened one. Reached with `ssh -L 8080:127.0.0.1:8080`; see
+    # ops/caddy/Caddyfile.dev for why a tunnel is the right answer here and not
+    # merely the available one.
+    ports: ["127.0.0.1:8080:8080"]
+    volumes:
+      - ../caddy/Caddyfile.dev:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    restart: unless-stopped
+    depends_on: [api, frontend]
+
   prometheus:
     image: prom/prometheus:v2.54.1
     profiles: ["obs"]
@@ -139,5 +168,7 @@ services:
     depends_on: [prometheus, loki]
 
 volumes:
+  caddydata:
+  caddyconfig:
   pgdata:
   redisdata:
