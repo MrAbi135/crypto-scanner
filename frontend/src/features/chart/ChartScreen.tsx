@@ -5,7 +5,7 @@
 // and, per Roadmap §8.2, to be the instrument the developer verifies golden
 // labels with -- so its job is to be honest, not finished.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { Meta, Candle, Pool, StructureEvent, Sweep, Zone } from '@entities/market/types'
 import {
@@ -18,6 +18,7 @@ import {
 } from '@services/api/client'
 import { currentSession } from '@services/api/session'
 import { Chart } from '@features/chart/Chart'
+import { inspectPool, inspectZone } from '@features/chart/inspection'
 import { EventTimeline } from '@features/chart/EventTimeline'
 import { EvidencePanel } from '@features/chart/EvidencePanel'
 import { SignIn } from '@features/chart/SignIn'
@@ -41,15 +42,33 @@ export interface ChartScreenProps {
   /**
    * The context to open on, when something sent the reader here.
    *
-   * Read once, as the initial state, and deliberately not synchronised
-   * afterwards: the reader is free to type another symbol, and an effect that
-   * pushed the prop back in would drag them home on every re-render. A caller
-   * that wants to re-open a context remounts this screen -- see App's key.
+   * Applied on mount, and again **only when this value itself changes** --
+   * never on every render. The difference is the whole design:
+   *
+   *   * a caller that mirrors this screen's own reports back into `openOn`
+   *     (App does, through the URL) gets a working back button, because a
+   *     history entry arriving from outside is a change and re-seeds;
+   *   * a caller that passes a fixed context does not get a leash: the reader
+   *     types another symbol, `openOn` has not changed, and nothing pushes
+   *     them home.
+   *
+   * An effect keyed on the current *state* instead would collapse both cases
+   * into the leash.
    */
-  readonly openOn?: { readonly symbol: string; readonly timeframe: string } | undefined
+  readonly openOn?:
+    | { readonly symbol: string; readonly timeframe: string; readonly object?: string }
+    | undefined
+  /**
+   * Report the context on screen, so an address bar (or anything else) can
+   * follow it. Includes the inspected object, because that selection is what
+   * makes an evidence link worth sending to someone.
+   */
+  readonly onContext?:
+    | ((next: { symbol: string; timeframe: string; object: string | null }) => void)
+    | undefined
 }
 
-export function ChartScreen({ openOn }: ChartScreenProps = {}) {
+export function ChartScreen({ openOn, onContext }: ChartScreenProps = {}) {
   const [symbol, setSymbol] = useState(openOn?.symbol ?? 'BTCUSDT')
   const [timeframe, setTimeframe] = useState<string>(openOn?.timeframe ?? 'H1')
   const [loaded, setLoaded] = useState<Loaded | null>(null)
@@ -57,6 +76,57 @@ export function ChartScreen({ openOn }: ChartScreenProps = {}) {
   const [busy, setBusy] = useState(false)
   const [inspection, setInspection] = useState<Inspection | null>(null)
   const [signedIn, setSignedIn] = useState(currentSession() !== null)
+  const [wanted, setWanted] = useState<string | null>(openOn?.object ?? null)
+  const [unresolved, setUnresolved] = useState<string | null>(null)
+  const lastOpenOn = useRef(signature(openOn))
+
+  // Re-seed when the caller's context changes, not when ours does. See the
+  // prop's own comment: this is what separates a working back button from a
+  // leash, and the two are one `useRef` apart.
+  useEffect(() => {
+    const next = signature(openOn)
+
+    if (next === lastOpenOn.current) return
+
+    lastOpenOn.current = next
+
+    if (openOn === undefined) return
+
+    setSymbol(openOn.symbol)
+    setTimeframe(openOn.timeframe)
+    setWanted(openOn.object ?? null)
+    setInspection(null)
+    setUnresolved(null)
+  }, [openOn])
+
+  useEffect(() => {
+    onContext?.({ symbol, timeframe, object: inspection?.id ?? wanted })
+  }, [onContext, symbol, timeframe, inspection, wanted])
+
+  // S15's "evidence deep-link → highlight": an address carrying an object id
+  // opens with that object's evidence, once its data has arrived.
+  //
+  // **Zones and pools only, and the panel says so when it is neither.** Their
+  // ids are the API's own (`zone_id`, `pool_id`) and survive a page load. A
+  // sweep's and a swing's are built from chart-local markers, so a link to one
+  // would resolve to a different object -- or to nothing -- on a window that
+  // has moved by a candle. That is the [[window-local-index-trap]] wearing a
+  // URL, and the fix is upstream: stable ids for those two, not a lookup here
+  // that is right most of the time.
+  useEffect(() => {
+    if (wanted === null || loaded === null) return
+
+    const [kind, id] = [wanted.slice(0, wanted.indexOf(':')), wanted.slice(wanted.indexOf(':') + 1)]
+
+    const zone = kind === 'zone' ? loaded.zones.find((row) => row.zone_id === id) : undefined
+    const pool = kind === 'pool' ? loaded.pools.find((row) => row.pool_id === id) : undefined
+
+    if (zone !== undefined) setInspection(inspectZone(zone))
+    else if (pool !== undefined) setInspection(inspectPool(pool))
+    else setUnresolved(wanted)
+
+    setWanted(null)
+  }, [wanted, loaded])
 
   useEffect(() => {
     if (!signedIn) return
@@ -183,6 +253,16 @@ export function ChartScreen({ openOn }: ChartScreenProps = {}) {
             selectedId={inspection?.id ?? null}
           />
 
+          {/* Not silent. A link that lands on a chart with nothing selected is
+              indistinguishable from a link that worked and pointed at an object
+              the reader then failed to notice. */}
+          {unresolved !== null && inspection === null && (
+            <p role="status" data-testid="chart-unresolved">
+              The linked object <code>{unresolved}</code> is not on this chart. Zone and pool
+              links survive; sweep and swing ids are built per render and do not.
+            </p>
+          )}
+
           <EvidencePanel inspection={inspection} onClose={() => setInspection(null)} />
 
           {/* Everything the structure endpoint returned that the chart does
@@ -214,4 +294,10 @@ function timeframes(selected: string): readonly string[] {
   return TIMEFRAMES.includes(selected as (typeof TIMEFRAMES)[number])
     ? TIMEFRAMES
     : [...TIMEFRAMES, selected]
+}
+
+function signature(openOn: ChartScreenProps['openOn']): string {
+  return openOn === undefined
+    ? ''
+    : `${openOn.symbol}|${openOn.timeframe}|${openOn.object ?? ''}`
 }

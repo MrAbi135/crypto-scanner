@@ -345,3 +345,67 @@ describe('ChartScreen opening context', () => {
     expect((screen.getByLabelText('Symbol') as HTMLInputElement).value).toBe('BTCUSDT')
   })
 })
+
+describe('ChartScreen deep links', () => {
+  it('opens the evidence for the object the address names', async () => {
+    // S15's DoD: "evidence deep-link → highlight". Without this the link lands
+    // on the right chart and the reader has to find the object again by eye,
+    // which is the work the link was supposed to save.
+    render(<ChartScreen openOn={{ symbol: 'BTCUSDT', timeframe: 'H1', object: 'zone:z1' }} />)
+
+    expect((await screen.findByTestId('evidence')).textContent).toContain('z1')
+  })
+
+  it('resolves a pool the same way', async () => {
+    render(<ChartScreen openOn={{ symbol: 'BTCUSDT', timeframe: 'H1', object: 'pool:p1' }} />)
+
+    expect((await screen.findByTestId('evidence')).textContent).toContain('p1')
+  })
+
+  it('says so when the linked object is not on this chart', async () => {
+    // A link that lands with nothing selected is indistinguishable from a link
+    // that worked and pointed at something the reader failed to notice.
+    render(<ChartScreen openOn={{ symbol: 'BTCUSDT', timeframe: 'H1', object: 'zone:gone' }} />)
+
+    expect((await screen.findByTestId('chart-unresolved')).textContent).toContain('zone:gone')
+  })
+
+  it('is honest that sweep and swing links do not survive', async () => {
+    // Their ids are built from chart-local markers, so a link to one resolves
+    // to a different object -- or to nothing -- on a window that has moved by a
+    // candle. Saying so beats a lookup that is right most of the time.
+    render(<ChartScreen openOn={{ symbol: 'BTCUSDT', timeframe: 'H1', object: 'sweep:whatever' }} />)
+
+    expect((await screen.findByTestId('chart-unresolved')).textContent).toContain('do not')
+  })
+
+  it('reports its context, including the selection, to whoever asked', async () => {
+    const seen: { symbol: string; timeframe: string; object: string | null }[] = []
+
+    render(
+      <ChartScreen
+        openOn={{ symbol: 'BTCUSDT', timeframe: 'H1', object: 'zone:z1' }}
+        onContext={(next) => seen.push(next)}
+      />,
+    )
+
+    await screen.findByTestId('evidence')
+
+    expect(seen.at(-1)).toEqual({ symbol: 'BTCUSDT', timeframe: 'H1', object: 'zone:z1' })
+  })
+
+  it('re-seeds when the caller changes the context from outside', async () => {
+    // What makes the back button real. An effect keyed on current state would
+    // instead make the symbol box unusable, which is the other failure and the
+    // reason this is keyed on the prop's own identity.
+    const { rerender } = render(<ChartScreen openOn={{ symbol: 'BTCUSDT', timeframe: 'H1' }} />)
+
+    await waitFor(() => expect(screen.getByLabelText('Symbol')).toBeDefined())
+
+    rerender(<ChartScreen openOn={{ symbol: 'ETHUSDT', timeframe: 'H4' }} />)
+
+    await waitFor(() =>
+      expect((screen.getByLabelText('Symbol') as HTMLInputElement).value).toBe('ETHUSDT'),
+    )
+  })
+})
