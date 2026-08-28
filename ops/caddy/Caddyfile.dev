@@ -24,6 +24,16 @@
 :8080 {
 	encode gzip
 
+	# Access log to stdout, so `docker compose logs caddy` says what the edge
+	# served. Its absence was noticed the first time someone asked whether the
+	# chart had actually fetched anything and there was no way to tell -- the
+	# API's own logs do not record requests either, so the edge was the only
+	# place that could have known and it was silent.
+	log {
+		output stdout
+		format console
+	}
+
 	# Cheap and true even on loopback: these cost nothing and mean the staging
 	# box does not teach habits the edge config would have to unteach.
 	header {
