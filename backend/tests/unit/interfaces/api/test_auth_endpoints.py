@@ -18,6 +18,7 @@ from tests.unit.interfaces.api.identity_fixtures import (
     EmptyIncidents,
     EmptyRankings,
     EmptySignals,
+    EmptySymbols,
     FakeSessionStore,
     FakeTenants,
     FakeUsers,
@@ -90,6 +91,7 @@ def build() -> tuple[TestClient, FakeClock, FakeSessionStore, FakeUsers]:
         rankings=EmptyRankings(),
         feed=EmptyFeed(),
         incidents=EmptyIncidents(),
+        symbols=EmptySymbols(),
     )
 
     return TestClient(app), clock, store, users

@@ -34,7 +34,7 @@ from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.ict_evidence import IctEvidenceRepository
 from scanner.application.ports.ict_zones import IctZoneRepository
 from scanner.application.ports.liquidity_detection import LiquidityPoolRepository
-from scanner.application.ports.repositories import IncidentRepository
+from scanner.application.ports.repositories import IncidentRepository, SymbolRepository
 from scanner.application.ports.sessions import SessionRepository
 from scanner.application.ports.signal_outcomes import SignalOutcomeRepository
 from scanner.application.ports.signal_transitions import SignalTransitionRepository
@@ -72,6 +72,7 @@ IMPLEMENTED_ROWS: tuple[str, ...] = (
     "GET /api/v1/rankings",
     "GET /api/v1/scanner/feed",
     "GET /api/v1/market/incidents",
+    "GET /api/v1/scanner/universe",
     "GET /api/v1/rankings/weights",
     "GET /api/v1/signals/history",
     "GET /api/v1/signals/statistics",
@@ -109,6 +110,7 @@ def build_read_api(
     rankings: RankingSnapshotService,
     feed: LiveFeedService,
     incidents: IncidentRepository,
+    symbols: SymbolRepository,
     # §11's buckets. Defaulted, unlike every other collaborator here, because
     # the in-process store is the correct one for a single-container
     # deployment and a test that does not care about limits should not have to
@@ -150,6 +152,7 @@ def build_read_api(
     app.state.rankings = rankings
     app.state.feed = feed
     app.state.incidents = incidents
+    app.state.symbols = symbols
     # §11's buckets. Asserted here rather than discovered on a request: a row
     # added without a class would be served unlimited, and unlimited is the one
     # answer §11 does not offer.

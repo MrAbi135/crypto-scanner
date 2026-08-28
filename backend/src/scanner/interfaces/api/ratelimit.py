@@ -180,6 +180,7 @@ RATE_LIMIT_CLASS: dict[str, str] = {
     "GET /api/v1/rankings": "read:heavy",
     "GET /api/v1/rankings/weights": "read:light",
     "GET /api/v1/scanner/feed": "read:heavy",
+    "GET /api/v1/scanner/universe": "read:heavy",
     "GET /api/v1/market/incidents": "read:light",
     "GET /api/v1/market/candles": "read:heavy",
     "GET /api/v1/signals/history": "read:heavy",

@@ -21,6 +21,7 @@ from tests.unit.interfaces.api.identity_fixtures import (
     EmptyIncidents,
     EmptyRankings,
     EmptySignals,
+    EmptySymbols,
     FakeSessionStore,
     FakeTenants,
     FakeUsers,
@@ -124,6 +125,7 @@ def build(
         track_statistics=EmptySignals(),
         rankings=EmptyRankings(),
         incidents=EmptyIncidents(),
+        symbols=EmptySymbols(),
         feed=LiveFeedService(
             signals or FakeSignals(),
             transitions or FakeTransitions(),

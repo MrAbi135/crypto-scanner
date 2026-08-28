@@ -22,6 +22,7 @@ from tests.unit.interfaces.api.identity_fixtures import (
     EmptyIncidents,
     EmptyRankings,
     EmptySignals,
+    EmptySymbols,
     FakeSessionStore,
     FakeTenants,
     FakeUsers,
@@ -71,6 +72,7 @@ def build(clock: MovableClock | None = None) -> tuple[TestClient, MovableClock]:
         rankings=EmptyRankings(),
         feed=EmptyFeed(),
         incidents=EmptyIncidents(),
+        symbols=EmptySymbols(),
         rate_limits=InMemoryRateLimitStore(),
     )
 

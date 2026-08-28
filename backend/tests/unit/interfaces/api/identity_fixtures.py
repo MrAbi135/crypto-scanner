@@ -223,6 +223,16 @@ class EmptyIncidents:
         return []
 
 
+class EmptySymbols:
+    """A registry with nothing in it -- distinct from a registry that failed."""
+
+    async def list_universe(self, *, status=None, tier=None, limit=200):
+        return []
+
+    async def count_observations(self):
+        return {}
+
+
 def identity(users: FakeUsers | None = None) -> dict:
     """Every collaborator `build_read_api` requires, as kwargs."""
 
@@ -242,6 +252,7 @@ def identity(users: FakeUsers | None = None) -> dict:
         "rankings": EmptyRankings(),
         "feed": EmptyFeed(),
         "incidents": EmptyIncidents(),
+        "symbols": EmptySymbols(),
     }
 
 

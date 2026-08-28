@@ -10,6 +10,7 @@ from scanner.application.ports.repositories import (
     IncidentRecord,
     IncidentRepository,
     SymbolRepository,
+    UniverseRow,
     UniverseStateRecord,
 )
 
@@ -21,5 +22,6 @@ __all__ = [
     "IncidentRepository",
     "MarketDataProvider",
     "SymbolRepository",
+    "UniverseRow",
     "UniverseStateRecord",
 ]

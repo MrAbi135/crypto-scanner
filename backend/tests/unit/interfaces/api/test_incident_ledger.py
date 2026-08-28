@@ -17,6 +17,7 @@ from tests.unit.interfaces.api.identity_fixtures import (
     EmptyIncidents,
     EmptyRankings,
     EmptySignals,
+    EmptySymbols,
     FakeSessionStore,
     FakeTenants,
     FakeUsers,
@@ -92,6 +93,7 @@ def build(incidents: FakeIncidents | None = None) -> TestClient:
         rankings=EmptyRankings(),
         feed=EmptyFeed(),
         incidents=incidents or FakeIncidents(),
+        symbols=EmptySymbols(),
     )
 
     return TestClient(app)
