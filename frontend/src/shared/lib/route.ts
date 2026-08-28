@@ -11,7 +11,7 @@
 // that disagree, so the address bar says one thing and the screen shows
 // another. That is worse than no routing at all.
 
-export type ViewId = 'feed' | 'rankings' | 'chart' | 'universe'
+export type ViewId = 'feed' | 'rankings' | 'chart' | 'universe' | 'signal'
 
 export interface Route {
   readonly view: ViewId
@@ -27,12 +27,24 @@ export interface Route {
    * cannot be sent to anyone.
    */
   readonly object?: string
+  /** Signal only: the published signal on screen. Same argument as `object`:
+   *  a conviction surface nobody can link to cannot be argued about. */
+  readonly signalId?: string
 }
 
-const VIEWS: readonly ViewId[] = ['feed', 'rankings', 'chart', 'universe']
+const VIEWS: readonly ViewId[] = ['feed', 'rankings', 'chart', 'universe', 'signal']
 
 /** The address for a route. Always absolute, always starts with `/`. */
 export function toPath(route: Route): string {
+  if (route.view === 'signal') {
+    // A signal id is opaque server output, so it is escaped like the symbol
+    // below -- and a signal route with no id is just the feed, because there
+    // is no "signal screen about nothing" to show.
+    return route.signalId === undefined || route.signalId === ''
+      ? '/'
+      : `/signal/${encodeURIComponent(route.signalId)}`
+  }
+
   if (route.view !== 'chart') {
     // The feed is the root, not `/feed`. It is where an unadorned visit lands
     // and it should not immediately rewrite the address bar to say so.
@@ -61,6 +73,14 @@ export function fromPath(path: string, query = ''): Route {
   if (parts.length === 0) return { view: 'feed' }
 
   const [head, ...rest] = parts
+
+  if (head === 'signal') {
+    const [signalId] = rest.map(decode)
+
+    return signalId === undefined || signalId === ''
+      ? { view: 'feed' }
+      : { view: 'signal', signalId }
+  }
 
   if (head === 'chart') {
     const [symbol, timeframe] = rest.map(decode)

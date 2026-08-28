@@ -18,9 +18,12 @@ export interface SignalRowProps {
    * one click away.
    */
   readonly onOpenChart?: ((symbol: string, timeframe: string) => void) | undefined
+  /** Open the signal's own detail screen — §15.4's factor breakdown lives
+   *  there, because the feed row cannot carry it. */
+  readonly onOpenSignal?: ((signalId: string) => void) | undefined
 }
 
-export function SignalRow({ row, onOpenChart }: SignalRowProps) {
+export function SignalRow({ row, onOpenChart, onOpenSignal }: SignalRowProps) {
   const long = row.direction === 'UP'
 
   return (
@@ -78,6 +81,17 @@ export function SignalRow({ row, onOpenChart }: SignalRowProps) {
       </td>
 
       <td className="signal__open">
+        {onOpenSignal !== undefined && (
+          <button
+            type="button"
+            className="signal__chart"
+            data-testid={`detail-${row.signal_id}`}
+            aria-label={`Open the ${row.symbol} ${row.timeframe} signal detail`}
+            onClick={() => onOpenSignal(row.signal_id)}
+          >
+            Detail
+          </button>
+        )}{' '}
         {onOpenChart !== undefined && (
           <button
             type="button"

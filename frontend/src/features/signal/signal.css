@@ -1,0 +1,123 @@
+.signal-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.signal-screen__title {
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+.signal-screen__meta {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--colour-muted, #6b7280);
+}
+
+.signal-screen__chart {
+  margin-top: 0.5rem;
+  font: inherit;
+  font-size: 0.8125rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--colour-border, #e5e7eb);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
+/* §12.4's verdict. Colour is not the only carrier: the word is the value. */
+.signal-screen__outcome {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--colour-border, #e5e7eb);
+  border-left-width: 4px;
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
+.signal-screen__outcome--success {
+  border-left-color: var(--sem-long, #16a34a);
+}
+
+.signal-screen__outcome--failed {
+  border-left-color: var(--sem-short, #dc2626);
+}
+
+.signal-screen__levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.signal-screen__levels dt {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--colour-muted, #6b7280);
+}
+
+.signal-screen__levels dd {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.signal-screen__subtitle {
+  font-size: 1rem;
+  margin: 0 0 0.35rem;
+}
+
+.signal-screen__reason {
+  margin: 0 0 0.5rem;
+  max-width: 60ch;
+}
+
+.signal-screen__factors {
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.signal-screen__factors th,
+.signal-screen__factors td {
+  text-align: left;
+  padding: 0.3rem 1rem 0.3rem 0;
+  border-bottom: 1px solid var(--colour-border, #e5e7eb);
+}
+
+.signal-screen__caption {
+  text-align: left;
+  color: var(--colour-muted, #6b7280);
+  font-size: 0.75rem;
+  padding-bottom: 0.35rem;
+}
+
+.signal-screen__mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.signal-screen__chain {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--colour-muted, #374151);
+}
+
+.signal-screen__timeline {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.8125rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.signal-screen__provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.75rem;
+  color: var(--colour-muted, #6b7280);
+  border-top: 1px solid var(--colour-border, #e5e7eb);
+  padding-top: 0.5rem;
+}

@@ -199,6 +199,71 @@ export interface PlatformStatus {
   readonly not_measured: readonly string[]
 }
 
+/** §12.4's resolved outcome, present only once the signal is settled. */
+export interface SignalOutcome {
+  readonly outcome: string
+  readonly resolved_at: string
+  readonly elapsed_candles: number
+  readonly mfe_r: string
+  readonly mae_r: string
+}
+
+/** §18.8's detail row (`projection=full`), which is the feed row plus the seal. */
+export interface SignalDetail {
+  readonly signal_id: string
+  readonly symbol: string
+  readonly timeframe: string
+  readonly direction: string
+  readonly archetype: string
+  readonly grade: string
+  readonly confidence: string
+  readonly entry: { readonly proximal: string; readonly distal: string }
+  readonly invalidation: string
+  readonly targets: {
+    readonly primary: TargetBand | null
+    readonly secondary: TargetBand | null
+  }
+  readonly published_at: string
+  readonly ttl_candles: number
+  readonly lifecycle_state: string | null
+  readonly versions: Versions
+  readonly outcome?: SignalOutcome
+  /** The sealed §15.2 payload, verbatim. */
+  readonly payload?: Record<string, unknown>
+  readonly payload_hash?: string
+  /** Recomputed server-side on every read, not trusted from the column. */
+  readonly payload_hash_verified?: boolean
+}
+
+/** §18.8's evidence row — the sealed chain and §15.4's breakdown. */
+export interface SignalEvidence {
+  readonly signal_id: string
+  readonly symbol: string
+  readonly timeframe: string
+  readonly evidence_ids: readonly string[]
+  readonly entry_zone_id: string | null
+  /** §15.4: the number never travels without the factors. */
+  readonly confidence: {
+    readonly final: string | null
+    readonly grade: string | null
+    readonly factors: Record<string, string>
+  }
+  readonly reason: string | null
+  readonly htf_chain: Record<string, string>
+  readonly risk: Record<string, unknown>
+}
+
+/** One §12 lifecycle transition, stress tests included (§18.8). */
+export interface SignalTransition {
+  readonly from_state: string | null
+  readonly to_state: string
+  readonly at_candle_open_time: string
+  readonly recorded_at: string
+  readonly stress_test: boolean
+  readonly refresh: boolean
+  readonly evidence: Record<string, unknown>
+}
+
 // §13. `freshness` is always present; `versions` only on doctrine-derived rows.
 export interface Freshness {
   readonly state: string

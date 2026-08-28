@@ -10,9 +10,22 @@ const ROUTES: readonly Route[] = [
   { view: 'chart', symbol: 'BTCUSDT' },
   { view: 'chart', symbol: 'BTCUSDT', timeframe: 'H1' },
   { view: 'chart', symbol: 'BTCUSDT', timeframe: 'H4', object: 'zone:abc-123' },
+  { view: 'signal', signalId: 'sig-2026-abc' },
 ]
 
 describe('route grammar', () => {
+  it('treats a signal route with no id as the feed', () => {
+    // There is no "signal screen about nothing" to show, in either direction.
+    expect(toPath({ view: 'signal' })).toBe('/')
+    expect(fromPath('/signal')).toEqual({ view: 'feed' })
+  })
+
+  it('escapes a signal id rather than letting it invent segments', () => {
+    expect(toPath({ view: 'signal', signalId: 'a/b' })).toBe('/signal/a%2Fb')
+    expect(fromPath('/signal/a%2Fb')).toEqual({ view: 'signal', signalId: 'a/b' })
+  })
+
+
   // The failure that matters is not a wrong parse. It is a parse and a print
   // that disagree -- the address bar saying one thing while the screen shows
   // another -- so every route is checked against its own round trip rather

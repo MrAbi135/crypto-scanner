@@ -16,6 +16,9 @@ import type {
   LiquidityMap,
   PlatformStatus,
   RankedRow,
+  SignalDetail,
+  SignalEvidence,
+  SignalTransition,
   StructureEvent,
   UniverseSymbol,
   Weights,
@@ -80,6 +83,28 @@ export function fetchUniverse(
   // Filters go to the server, as everywhere: §9 refuses one it cannot apply
   // rather than letting a client narrow a list it was already sent.
   return request<readonly UniverseSymbol[]>('/scanner/universe', filters)
+}
+
+export function fetchSignalDetail(signalId: string): Promise<Envelope<SignalDetail>> {
+  // Always `full`: the provenance footer needs the hash and the server's own
+  // verification of it, and a second request to upgrade the projection would
+  // double the reads on the screen §15.4 calls the conviction surface.
+  return request<SignalDetail>(`/signals/${encodeURIComponent(signalId)}`, {
+    projection: 'full',
+  })
+}
+
+export function fetchSignalEvidence(signalId: string): Promise<Envelope<SignalEvidence>> {
+  return request<SignalEvidence>(`/signals/${encodeURIComponent(signalId)}/evidence`, {})
+}
+
+export function fetchSignalTransitions(
+  signalId: string,
+): Promise<Envelope<readonly SignalTransition[]>> {
+  return request<readonly SignalTransition[]>(
+    `/signals/${encodeURIComponent(signalId)}/transitions`,
+    {},
+  )
 }
 
 export function fetchStatus(): Promise<Envelope<PlatformStatus>> {

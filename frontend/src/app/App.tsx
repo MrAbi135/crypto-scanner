@@ -19,6 +19,7 @@ import { useCallback } from 'react'
 
 import { ChartScreen } from '@features/chart/ChartScreen'
 import { RankingsScreen } from '@features/scanner/RankingsScreen'
+import { SignalScreen } from '@features/signal/SignalScreen'
 import { ScannerScreen } from '@features/scanner/ScannerScreen'
 import { UniverseScreen } from '@features/scanner/UniverseScreen'
 import { CommandPalette } from '@features/palette/CommandPalette'
@@ -40,8 +41,13 @@ export function App() {
 
   const view = route.view
 
-  function openChart(symbol: string, timeframe: string) {
-    navigate({ view: 'chart', symbol, timeframe })
+  function openChart(symbol: string, timeframe: string, object?: string) {
+    navigate({
+      view: 'chart',
+      symbol,
+      timeframe,
+      ...(object === undefined ? {} : { object }),
+    })
   }
 
   function isView(id: string): id is ViewId {
@@ -120,6 +126,7 @@ export function App() {
           <ScannerScreen
             onShowFloors={() => navigate({ view: 'rankings' })}
             onOpenChart={openChart}
+            onOpenSignal={(signalId) => navigate({ view: 'signal', signalId })}
           />
         )}
         {view === 'rankings' && <RankingsScreen />}
@@ -130,6 +137,12 @@ export function App() {
             box lands in the address bar and does not bounce. */}
         {view === 'chart' && <ChartScreen openOn={chartContext} onContext={onChartContext} />}
         {view === 'universe' && <UniverseScreen />}
+        {/* Not a tab: a detail screen reached from a row or a link. While it
+            is open no tab reads selected, which is true -- the reader is not
+            on any of the four boards. */}
+        {view === 'signal' && route.signalId !== undefined && (
+          <SignalScreen signalId={route.signalId} onOpenChart={openChart} />
+        )}
       </div>
     </main>
   )
