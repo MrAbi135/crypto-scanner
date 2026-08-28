@@ -16,6 +16,8 @@ import {
   fetchZones,
 } from '@services/api/client'
 import { Chart } from '@features/chart/Chart'
+import { EvidencePanel } from '@features/chart/EvidencePanel'
+import type { Inspection } from '@features/chart/inspection'
 
 import './chart.css'
 
@@ -37,6 +39,7 @@ export function ChartScreen() {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [inspection, setInspection] = useState<Inspection | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -44,6 +47,11 @@ export function ChartScreen() {
     async function load() {
       setBusy(true)
       setError(null)
+      // The selection belongs to the context it was made in. Left standing
+      // across a symbol or timeframe change, the panel would show one
+      // context's evidence beside another's chart -- and this screen exists to
+      // be trusted about exactly that pairing.
+      setInspection(null)
 
       try {
         const [candles, zones, liquidity, structure] = await Promise.all([
@@ -130,7 +138,11 @@ export function ChartScreen() {
             pools={loaded.pools}
             structure={loaded.structure}
             sweeps={loaded.sweeps}
+            onInspect={setInspection}
+            selectedId={inspection?.id ?? null}
           />
+
+          <EvidencePanel inspection={inspection} onClose={() => setInspection(null)} />
 
           {/* Provenance on screen, not buried in a network tab. A chart whose
               algo_version the viewer cannot see is a chart they cannot use to
