@@ -20,6 +20,7 @@ pytest.importorskip("testcontainers")
 from sqlalchemy import text
 
 from scanner.application.ports import IncidentRecord
+from scanner.application.ports.liquidity_history import LiquidityHistoryRecord
 from scanner.application.ports.repositories import UniverseStateRecord
 from scanner.domain.common import Symbol, SymbolStatus, TradeAggregate
 from scanner.domain.common.universe import UniverseTier
@@ -28,6 +29,7 @@ from scanner.infrastructure.persistence.database import build_session_factory
 from scanner.infrastructure.persistence.repositories import (
     PgCandleRepository,
     PgIncidentRepository,
+    PgLiquidityHistoryRepository,
     PgSymbolRepository,
     PgTradeAggregateRepository,
 )
@@ -302,6 +304,80 @@ async def test_the_clean_day_counter_cannot_pass_the_lift_threshold(engine) -> N
 
     with pytest.raises(Exception, match="ck_symbols_wash_clean_days"):
         await repo.save_wash_risk("CLEANUSDT", WashRiskState(tagged=True, clean_days=3))
+
+
+async def test_the_universe_read_joins_the_registry_to_its_counters(engine) -> None:
+    """§18.4's universe row, against the database rather than a fake.
+
+    Two things only SQL can get wrong here, and both would be invisible in the
+    endpoint's own tests: that the tiering counters come back attached to the
+    right symbol, and that the observation count is one grouped query rather
+    than a per-symbol lookup that would grow the page with the exchange's
+    listings.
+    """
+    sessions = build_session_factory(engine)
+    repo = PgSymbolRepository(sessions)
+    history = PgLiquidityHistoryRepository(sessions)
+
+    tag = new_ulid()[:6]
+    watched = f"UNIA{tag}USDT"
+    other = f"UNIB{tag}USDT"
+
+    for symbol in (watched, other):
+        await repo.upsert_many(
+            [
+                Symbol(
+                    new_ulid(),
+                    "binance",
+                    symbol,
+                    symbol[:-4],
+                    "USDT",
+                    SymbolStatus.QUARANTINE,
+                    BASE_TIME,
+                )
+            ]
+        )
+
+    await repo.save_universe_state(
+        UniverseStateRecord(
+            exchange_symbol=watched,
+            tier=UniverseTier.T2,
+            candidate_tier=UniverseTier.T1,
+            consecutive_passes=3,
+            consecutive_failures=0,
+        )
+    )
+
+    for day in range(4):
+        await history.append(
+            LiquidityHistoryRecord(
+                exchange_symbol=watched,
+                observed_at=BASE_TIME + timedelta(days=day),
+                daily_quote_volume=Decimal("1000000"),
+                spread_bps=Decimal("1.5"),
+                depth_2pct=Decimal("50000"),
+            )
+        )
+
+    rows = {row.exchange_symbol: row for row in await repo.list_universe(limit=500)}
+
+    assert rows[watched].tier is UniverseTier.T2
+    assert rows[watched].candidate_tier is UniverseTier.T1
+    assert rows[watched].consecutive_passes == 3
+    # The other symbol must not have inherited them.
+    assert rows[other].consecutive_passes == 0
+    assert rows[other].candidate_tier is None
+
+    counts = await repo.count_observations()
+
+    assert counts[watched] == 4
+    # Absent rather than zero: the map carries what was observed, and the
+    # endpoint decides what silence means.
+    assert other not in counts
+
+    # Filtered in the query.
+    assert all(row.status == "QUARANTINE" for row in await repo.list_universe(status="QUARANTINE"))
+    assert await repo.list_universe(status="DELISTED", limit=500) == []
 
 
 async def test_incident_roundtrip(engine) -> None:

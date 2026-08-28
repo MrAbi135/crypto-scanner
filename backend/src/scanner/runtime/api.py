@@ -116,6 +116,7 @@ def build_api_app(settings: ApiSettings) -> FastAPI:
             PgSymbolRepository(db),
         ),
         incidents=PgIncidentRepository(db),
+        symbols=PgSymbolRepository(db),
         feed=LiveFeedService(
             PgSignalRepository(db),
             PgSignalTransitionRepository(db),

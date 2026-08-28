@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -27,6 +27,21 @@ class IncidentRecord:
     resolution: str | None = None
     resolved_at: datetime | None = None
     notes: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class UniverseRow:
+    """A registry row with its §1.4 tiering state, for §18.4's universe read."""
+
+    exchange_symbol: str
+    base_asset: str
+    quote_asset: str
+    status: str
+    tier: UniverseTier
+    candidate_tier: UniverseTier | None
+    consecutive_passes: int
+    consecutive_failures: int
+    first_seen_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +110,32 @@ class SymbolRepository(Protocol):
         exchange_symbol: str,
     ) -> UniverseStateRecord | None:
         """Return persisted universe state for one symbol."""
+        ...
+
+    async def list_universe(
+        self,
+        *,
+        status: str | None = None,
+        tier: str | None = None,
+        limit: int = 200,
+    ) -> Sequence[UniverseRow]:
+        """§18.4's universe read: the registry row and its §1.4 state together.
+
+        One query rather than `list_observable` plus a `get_universe_state` per
+        symbol. The registry holds seven hundred rows; a call per symbol would
+        make the page cost grow with the exchange's listings rather than with
+        the answer.
+        """
+        ...
+
+    async def count_observations(self) -> Mapping[str, int]:
+        """Daily liquidity observations per symbol (§1.4's first seven).
+
+        Separate from the row because it is a count over another table, and
+        because it is the number that explains the whole page: until a symbol
+        has seven, no evaluation runs at all and its pass counter stays at
+        zero -- which reads exactly like a dead universe layer.
+        """
         ...
 
     async def save_universe_state(

@@ -7,17 +7,18 @@ staging preserves immutability (existing candle facts are never touched).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import bindparam, select, text
+from sqlalchemy import bindparam, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from scanner.application.ports import (
     Clock,
     IncidentRecord,
+    UniverseRow,
     UniverseStateRecord,
 )
 from scanner.application.ports.liquidity_history import (
@@ -239,6 +240,63 @@ class PgSymbolRepository:
                 consecutive_passes=row.consecutive_passes,
                 consecutive_failures=row.consecutive_failures,
             )
+
+    async def list_universe(
+        self,
+        *,
+        status: str | None = None,
+        tier: str | None = None,
+        limit: int = 200,
+    ) -> Sequence[UniverseRow]:
+        stmt = select(SymbolRow)
+
+        if status is not None:
+            stmt = stmt.where(SymbolRow.status == status)
+
+        if tier is not None:
+            stmt = stmt.where(SymbolRow.tier == tier)
+
+        # Tier first so the most liquid lead, then the symbol so the page is
+        # the same page twice. Without the second key a tie comes back in
+        # whatever order the planner chose, and a list that reorders itself
+        # between reads cannot be paged through.
+        stmt = stmt.order_by(SymbolRow.tier.asc(), SymbolRow.exchange_symbol.asc()).limit(limit)
+
+        async with self._sessions() as session:
+            rows = (await session.execute(stmt)).scalars()
+
+            return [
+                UniverseRow(
+                    exchange_symbol=row.exchange_symbol,
+                    base_asset=row.base_asset,
+                    quote_asset=row.quote_asset,
+                    status=row.status,
+                    tier=UniverseTier(row.tier),
+                    candidate_tier=(
+                        UniverseTier(row.candidate_tier) if row.candidate_tier is not None else None
+                    ),
+                    consecutive_passes=row.consecutive_passes,
+                    consecutive_failures=row.consecutive_failures,
+                    first_seen_at=row.first_seen_at,
+                )
+                for row in rows
+            ]
+
+    async def count_observations(self) -> Mapping[str, int]:
+        """One grouped count rather than a query per symbol.
+
+        Seven hundred symbols and one round trip: the per-symbol version would
+        make the universe page cost grow with the exchange's listings.
+        """
+        stmt = select(
+            LiquidityHistoryRow.exchange_symbol,
+            func.count().label("days"),
+        ).group_by(LiquidityHistoryRow.exchange_symbol)
+
+        async with self._sessions() as session:
+            rows = await session.execute(stmt)
+
+            return {symbol: int(days) for symbol, days in rows}
 
     async def save_universe_state(
         self,

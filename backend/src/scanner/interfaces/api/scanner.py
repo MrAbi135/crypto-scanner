@@ -15,7 +15,8 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Request
 
 from scanner.application.feed import FeedRow, LiveFeedService
-from scanner.interfaces.api.deps import get_feed
+from scanner.application.ports import Clock, SymbolRepository, UniverseRow
+from scanner.interfaces.api.deps import get_clock, get_feed, get_symbols
 from scanner.interfaces.api.envelope import Freshness, success
 from scanner.interfaces.api.query import (
     Filter,
@@ -46,6 +47,10 @@ FEED_FILTERS: dict[str, frozenset[FilterOp]] = {
 # would not reorder a page, it would reorder a *ranking* -- the position
 # numbers printed beside the rows would become wrong.
 FEED_SORT = (SortKey("rank"),)
+
+# §18.4 documents no sort on the universe row either; tier then symbol is the
+# order, and it is the server's.
+UNIVERSE_SORT = (SortKey("tier"),)
 
 
 @router.get("/feed")
@@ -152,3 +157,99 @@ def _matches(row: FeedRow, filters: tuple[Filter, ...]) -> bool:
     # `values` is a tuple even for EQ, so both operators read the same field
     # and neither has to know what the other holds.
     return all(field_of[parsed.field] in parsed.values for parsed in filters)
+
+
+# §18.4 documents `tier`, `category` and `status`. `category` is not a column
+# the registry has -- §1.4 tiers by liquidity and nothing classifies a symbol
+# by sector -- so offering it would be a filter the server cannot apply, which
+# §9 calls "a lie the client believes". It is absent rather than accepted and
+# ignored.
+UNIVERSE_FILTERS: dict[str, frozenset[FilterOp]] = {
+    "tier": frozenset({FilterOp.EQ}),
+    "status": frozenset({FilterOp.EQ}),
+}
+
+UNIVERSE_LIMIT = 200
+
+# §1.4: seven daily observations before any evaluation runs, then seven
+# consecutive passing evaluations to promote. Published so a reader can see
+# what the counters below are counting towards.
+REQUIRED_OBSERVATION_DAYS = 7
+REQUIRED_PROMOTION_DAYS = 7
+
+
+@router.get("/universe")
+async def universe(
+    request: Request,
+    _: Annotated[CurrentUser, Depends(require_user)],
+    symbols: Annotated[SymbolRepository, Depends(get_symbols)],
+    clock: Annotated[Clock, Depends(get_clock)],
+) -> dict[str, Any]:
+    """§18.4's universe view (DDD T1/T2).
+
+    **The observation count is the point of this row.** Every symbol on a young
+    host reads `INELIGIBLE / QUARANTINE` with `consecutive_passes = 0`, which
+    is indistinguishable from a universe layer that has stopped -- and was
+    misread as exactly that. The count says which: seven observations are
+    needed before an evaluation runs at all, so a symbol at four has not failed
+    anything, it has not been assessed.
+
+    §18.4 also names "warmup state" and "TFs scanned". Neither is served, and
+    neither is faked: §1.9's warm-up is a question per symbol *and timeframe*
+    that the coin rows answer, and the scanned timeframe set is engine
+    configuration rather than a property of a symbol. A column invented here
+    would be a number this endpoint has not been told.
+    """
+    params = dict(request.query_params)
+
+    filters = parse_filters(params, allowed=UNIVERSE_FILTERS)
+    parse_limit(params.get("limit"))
+    parse_sort(params.get("sort"), allowed=frozenset(), default=UNIVERSE_SORT, fixed=True)
+
+    chosen = {parsed.field: parsed.values[0] for parsed in filters}
+
+    rows = await symbols.list_universe(
+        status=chosen.get("status"),
+        tier=chosen.get("tier"),
+        limit=UNIVERSE_LIMIT,
+    )
+
+    observations = await symbols.count_observations()
+
+    return success(
+        [_universe_row(row, observations.get(row.exchange_symbol, 0)) for row in rows],
+        generated_at=clock.now(),
+        # The registry is what the daily job last wrote, not a live reading.
+        freshness=Freshness(state="RECORDED", observed_at=None),
+        page={
+            "count": len(rows),
+            "has_more": len(rows) == UNIVERSE_LIMIT,
+            "required_observation_days": REQUIRED_OBSERVATION_DAYS,
+            "required_promotion_days": REQUIRED_PROMOTION_DAYS,
+        },
+    )
+
+
+def _universe_row(row: UniverseRow, observations: int) -> dict[str, Any]:
+    return {
+        "symbol": row.exchange_symbol,
+        "base_asset": row.base_asset,
+        "quote_asset": row.quote_asset,
+        "status": row.status,
+        "tier": row.tier.value,
+        "candidate_tier": row.candidate_tier.value if row.candidate_tier is not None else None,
+        "consecutive_passes": row.consecutive_passes,
+        "consecutive_failures": row.consecutive_failures,
+        "observation_days": observations,
+        # Said rather than left to be inferred from two counters and a
+        # threshold. "Not yet assessed" and "assessed and failing" are the two
+        # states this page exists to separate.
+        "assessment": (
+            "collecting"
+            if observations < REQUIRED_OBSERVATION_DAYS
+            else "evaluating"
+            if row.consecutive_failures == 0
+            else "failing"
+        ),
+        "first_seen_at": row.first_seen_at.isoformat(),
+    }
