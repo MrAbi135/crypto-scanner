@@ -54,17 +54,26 @@ def count_pool_touches(
     side: LiquiditySide,
     band_low: Decimal,
     band_high: Decimal,
-    epsilon: Decimal,
+    epsilons: Sequence[Decimal],
 ) -> int:
     """Count §4.2's separate reversing approaches over `candles`.
 
     `candles` are the closed candles **after** the pool's confirmation, oldest
     first. A pool is not touched by the candle that created it.
 
-    `epsilon` is the same `ε` the rest of §4 uses for level equality, supplied
-    by the caller because it is ATR-derived and this stays pure.
+    `epsilons` is per candle, aligned with `candles`, each derived from that
+    candle's own ATR -- the same ε the sweep lifecycle uses when it walks the
+    same candles. The first version took ONE epsilon derived from the window's
+    newest candle, which broke §4.2's own promise ("every component is
+    recomputable from stored evidence") twice over: a historical candle's
+    touch/breach classification shifted every time the window's newest ATR
+    moved, and the touch counter could disagree with the sweep lifecycle about
+    whether the same candle breached the same pool.
     """
-    if epsilon < 0:
+    # Alignment is enforced by zip(strict=True) in the walk below -- an
+    # explicit pre-check was written first and removed when mutating it away
+    # changed no test, because the zip raises the same ValueError.
+    if any(value < 0 for value in epsilons):
         raise ValueError("epsilon must be non-negative")
 
     if band_high < band_low:
@@ -74,7 +83,7 @@ def count_pool_touches(
     inside = False
     breached = False
 
-    for candle in candles:
+    for candle, epsilon in zip(candles, epsilons, strict=True):
         in_zone = _reaches(candle, side, band_low, band_high, epsilon)
 
         if in_zone:

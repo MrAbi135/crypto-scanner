@@ -126,13 +126,39 @@ def _cluster_side(
     min_depth_atr: Decimal,
 ) -> list[EqualLevelCluster]:
     result: list[EqualLevelCluster] = []
-    index = 0
 
-    while index < len(members) - 1:
-        chain = [members[index]]
-        cursor = index + 1
+    # Positions already belonging to a cluster. The first version advanced the
+    # outer loop by `index += len(chain)` -- a COUNT, over a list where the
+    # consumed members are not contiguous (the inner loop skips members whose
+    # gap is under the minimum). Two real consequences, both found by tracing
+    # highs at candle indices 10, 11, 14 with min_gap=3: the skipped member 11
+    # never got to seed a chain of its own (a §4.3 cluster at a *different*
+    # price level could vanish the same way), and with a fourth high at 18 the
+    # arithmetic landed the outer loop back on the consumed member 14, which
+    # then seeded a second, fully-overlapping cluster -- a duplicate pool.
+    #
+    # A consumed set makes both impossible: every unconsumed member seeds, and
+    # a member already inside a cluster neither seeds nor joins again --
+    # §4.3's "later qualifying members join incrementally" describes one chain
+    # per shelf growing, not one shelf spawning overlapping chains.
+    consumed: set[int] = set()
+
+    # No skip on consumed seeds, on purpose: the inner scan's consumed-check
+    # is the sole enforcement, and it is sufficient -- a chain seeded from a
+    # consumed member can never reach length 2, because every partner it could
+    # legally pair with was consumed alongside it. An outer skip was written
+    # first and removed when mutating it away changed no test: redundant
+    # protection reads as load-bearing, which is worse than absent.
+    for start in range(len(members) - 1):
+        chain = [members[start]]
+        positions = [start]
+        cursor = start + 1
 
         while cursor < len(members):
+            if cursor in consumed:
+                cursor += 1
+                continue
+
             previous = chain[-1]
             current = members[cursor]
             gap = current.index - previous.index
@@ -165,6 +191,7 @@ def _cluster_side(
                 break
 
             chain.append(current)
+            positions.append(cursor)
             cursor += 1
 
         if len(chain) >= 2:
@@ -187,9 +214,7 @@ def _cluster_side(
                 )
             )
 
-            index += len(chain)
-        else:
-            index += 1
+            consumed.update(positions)
 
     return result
 

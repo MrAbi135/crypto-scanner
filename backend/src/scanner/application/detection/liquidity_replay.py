@@ -60,7 +60,13 @@ from scanner.domain.structure import (
 )
 from scanner.shared import Timeframe
 
-LIQUIDITY_ALGO_VERSION = "s5-v7"
+# v8: two detector-output changes from the 2026-08-29 full-domain review.
+# (1) §4.3 cluster chains advance by a consumed-set instead of a member count,
+# so a gap-skipped member can seed its own chain and a consumed member can no
+# longer seed an overlapping duplicate. (2) §4.2 touches are counted with each
+# candle's own ATR-derived epsilon instead of the window-newest candle's, so a
+# stored candle's touch verdict no longer moves as the window slides.
+LIQUIDITY_ALGO_VERSION = "s5-v8"
 
 _ATR_PERIOD = 14
 _SWEEP_SCAN_ATR = Decimal("3")
@@ -224,6 +230,7 @@ class LiquidityReplayService:
                 liquidity_class=liquidity_class,
                 levels=levels,
                 epsilon=epsilon,
+                atrs=atrs,
             )
 
             if persisted:
@@ -244,6 +251,7 @@ class LiquidityReplayService:
                 liquidity_class=liquidity_class,
                 levels=levels,
                 epsilon=epsilon,
+                atrs=atrs,
             )
 
             if persisted:
@@ -267,6 +275,7 @@ class LiquidityReplayService:
                 liquidity_class=liquidity_class,
                 levels=levels,
                 epsilon=epsilon,
+                atrs=atrs,
             ):
                 by_class[liquidity_class] += 1
                 cluster_count += 1
@@ -349,6 +358,7 @@ class LiquidityReplayService:
         liquidity_class: LiquidityClass,
         levels: _LevelMap,
         epsilon: Decimal,
+        atrs: Sequence[Decimal | None],
     ) -> bool:
         confirmation_index = swing.index + swing_window(swing.strength)
 
@@ -393,7 +403,10 @@ class LiquidityReplayService:
             side=side,
             band_low=swing.price,
             band_high=swing.price,
-            epsilon=epsilon,
+            # Per candle, from each candle's own ATR -- the same ε the sweep
+            # lifecycle uses on the same walk. One ε from the newest candle
+            # made a historical candle's touch verdict move with the window.
+            epsilons=_epsilons_for(atrs, confirmation_index + 1, len(candles)),
         )
 
         pool = pool_from_swing(
@@ -465,6 +478,7 @@ class LiquidityReplayService:
         liquidity_class: LiquidityClass,
         levels: _LevelMap,
         epsilon: Decimal,
+        atrs: Sequence[Decimal | None],
     ) -> bool:
         if cluster.confirmed_index >= len(candles):
             return False
@@ -494,7 +508,7 @@ class LiquidityReplayService:
             side=cluster.side,
             band_low=cluster.band_low,
             band_high=cluster.band_high,
-            epsilon=epsilon,
+            epsilons=_epsilons_for(atrs, cluster.confirmed_index + 1, len(candles)),
         )
 
         pool = pool_from_cluster(
@@ -1048,6 +1062,23 @@ def _atr_at(
         return Decimal("0")
 
     return atrs[index] or Decimal("0")
+
+
+def _epsilons_for(
+    atrs: Sequence[Decimal | None],
+    start: int,
+    end: int,
+) -> tuple[Decimal, ...]:
+    """Per-candle sweep tolerance for candles[start:end].
+
+    A candle whose ATR is unavailable (warm-up head of the series) gets
+    epsilon 0 -- the strictest reading, so an unmeasured candle can neither
+    manufacture a touch that a measured one would refuse nor forgive a breach.
+    """
+    return tuple(
+        TOLERANCE_ATR * atr if (atr := atrs[index]) is not None and atr > 0 else Decimal(0)
+        for index in range(start, end)
+    )
 
 
 def _side_of(swing: SwingPoint) -> LiquiditySide:
