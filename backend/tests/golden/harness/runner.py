@@ -175,6 +175,7 @@ async def _run_confluence(dataset: GoldenDataset) -> dict[str, Any]:
             pool_transitions,
             events,
             InMemoryLiquidityStateStore(),
+            evidence,
             clock,
         ),
         StructureShiftReplayService(candles, events, evidence, clock, shift_state),
@@ -337,6 +338,7 @@ async def _run_liquidity(dataset: GoldenDataset) -> dict[str, Any]:
         transitions,
         events,
         InMemoryLiquidityStateStore(),
+        InMemoryIctEvidenceRepository(events, transitions),
         FixedClock(HARNESS_CLOCK),
         algo_version=dataset.algo_version,
     )

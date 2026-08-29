@@ -21,6 +21,9 @@ from scanner.application.detection.liquidity_replay import (
 from scanner.application.ports.detection import (
     EngineEventRecord,
 )
+from scanner.application.ports.ict_evidence import (
+    LiquidityEvidenceRecord,
+)
 from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRecord,
     LiquidityTransitionRecord,
@@ -178,6 +181,13 @@ class FakeEvents:
         self,
         event: EngineEventRecord,
     ) -> bool:
+        # Mirrors the production ON CONFLICT DO NOTHING: the maturation pass
+        # re-attempts every settled fact on every run, and a fake that
+        # appended duplicates would hide exactly the double-count the event
+        # key exists to prevent.
+        if await self.exists(event.event_key):
+            return False
+
         self.items.append(event)
         return True
 
@@ -186,6 +196,36 @@ class FakeEvents:
         event_key: str,
     ) -> bool:
         return any(item.event_key == event_key for item in self.items)
+
+
+class FakeEvidence:
+    """`list_liquidity` over a FakeTransitions log, with production's bounds."""
+
+    def __init__(self, transitions: FakeTransitions) -> None:
+        self._transitions = transitions
+
+    async def list_liquidity(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[LiquidityEvidenceRecord, ...]:
+        return tuple(
+            LiquidityEvidenceRecord(
+                pool_id=item.pool_id,
+                from_state=item.from_state,
+                to_state=item.to_state,
+                reason=item.reason,
+                transitioned_at=item.transitioned_at,
+                candle_index=item.candle_index,
+                evidence=item.evidence,
+            )
+            for item in self._transitions.items
+            if item.symbol == symbol
+            and item.timeframe is timeframe
+            and start <= item.transitioned_at < end
+        )
 
 
 class FakeSnapshots:
@@ -326,6 +366,7 @@ async def test_active_bsl_pool_sweep_becomes_terminal() -> None:
         transitions,
         events,
         snapshots,  # type: ignore[arg-type]
+        FakeEvidence(transitions),  # type: ignore[arg-type]
         FakeClock(),
     )
 
@@ -382,6 +423,7 @@ async def test_terminal_pool_cannot_transition_twice() -> None:
         transitions,
         events,
         snapshots,  # type: ignore[arg-type]
+        FakeEvidence(transitions),  # type: ignore[arg-type]
         FakeClock(),
     )
 
@@ -405,12 +447,47 @@ async def test_terminal_pool_cannot_transition_twice() -> None:
     assert len(events.items) == 1
 
 
+def _maturation_service(
+    candles: list[Candle],
+    pools: FakePools,
+) -> tuple[LiquidityReplayService, FakeTransitions, FakeEvents]:
+    transitions = FakeTransitions()
+    events = FakeEvents()
+
+    service = LiquidityReplayService(
+        FakeCandles(candles),  # type: ignore[arg-type]
+        pools,  # type: ignore[arg-type]
+        transitions,
+        events,
+        FakeSnapshots(),  # type: ignore[arg-type]
+        FakeEvidence(transitions),  # type: ignore[arg-type]
+        FakeClock(),
+    )
+
+    return service, transitions, events
+
+
+async def _sweep_then_mature(
+    service: LiquidityReplayService,
+    pools: FakePools,
+    candles: list[Candle],
+) -> None:
+    """The two steps `run()` performs, in `run()`'s order."""
+
+    atrs = wilder_atr_series(candles)
+
+    await service._replay_pool_lifecycle(pools.pool, candles, atrs)
+    await service._mature_recent_sweeps("BTCUSDT", Timeframe.M5, candles, atrs)
+
+
 @pytest.mark.asyncio
 async def test_external_sweep_plus_reversal_displacement_records_a_stop_hunt() -> None:
-    """SLS §4.7 composite, wired for the first time.
+    """SLS §4.7's composite, and §4.6's `displaced_after`, from the
+    maturation pass.
 
-    The detector has existed and been unit-tested since S5 but had no caller,
-    so nothing ever produced a stop hunt. This drives the real service.
+    Both facts concern candles after the sweep confirms, so they are found by
+    re-reading the recorded sweep on the next pass — here the same pass,
+    because the displacement candle is already in the window.
 
     Note the padding candle carries a body of 1. `mean_body_20` is the
     denominator of §5.10's displacement test, and flat padding would make it
@@ -430,26 +507,14 @@ async def test_external_sweep_plus_reversal_displacement_records_a_stop_hunt() -
     )
 
     pools = FakePools(make_pool())
-    transitions = FakeTransitions()
-    events = FakeEvents()
-    snapshots = FakeSnapshots()
+    service, _, events = _maturation_service(candles, pools)
 
-    service = LiquidityReplayService(
-        FakeCandles(candles),  # type: ignore[arg-type]
-        pools,  # type: ignore[arg-type]
-        transitions,
-        events,
-        snapshots,  # type: ignore[arg-type]
-        FakeClock(),
-    )
-
-    result = await service._replay_pool_lifecycle(pools.pool, candles, wilder_atr_series(candles))
-
-    assert result == "SWEPT"
+    await _sweep_then_mature(service, pools, candles)
 
     kinds = [event.event_type for event in events.items]
 
     assert "LIQUIDITY_SWEEP" in kinds
+    assert "LIQUIDITY_SWEEP_DISPLACED" in kinds
     assert "LIQUIDITY_STOP_HUNT" in kinds, (
         f"expected a stop hunt after the reversal displacement, got {kinds}"
     )
@@ -464,13 +529,152 @@ async def test_external_sweep_plus_reversal_displacement_records_a_stop_hunt() -
     assert payload["failed"] is False
 
 
+@pytest.mark.asyncio
+async def test_a_sweep_recorded_last_pass_matures_on_this_one() -> None:
+    """The live case the confirmation-time code could never reach.
+
+    The sweep confirmed on what was then the newest candle, so `reclaimed`
+    was recorded `false` because the reclaiming candle did not exist yet. The
+    transition row carries a frozen `candle_index` from that old window (497,
+    junk here) — the maturation pass must place the sweep by
+    `transitioned_at`, find the close back above the level two candles later,
+    and publish the reclaim exactly once however many passes run.
+    """
+
+    candles = pad_for_warmup(
+        [
+            make_candle(0, open_="97", high="99", low="97", close="98"),
+            make_candle(1, open_="99", high="102", low="98", close="99"),
+            make_candle(2, open_="99", high="100.5", low="98", close="99.5"),
+            # Two candles after confirmation: close back above 100 (§4.6).
+            make_candle(3, open_="99.5", high="101", low="99", close="100.5"),
+        ]
+    )
+
+    pools = FakePools(make_pool())
+    service, transitions, events = _maturation_service(candles, pools)
+
+    sweep_index = len(candles) - 3  # the "102 high" candle
+
+    transitions.items.append(
+        LiquidityTransitionRecord(
+            transition_id="t-old",
+            pool_id="pool-1",
+            symbol="BTCUSDT",
+            timeframe=Timeframe.M5,
+            from_state="ACTIVE",
+            to_state="SWEPT",
+            reason="liquidity_sweep",
+            transitioned_at=candles[sweep_index].close_time,
+            candle_index=497,
+            evidence=json.dumps(
+                {
+                    "pool_id": "pool-1",
+                    "side": "BSL",
+                    "liquidity_class": "EXTERNAL",
+                    "reference_level": "100",
+                    "penetration_price": "102",
+                    "close_back_price": "99",
+                    "sweep_depth_atr": "1.2",
+                    "confirmation_window": 1,
+                    "gap_sweep": False,
+                    "reclaimed": False,
+                    "displaced_after": False,
+                    "setup_expiry_index": 512,
+                }
+            ),
+        )
+    )
+
+    atrs = wilder_atr_series(candles)
+
+    await service._mature_recent_sweeps("BTCUSDT", Timeframe.M5, candles, atrs)
+    await service._mature_recent_sweeps("BTCUSDT", Timeframe.M5, candles, atrs)
+
+    reclaims = [e for e in events.items if e.event_type == "LIQUIDITY_SWEEP_RECLAIMED"]
+
+    assert len(reclaims) == 1, (
+        f"expected exactly one reclaim across two passes, got {len(reclaims)}"
+    )
+
+    payload = json.loads(reclaims[0].payload)
+
+    assert payload["close"] == "100.5"
+    assert payload["candles_since_confirmation"] == 2
+
+
+@pytest.mark.asyncio
+async def test_a_close_back_after_the_expiry_window_is_not_a_reclaim() -> None:
+    """§4.6: the reclaim window is `sweep_expiry = 15` closed candles."""
+
+    tail = [
+        make_candle(0, open_="97", high="99", low="97", close="98"),
+        make_candle(1, open_="99", high="102", low="98", close="99"),
+    ]
+
+    # Fifteen quiet candles, then the close back above the level — one
+    # candle too late to say anything about the sweep.
+    tail.extend(
+        make_candle(2 + offset, open_="99", high="99.5", low="98.5", close="99")
+        for offset in range(15)
+    )
+    tail.append(make_candle(17, open_="99", high="101", low="99", close="100.5"))
+
+    candles = pad_for_warmup(tail)
+
+    pools = FakePools(make_pool())
+    service, _, events = _maturation_service(candles, pools)
+
+    await _sweep_then_mature(service, pools, candles)
+
+    kinds = [event.event_type for event in events.items]
+
+    assert "LIQUIDITY_SWEEP" in kinds
+    assert "LIQUIDITY_SWEEP_RECLAIMED" not in kinds
+
+
+@pytest.mark.asyncio
+async def test_a_stop_hunt_fails_when_price_reclaims_the_extreme() -> None:
+    """§4.7 via `mark_stop_hunt_failed`: a close beyond the penetration
+    extreme within five candles of the hunt marks it failed."""
+
+    candles = pad_for_warmup(
+        [
+            make_candle(0, open_="97", high="99", low="97", close="98"),
+            make_candle(1, open_="99", high="102", low="98", close="99"),
+            make_candle(2, open_="99", high="99", low="94", close="94.5"),
+            # Two candles after the hunt: close above the 102 extreme.
+            make_candle(3, open_="95", high="103", low="94", close="102.5"),
+        ]
+    )
+
+    pools = FakePools(make_pool())
+    service, _, events = _maturation_service(candles, pools)
+
+    await _sweep_then_mature(service, pools, candles)
+
+    kinds = [event.event_type for event in events.items]
+
+    assert "LIQUIDITY_STOP_HUNT" in kinds
+    assert "LIQUIDITY_STOP_HUNT_FAILED" in kinds, f"got {kinds}"
+
+    failed = next(e for e in events.items if e.event_type == "LIQUIDITY_STOP_HUNT_FAILED")
+    payload = json.loads(failed.payload)
+
+    assert payload["close"] == "102.5"
+    assert payload["sweep_extreme"] == "102"
+
+
 def _service(candles, pools) -> LiquidityReplayService:
+    transitions = FakeTransitions()
+
     return LiquidityReplayService(
         FakeCandles(candles),  # type: ignore[arg-type]
         pools,  # type: ignore[arg-type]
-        FakeTransitions(),
+        transitions,
         FakeEvents(),
         FakeSnapshots(),  # type: ignore[arg-type]
+        FakeEvidence(transitions),  # type: ignore[arg-type]
         FakeClock(),
     )
 
@@ -704,3 +908,67 @@ def test_the_range_anchors_on_the_most_recent_swing_not_the_tallest() -> None:
 
     assert extremes.high == Decimal("120")
     assert extremes.low == Decimal("80")
+
+
+@pytest.mark.asyncio
+async def test_run_itself_matures_a_sweep_from_a_previous_pass() -> None:
+    """The wiring, not the walk: `run()` must call the maturation pass.
+
+    The pool is already SWEPT, so the lifecycle loop has nothing to do and
+    only the maturation stage can publish the reclaim. If `run()` stops
+    calling it, this is the live scenario that silently regresses to
+    743/743 `reclaimed: false`.
+    """
+
+    candles = pad_for_warmup(
+        [
+            make_candle(0, open_="97", high="99", low="97", close="98"),
+            make_candle(1, open_="99", high="102", low="98", close="99"),
+            make_candle(2, open_="99", high="100.5", low="98", close="99.5"),
+            make_candle(3, open_="99.5", high="101", low="99", close="100.5"),
+        ]
+    )
+
+    pools = FakePools(replace(make_pool(), state="SWEPT"))
+    service, transitions, events = _maturation_service(candles, pools)
+
+    transitions.items.append(
+        LiquidityTransitionRecord(
+            transition_id="t-old",
+            pool_id="pool-1",
+            symbol="BTCUSDT",
+            timeframe=Timeframe.M5,
+            from_state="ACTIVE",
+            to_state="SWEPT",
+            reason="liquidity_sweep",
+            transitioned_at=candles[-3].close_time,
+            candle_index=497,
+            evidence=json.dumps(
+                {
+                    "pool_id": "pool-1",
+                    "side": "BSL",
+                    "liquidity_class": "EXTERNAL",
+                    "reference_level": "100",
+                    "penetration_price": "102",
+                    "close_back_price": "99",
+                    "sweep_depth_atr": "1.2",
+                    "confirmation_window": 1,
+                    "gap_sweep": False,
+                    "reclaimed": False,
+                    "displaced_after": False,
+                    "setup_expiry_index": 512,
+                }
+            ),
+        )
+    )
+
+    await service.run(
+        "BTCUSDT",
+        Timeframe.M5,
+        candles[0].open_time,
+        candles[-1].open_time + Timeframe.M5.duration,
+    )
+
+    kinds = [event.event_type for event in events.items]
+
+    assert "LIQUIDITY_SWEEP_RECLAIMED" in kinds, f"got {kinds}"
