@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import ClassVar
 
 import pytest
-from tests.support.builders import pad_for_warmup
+from tests.support.builders import make_candle, pad_for_warmup
 
 import scanner.application.detection.ict_ob_replay as ob_mod
 import scanner.application.detection.ict_replay as ict_mod
@@ -691,8 +691,50 @@ def test_ob_evidence_parsers_and_structure_helpers() -> None:
         swings,
         strength="EXTERNAL",
         direction=ob_mod.DisplacementDirection.BULLISH,
-        before_index=10,
+        # By time now: the persisted index froze in the recording window
+        # and cannot be compared with today's offsets.
+        before_at=now + timedelta(hours=1),
     ) == Decimal("110")
+
+    assert (
+        ob_mod._latest_break_level(
+            swings,
+            strength="EXTERNAL",
+            direction=ob_mod.DisplacementDirection.BULLISH,
+            before_at=now,
+        )
+        is None
+    )
+
+    # Two qualifying highs whose FROZEN indices order the other way round:
+    # the time-latest carries the lower index (recorded in a later window,
+    # nearer that window's left edge). "Latest" must follow time.
+    contested = (
+        ob_mod.SwingEvidence(
+            at=now + timedelta(hours=1),
+            index=499,
+            price=Decimal("120"),
+            strength="EXTERNAL",
+            kind="HIGH",
+        ),
+        ob_mod.SwingEvidence(
+            at=now + timedelta(hours=2),
+            index=310,
+            price=Decimal("112"),
+            strength="EXTERNAL",
+            kind="HIGH",
+        ),
+    )
+
+    assert (
+        ob_mod._latest_break_level(
+            contested,
+            strength="EXTERNAL",
+            direction=ob_mod.DisplacementDirection.BULLISH,
+            before_at=now + timedelta(hours=3),
+        )
+        == Decimal("112")
+    )
 
     assert ob_mod._closes_beyond_level(
         Decimal("111"),
@@ -768,29 +810,67 @@ def test_failure_swing_and_origin_sweep_helpers() -> None:
 
     ob = ob_mod._record_to_ob(ob_record)
 
+    # The record's created_index=1, confirmed_index=3. Candles supply the
+    # time frame both helpers now compare in.
+    base = datetime(2026, 8, 16, tzinfo=UTC)
+    candles = [make_candle(open_time=base + timedelta(hours=offset)) for offset in range(8)]
+
     sweep = ob_mod.LiquiditySweepEvidence(
         pool_id="ssl",
         side="SSL",
         reference_level=Decimal("105"),
         candle_index=2,
-        transitioned_at=datetime(2026, 8, 16, tzinfo=UTC),
+        # The origin candle's close -- inside (open[1], open[3] + 1h].
+        transitioned_at=base + timedelta(hours=2),
     )
 
     assert ob_mod._origin_has_sweep(
         ob,
         (sweep,),
+        candles,
+        Timeframe.H1,
     )
 
+    # A sweep from before the origin candle opened must not count, however
+    # its frozen index reads.
+    early = ob_mod.LiquiditySweepEvidence(
+        pool_id="ssl",
+        side="SSL",
+        reference_level=Decimal("105"),
+        candle_index=2,
+        transitioned_at=base,
+    )
+
+    assert not ob_mod._origin_has_sweep(
+        ob,
+        (early,),
+        candles,
+        Timeframe.H1,
+    )
+
+    # Frozen indices deliberately ordered AGAINST time (497 before 310), and
+    # a third low placed after the invalidation whose inclusion would flip
+    # the verdict -- so both an index-ordered sort and a dropped time bracket
+    # turn this True into a False.
     swings = (
         ob_mod.SwingEvidence(
-            index=4,
+            at=base + timedelta(hours=4),
+            index=497,
             price=Decimal("102"),
             strength="EXTERNAL",
             kind="LOW",
         ),
         ob_mod.SwingEvidence(
-            index=5,
+            at=base + timedelta(hours=5),
+            index=310,
             price=Decimal("104"),
+            strength="EXTERNAL",
+            kind="LOW",
+        ),
+        ob_mod.SwingEvidence(
+            at=base + timedelta(hours=7),
+            index=210,
+            price=Decimal("100"),
             strength="EXTERNAL",
             kind="LOW",
         ),
@@ -799,6 +879,33 @@ def test_failure_swing_and_origin_sweep_helpers() -> None:
     assert ob_mod._has_failure_swing_before_invalidation(
         ob,
         swings,
+        candles,
+        invalidation_index=6,
+    )
+
+    # And the mirror refusal: bracketed lows that step DOWN are not a failure
+    # swing for a bullish OB.
+    descending = (
+        ob_mod.SwingEvidence(
+            at=base + timedelta(hours=4),
+            index=497,
+            price=Decimal("104"),
+            strength="EXTERNAL",
+            kind="LOW",
+        ),
+        ob_mod.SwingEvidence(
+            at=base + timedelta(hours=5),
+            index=310,
+            price=Decimal("102"),
+            strength="EXTERNAL",
+            kind="LOW",
+        ),
+    )
+
+    assert not ob_mod._has_failure_swing_before_invalidation(
+        ob,
+        descending,
+        candles,
         invalidation_index=6,
     )
 

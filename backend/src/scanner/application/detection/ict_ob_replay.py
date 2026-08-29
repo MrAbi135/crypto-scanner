@@ -47,7 +47,14 @@ from scanner.domain.ict import (
 )
 from scanner.shared import Timeframe
 
-ICT_OB_ALGO_VERSION = "s6-ob-v4"
+# v5: the three remaining index-frame mixes in this file are converted to
+# time, the way _mss_spans already was. Persisted swing/sweep evidence carries
+# indices frozen in whichever window recorded it (live recordings cluster at
+# the tail, ~495+), while OBs and displacements are indexed in today's window
+# -- so origin_swept, the structure-break levels, and the failure-swing test
+# were all comparing two coordinate systems. The host's 4 breakers against
+# 351 OBs is what that looks like.
+ICT_OB_ALGO_VERSION = "s6-ob-v5"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")
@@ -84,6 +91,11 @@ class StructureBreakFlags:
 
 @dataclass(frozen=True, slots=True)
 class SwingEvidence:
+    # The pivot candle's open time -- structure_replay stamps event_at from
+    # the swing itself, so it is durable across windows. `index` is kept for
+    # provenance only: it froze in whichever window recorded the swing and
+    # MUST NOT be compared against anything indexed in today's window.
+    at: datetime
     index: int
     price: Decimal
     strength: str
@@ -222,6 +234,7 @@ class IctOrderBlockReplayService:
                 candles[displacement.candle_index],
                 displacement,
                 swings,
+                before_at=candles[displacement.candle_index].open_time,
             )
 
             await self._zones.upsert(
@@ -345,6 +358,7 @@ class IctOrderBlockReplayService:
             candles[displacement_index],
             displacement,
             swings,
+            before_at=candles[displacement_index].open_time,
         )
 
         fvg_created = _displacement_created_fvg(
@@ -395,6 +409,8 @@ class IctOrderBlockReplayService:
             origin_swept = _origin_has_sweep(
                 provisional,
                 sweeps,
+                candles,
+                candles[0].timeframe,
             )
 
             return replace(
@@ -486,6 +502,7 @@ class IctOrderBlockReplayService:
                 origin_failure_swing = _has_failure_swing_before_invalidation(
                     updated,
                     swings,
+                    candles,
                     invalidation_index=index,
                 )
 
@@ -566,6 +583,7 @@ class IctOrderBlockReplayService:
             candles[invalidation_index],
             displacement,
             swings,
+            before_at=candles[invalidation_index].open_time,
         )
 
         if not break_flags.any_break:
@@ -711,6 +729,7 @@ class IctOrderBlockReplayService:
             candles[invalidation_index],
             displacement,
             swings,
+            before_at=candles[invalidation_index].open_time,
         )
 
         if not break_flags.any_break:
@@ -965,6 +984,7 @@ def _parse_swings(
 
         parsed.append(
             SwingEvidence(
+                at=record.event_at,
                 index=index_raw,
                 price=Decimal(price_raw),
                 strength=(strength_raw),
@@ -972,9 +992,11 @@ def _parse_swings(
             )
         )
 
+    # Ordered by time, not by the frozen index -- across windows the indices
+    # are not even monotone with age.
     parsed.sort(
         key=lambda item: (
-            item.index,
+            item.at,
             item.strength,
             item.kind,
         )
@@ -1047,14 +1069,29 @@ def _origin_has_sweep(
         LiquiditySweepEvidence,
         ...,
     ],
+    candles: Sequence[Candle],
+    timeframe: Timeframe,
 ) -> bool:
+    """Did the OB's origin candles take the opposite-side liquidity?
+
+    Compared in TIME. `sweep.candle_index` froze in whichever window recorded
+    the sweep (a SWEPT pool transitions once), while the OB is freshly
+    detected in today's window -- the old containment test compared the two
+    coordinate systems directly, the same trap `_mss_spans` documents and
+    fixes one page down. `transitioned_at` is the sweep candle's close, so a
+    sweep on candle range [created, confirmed] lands strictly after the
+    origin candle opens and no later than the confirmation candle closes.
+    """
     expected_side = "SSL" if ob.polarity is ZonePolarity.BULLISH else "BSL"
+
+    origin_opens = candles[ob.created_index].open_time
+    confirmation_closes = candles[ob.confirmed_index].open_time + timeframe.duration
 
     for sweep in sweeps:
         if sweep.side != expected_side:
             continue
 
-        if not (ob.created_index <= sweep.candle_index <= ob.confirmed_index):
+        if not (origin_opens < sweep.transitioned_at <= confirmation_closes):
             continue
 
         if not (ob.band.low <= sweep.reference_level <= ob.band.high):
@@ -1071,40 +1108,40 @@ def _has_failure_swing_before_invalidation(
         SwingEvidence,
         ...,
     ],
+    candles: Sequence[Candle],
     *,
     invalidation_index: int,
 ) -> bool:
-    """Return SLS §5.3 failure-swing evidence before OB invalidation."""
+    """Return SLS §5.3 failure-swing evidence before OB invalidation.
 
-    required_kind = "HL" if ob.polarity is ZonePolarity.BULLISH else "LH"
+    Derived from the latest two external same-side pivots between the OB's
+    confirmation and its invalidation, compared in TIME: the persisted swing
+    indices froze in the windows that recorded them, and the old bracket
+    `confirmed_index < swing.index < invalidation_index` mixed three
+    coordinate frames in one predicate.
 
-    # Prefer classified structure evidence encoded in SwingEvidence.kind when
-    # available. This keeps the helper compatible with richer evidence feeds.
-    for swing in reversed(swings):
-        if swing.index >= invalidation_index:
-            continue
-        if swing.index <= ob.confirmed_index:
-            break
-        if swing.strength == "EXTERNAL" and swing.kind == required_kind:
-            return True
-
-    # Current swing evidence stores HIGH/LOW rather than HH/HL/LH/LL.
-    # Derive the failure swing deterministically from the latest two external
-    # same-side pivots formed after the OB was confirmed.
+    A first branch matching `swing.kind in ("HL", "LH")` was deleted outright:
+    the feed writes kind as HIGH/LOW (its own comment admitted it), so the
+    branch could never fire -- a guard that reads as richer evidence support
+    and supports nothing.
+    """
     pivot_kind = "LOW" if ob.polarity is ZonePolarity.BULLISH else "HIGH"
+
+    confirmed_at = candles[ob.confirmed_index].open_time
+    invalidated_at = candles[invalidation_index].open_time
 
     candidates = [
         swing
         for swing in swings
         if swing.strength == "EXTERNAL"
         and swing.kind == pivot_kind
-        and ob.confirmed_index < swing.index < invalidation_index
+        and confirmed_at < swing.at < invalidated_at
     ]
 
     if len(candidates) < 2:
         return False
 
-    candidates.sort(key=lambda item: item.index)
+    candidates.sort(key=lambda item: item.at)
 
     previous = candidates[-2]
     latest = candidates[-1]
@@ -1202,19 +1239,21 @@ def _structure_break_flags(
         SwingEvidence,
         ...,
     ],
+    *,
+    before_at: datetime,
 ) -> StructureBreakFlags:
     internal_level = _latest_break_level(
         swings,
         strength="INTERNAL",
         direction=(displacement.direction),
-        before_index=(displacement.candle_index),
+        before_at=before_at,
     )
 
     external_level = _latest_break_level(
         swings,
         strength="EXTERNAL",
         direction=(displacement.direction),
-        before_index=(displacement.candle_index),
+        before_at=before_at,
     )
 
     internal_break = _closes_beyond_level(
@@ -1245,14 +1284,24 @@ def _latest_break_level(
     *,
     strength: str,
     direction: DisplacementDirection,
-    before_index: int,
+    before_at: datetime,
 ) -> Decimal | None:
+    """The most recent qualifying swing level before `before_at`, by TIME.
+
+    The old filter was `swing.index < before_index` with a max over index --
+    but the persisted swing index froze in the window that recorded it (live
+    recordings cluster at ~495+), so against a mid-window displacement the
+    filter found almost nothing, and where it found several, "latest" was
+    decided by recording accidents rather than recency. `break_flags.any_break`
+    gates OB admission and both promotion paths, so this was the load-bearing
+    comparison of the whole file.
+    """
     required_kind = "HIGH" if direction is DisplacementDirection.BULLISH else "LOW"
 
     candidates = [
         swing
         for swing in swings
-        if swing.strength == strength and swing.kind == required_kind and swing.index < before_index
+        if swing.strength == strength and swing.kind == required_kind and swing.at < before_at
     ]
 
     if not candidates:
@@ -1260,7 +1309,7 @@ def _latest_break_level(
 
     latest = max(
         candidates,
-        key=lambda item: item.index,
+        key=lambda item: item.at,
     )
 
     return latest.price
