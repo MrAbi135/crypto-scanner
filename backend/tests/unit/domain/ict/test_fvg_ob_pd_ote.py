@@ -22,6 +22,7 @@ from scanner.domain.ict import (
     advance_fvg,
     advance_ote,
     bracketed_dealing_range,
+    dealing_range_at,
     create_breaker,
     create_ifvg,
     create_mitigation_block,
@@ -33,6 +34,7 @@ from scanner.domain.ict import (
 from scanner.domain.ict.order_blocks import (
     OrderBlock,
 )
+from scanner.domain.structure import SwingKind, SwingPoint, SwingStrength
 from scanner.shared import Timeframe
 
 
@@ -501,3 +503,114 @@ def test_bullish_ote_uses_62_to_79_percent_retracement() -> None:
     )
 
     assert updated.state is ZoneState.MITIGATED
+
+
+def make_swing(
+    index: int,
+    price: str,
+    kind: SwingKind,
+    *,
+    strength: SwingStrength,
+) -> SwingPoint:
+    return SwingPoint(
+        index=index,
+        open_time=datetime(2026, 8, 15, tzinfo=UTC) + Timeframe.H1.duration * index,
+        price=Decimal(price),
+        kind=kind,
+        strength=strength,
+    )
+
+
+def test_dealing_range_consumes_only_confirmed_swings() -> None:
+    """§3.1: "no downstream logic may consume it earlier" — a swing exists at
+    the close of its k-th follow-up candle, not at its pivot.
+
+    Filtering on the pivot alone let a replay anchor ranges on swings a live
+    engine could not yet see (k_ext = 5 candles of look-ahead), so live and
+    replay disagreed about premium/discount on identical data — the §0.2
+    non-repaint break §13 calls a critical defect.
+    """
+    swings = (
+        make_swing(10, "80", SwingKind.LOW, strength=SwingStrength.EXTERNAL),
+        make_swing(20, "120", SwingKind.HIGH, strength=SwingStrength.EXTERNAL),
+        # Pivoted at 30, confirmed only at 35 — a higher high that would
+        # re-anchor the range upward if look-ahead were allowed.
+        make_swing(30, "140", SwingKind.HIGH, strength=SwingStrength.EXTERNAL),
+    )
+
+    at_32 = dealing_range_at(swings, close=Decimal("100"), index=32)
+    at_35 = dealing_range_at(swings, close=Decimal("100"), index=35)
+
+    assert at_32 is not None
+    assert at_32.high == Decimal("120"), "the unconfirmed 140 must not anchor yet"
+
+    assert at_35 is not None
+    assert at_35.high == Decimal("140"), "once confirmed it re-anchors"
+
+
+def test_pd_gates_are_decided_on_the_unquantised_position() -> None:
+    """§0.4: quantisation is a presentation rule, never a decision rule.
+
+    Raw position 0.50004 quantises (ROUND_HALF_EVEN) to 0.5000; a gate read
+    off the quantised value opens for a long the raw comparison refuses.
+    Range [0, 100000] with close 50004 lands exactly there.
+    """
+    dealing_range = bracketed_dealing_range(
+        range_id="r",
+        external_low=Decimal("0"),
+        external_high=Decimal("100000"),
+        low_anchor_index=1,
+        high_anchor_index=10,
+        close=Decimal("50004"),
+    )
+
+    assert dealing_range is not None
+
+    context = evaluate_pd_context(
+        dealing_range,
+        close=Decimal("50004"),
+        atr=Decimal("10"),
+    )
+
+    # The RECORDED position still quantises to the boundary...
+    assert context.range_position == Decimal("0.5000")
+    # ...and the verdicts come from the raw value anyway.
+    assert context.long_gate is False
+    assert context.short_gate is True
+
+
+def test_every_pd_gate_has_its_own_quantisation_boundary_case() -> None:
+    """One boundary per gate, because each survives the others' cases: the
+    long-gate test at raw 0.50004 says nothing about short_gate (true either
+    way there) -- exactly how two of these four mutations outlived the first
+    test."""
+
+    def context_at(close: str):
+        dealing_range = bracketed_dealing_range(
+            range_id="r",
+            external_low=Decimal("0"),
+            external_high=Decimal("100000"),
+            low_anchor_index=1,
+            high_anchor_index=10,
+            close=Decimal(close),
+        )
+
+        assert dealing_range is not None
+
+        return evaluate_pd_context(dealing_range, close=Decimal(close), atr=Decimal("10"))
+
+    # Raw 0.49996 quantises UP to 0.5000: quantised short_gate would open.
+    below_half = context_at("49996")
+    assert below_half.range_position == Decimal("0.5000")
+    assert below_half.short_gate is False
+    assert below_half.long_gate is True
+
+    # Raw 0.33004 quantises DOWN to 0.3300: quantised sweep_long would open.
+    above_third = context_at("33004")
+    assert above_third.range_position == Decimal("0.3300")
+    assert above_third.sweep_long_gate is False
+
+    # Raw 0.66996 quantises UP to 0.6700: quantised sweep_short would open.
+    below_upper_third = context_at("66996")
+    assert below_upper_third.range_position == Decimal("0.6700")
+    assert below_upper_third.sweep_short_gate is False
