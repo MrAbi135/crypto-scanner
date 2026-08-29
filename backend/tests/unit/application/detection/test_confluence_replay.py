@@ -3122,6 +3122,7 @@ def test_labels_are_ordered_by_event_time_not_by_frozen_payload_index() -> None:
     payload indices say HL-before-HH while time says HH-before-HL; only the
     time order is real.
     """
+
     # Built directly: the shared `event` helper's own parameter is named
     # `index`, so a payload key of the same name cannot pass through it.
     def label_event(event_type: str, at_candle: int, payload_index: int) -> EngineEventRecord:
