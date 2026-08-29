@@ -169,7 +169,13 @@ from scanner.shared import Timeframe
 # `_is_displacement_fvg` compares times, not a frozen created_index against
 # current-window offsets. §7.4's labels are ordered by event time, not by
 # offsets minted in different windows.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v24"
+#
+# v25: sweeps' maturing facts arrive as events now (s5-v9), and the frozen
+# `reclaimed` field in the transition row is permanently false for live
+# sweeps -- so §4.6's contrary-evidence reading joins LIQUIDITY_SWEEP_RECLAIMED
+# events onto the sweeps by pool id. §4.7's stop-hunt credit is likewise
+# withdrawn when the hunt's own pool has a LIQUIDITY_STOP_HUNT_FAILED event.
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v25"
 
 # Import-time, not call-time: a zone type with no version entry is invisible
 # to scoring, and that must refuse to boot rather than run quietly blind.
@@ -429,6 +435,19 @@ class ConfluenceReplayService:
 
         event_types = {record.event_type for record in events}
 
+        # The maturing sweep facts (s5-v9) live in events, not in the frozen
+        # transition evidence -- for a live sweep the row's `reclaimed` was
+        # written before the reclaiming candle existed and stays false.
+        reclaimed_pools = _pool_ids_of(events, "LIQUIDITY_SWEEP_RECLAIMED", key="pool_id")
+
+        # §4.7: a hunt whose own pool later recorded a failure is withdrawn
+        # credit; pool-matched so one failed hunt does not poison another
+        # pool's clean one for the rest of the window.
+        stop_hunt_alive = bool(
+            _pool_ids_of(events, "LIQUIDITY_STOP_HUNT", key="sweep_pool_id")
+            - _pool_ids_of(events, "LIQUIDITY_STOP_HUNT_FAILED", key="sweep_pool_id")
+        )
+
         # §6.5 compares this candle's p90 print size against the median of
         # the same statistic over the trailing twenty, so twenty-one candles of
         # minute buckets is the whole read -- not the five hundred the rest of
@@ -498,6 +517,8 @@ class ConfluenceReplayService:
                 legs=legs,
                 bos_breaks=bos_breaks,
                 pd=pd,
+                reclaimed_pools=reclaimed_pools,
+                stop_hunt_alive=stop_hunt_alive,
             )
 
             candidates.append(candidate)
@@ -544,6 +565,8 @@ class ConfluenceReplayService:
         legs: _Legs,
         bos_breaks: dict[str, frozenset[datetime]],
         pd: PdContext | None,
+        reclaimed_pools: frozenset[str],
+        stop_hunt_alive: bool,
     ) -> SetupCandidate:
         polarity = "BULLISH" if direction == "UP" else "BEARISH"
 
@@ -559,7 +582,11 @@ class ConfluenceReplayService:
             if zone.polarity == polarity and _near_price(zone, price, atr)
         ]
 
-        sweeps = [_Sweep(r) for r in liquidity if r.reason == "liquidity_sweep"]
+        sweeps = [
+            _Sweep(r, reclaimed_pools=reclaimed_pools)
+            for r in liquidity
+            if r.reason == "liquidity_sweep"
+        ]
 
         # §4.6: "a sweep's setup relevance expires P.liquidity.sweep_expiry = 15
         # closed candles after confirmation -- beyond that window it may no
@@ -769,7 +796,7 @@ class ConfluenceReplayService:
                     # must stop paying for it.
                     unclaimed=not best_sweep.reclaimed if best_sweep else False,
                     fresh=best_sweep.live(at, timeframe) if best_sweep else False,
-                    stop_hunt="LIQUIDITY_STOP_HUNT" in event_types,
+                    stop_hunt=stop_hunt_alive,
                     target_pool_strength=(target_pool.strength if target_pool else Decimal(0)),
                 )
             ),
@@ -830,7 +857,7 @@ class ConfluenceReplayService:
                 # G4 already established price is at this zone, so a zone that
                 # records an MSS origin *is* the MSS-origin zone being retested.
                 mss_origin_zone_retested=_is_mss_origin(best_zone),
-                stop_hunt_confirmed="LIQUIDITY_STOP_HUNT" in event_types,
+                stop_hunt_confirmed=stop_hunt_alive,
                 breaker_formed=any(z.grade == "BRK_A" for z in matching_zones),
                 breaker_grade_a=best_zone.grade == "BRK_A",
                 breaker_first_retest_respected=history.first_retest_respected,
@@ -1423,13 +1450,44 @@ class ConfluenceReplayService:
         return _f6_vocabulary(state.trend_state)
 
 
+def _pool_ids_of(
+    events: Sequence[EngineEventRecord],
+    event_type: str,
+    *,
+    key: str,
+) -> frozenset[str]:
+    """The pool ids named by every event of one type, for the sweep joins."""
+
+    ids = set()
+
+    for record in events:
+        if record.event_type != event_type:
+            continue
+
+        try:
+            pool_id = json.loads(record.payload).get(key)
+        except ValueError:
+            continue
+
+        if isinstance(pool_id, str) and pool_id:
+            ids.add(pool_id)
+
+    return frozenset(ids)
+
+
 class _Sweep:
     """A §4.6 sweep transition, read through the questions §8 asks of it."""
 
-    __slots__ = ("_e", "confirmed_at")
+    __slots__ = ("_e", "_reclaimed_by_event", "confirmed_at")
 
-    def __init__(self, record: LiquidityEvidenceRecord) -> None:
+    def __init__(
+        self,
+        record: LiquidityEvidenceRecord,
+        *,
+        reclaimed_pools: frozenset[str] = frozenset(),
+    ) -> None:
         self._e = json.loads(record.evidence)
+        self._reclaimed_by_event = record.pool_id in reclaimed_pools
 
         # The transition's real time, not its `candle_index`. That index is
         # the offset inside whichever window recorded the sweep, and it is
@@ -1438,7 +1496,11 @@ class _Sweep:
 
     @property
     def reclaimed(self) -> bool:
-        return bool(self._e.get("reclaimed"))
+        # The evidence field is the truth for backfill rows, where the
+        # reclaiming candle was already in the window at recording time. For
+        # live sweeps it froze at false, and the maturation event (s5-v9)
+        # carries the fact instead.
+        return bool(self._e.get("reclaimed")) or self._reclaimed_by_event
 
     @property
     def reference_level(self) -> Decimal | None:

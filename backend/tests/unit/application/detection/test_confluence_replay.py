@@ -2411,7 +2411,9 @@ async def test_a_swept_mss_origin_zone_at_the_extreme_classifies_as_a1() -> None
     setup["events"] = [
         event("BOS_UP", 3, direction="UP"),
         event("MSS_UP", 6, direction="UP"),
-        event("LIQUIDITY_STOP_HUNT", 7),
+        # As the liquidity engine writes it: every hunt names its sweep's
+        # pool, and v25 withdraws credit per pool when a failure follows.
+        event("LIQUIDITY_STOP_HUNT", 7, sweep_pool_id="p1"),
     ]
     setup["zones"] = [
         zone(
@@ -3195,3 +3197,90 @@ def test_displacement_fvg_is_judged_in_time_not_against_todays_offsets() -> None
     assert _is_displacement_fvg(gap, inside, TF)
     assert not _is_displacement_fvg(gap, before, TF)
     assert not _is_displacement_fvg(gap, after, TF)
+
+
+@pytest.mark.asyncio
+async def test_a_reclaim_published_as_an_event_is_contrary_evidence_too() -> None:
+    """s5-v9 publishes a live sweep's reclaim as an event, because the
+    transition row froze `reclaimed: false` before the reclaiming candle
+    existed. §4.6's contrary-evidence reading must hear the event form,
+    joined by pool id -- or every live reclaim is invisible and only
+    backfill rows can ever fail G5."""
+
+    setup = bullish_setup()
+    setup["liquidity"] = [sweep(reclaimed=False)]
+    setup["events"].append(event("LIQUIDITY_SWEEP_RECLAIMED", RECENT_SWEEP + 2, pool_id="p1"))
+
+    svc, _ = service(**setup)
+
+    report = await run(svc, trend_state="BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    assert not up.gates_passed
+    assert "G5" in up.failed_gates
+
+
+@pytest.mark.asyncio
+async def test_a_reclaim_event_for_another_pool_changes_nothing() -> None:
+    """The join is by pool id, not by event presence."""
+
+    setup = bullish_setup()
+    setup["liquidity"] = [sweep(reclaimed=False)]
+    setup["events"].append(
+        event("LIQUIDITY_SWEEP_RECLAIMED", RECENT_SWEEP + 2, pool_id="somebody-else")
+    )
+
+    svc, _ = service(**setup)
+
+    report = await run(svc, trend_state="BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    assert up.gates_passed
+
+
+@pytest.mark.asyncio
+async def test_a_failed_stop_hunt_withdraws_its_own_credit_only() -> None:
+    """§4.7: a failure names its pool. The failed hunt loses its credit;
+    a clean hunt on another pool keeps its own."""
+
+    settle = 990
+
+    setup = ranged_setup(settle)
+    setup["events"] = [
+        event("BOS_UP", 3, direction="UP"),
+        event("MSS_UP", 6, direction="UP"),
+        event("LIQUIDITY_STOP_HUNT", 7, sweep_pool_id="p1"),
+        event("LIQUIDITY_STOP_HUNT_FAILED", 9, sweep_pool_id="p1"),
+    ]
+    setup["zones"] = [
+        zone(
+            "ob",
+            grade="OB_A",
+            band_low=Decimal(settle - 1),
+            band_high=Decimal(settle + 1),
+            evidence=json.dumps({"mss_origin": True}),
+        )
+    ]
+
+    svc, _ = service(**setup, candles=ranged_series(settle), htf_trend="BULLISH")
+
+    report = await run(svc, "BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    # The A1 chain requires a confirmed stop hunt; with the only hunt
+    # withdrawn the candidate cannot classify as A1.
+    assert up.archetype != "A1"
+
+    # A second, clean hunt on a different pool restores the credit.
+    setup["events"].append(event("LIQUIDITY_STOP_HUNT", 8, sweep_pool_id="p2"))
+
+    svc, _ = service(**setup, candles=ranged_series(settle), htf_trend="BULLISH")
+
+    report = await run(svc, "BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    assert up.archetype == "A1"
