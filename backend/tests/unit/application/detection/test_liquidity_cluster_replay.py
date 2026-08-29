@@ -16,6 +16,9 @@ import pytest
 
 from scanner.application.detection.liquidity_replay import LiquidityReplayService
 from scanner.application.ports.detection import EngineEventRecord
+from scanner.application.ports.ict_evidence import (
+    LiquidityEvidenceRecord,
+)
 from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRecord,
     LiquidityTransitionRecord,
@@ -164,6 +167,26 @@ class FakeEvents:
         return any(item.event_key == event_key for item in self.items)
 
 
+class FakeEvidence:
+    def __init__(self, transitions: FakeTransitions) -> None:
+        self._transitions = transitions
+
+    async def list_liquidity(self, symbol, timeframe, start, end):
+        return tuple(
+            LiquidityEvidenceRecord(
+                pool_id=item.pool_id,
+                from_state=item.from_state,
+                to_state=item.to_state,
+                reason=item.reason,
+                transitioned_at=item.transitioned_at,
+                candle_index=item.candle_index,
+                evidence=item.evidence,
+            )
+            for item in self._transitions.items
+            if start <= item.transitioned_at < end
+        )
+
+
 class FakeSnapshots:
     def __init__(self) -> None:
         self.last_pools: tuple[LiquidityPoolRecord, ...] = ()
@@ -177,13 +200,15 @@ class FakeSnapshots:
 
 def build(candles: list[Candle]):
     pools = CollectingPools()
+    transitions = FakeTransitions()
 
     service = LiquidityReplayService(
         FakeCandles(candles),
         pools,
-        FakeTransitions(),
+        transitions,
         FakeEvents(),
         FakeSnapshots(),
+        FakeEvidence(transitions),
         FakeClock(),
     )
 

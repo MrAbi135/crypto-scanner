@@ -7,7 +7,7 @@ import json
 from bisect import bisect_left
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from scanner.application.ports import (
@@ -17,6 +17,10 @@ from scanner.application.ports import (
 from scanner.application.ports.detection import (
     EngineEventRecord,
     EngineEventRepository,
+)
+from scanner.application.ports.ict_evidence import (
+    IctEvidenceRepository,
+    LiquidityEvidenceRecord,
 )
 from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRecord,
@@ -41,15 +45,19 @@ from scanner.domain.liquidity import (
     PoolSource,
     PoolState,
     PoolStrength,
+    StopHuntEvent,
     SweepEvent,
     count_pool_touches,
     detect_equal_level_clusters,
     detect_single_candle_sweep,
     detect_stop_hunt,
     detect_two_candle_sweep,
+    mark_displaced_after,
+    mark_stop_hunt_failed,
     pool_from_cluster,
     pool_from_swing,
     should_expire_pool,
+    sweep_reclaimed,
 )
 from scanner.domain.structure import (
     SwingKind,
@@ -66,11 +74,20 @@ from scanner.shared import Timeframe
 # longer seed an overlapping duplicate. (2) §4.2 touches are counted with each
 # candle's own ATR-derived epsilon instead of the window-newest candle's, so a
 # stored candle's touch verdict no longer moves as the window slides.
-LIQUIDITY_ALGO_VERSION = "s5-v8"
+#
+# v9: sweeps mature. §4.6's `reclaimed` / `displaced_after` and §4.7's stop
+# hunt all concern candles that close AFTER the sweep confirms, and a live
+# sweep confirms on the newest candle -- so at recording time none of those
+# candles existed and the facts were structurally unreachable outside
+# backfill. Every pass now revisits recent sweeps and publishes what matured
+# as LIQUIDITY_SWEEP_RECLAIMED / LIQUIDITY_SWEEP_DISPLACED /
+# LIQUIDITY_STOP_HUNT / LIQUIDITY_STOP_HUNT_FAILED events.
+LIQUIDITY_ALGO_VERSION = "s5-v9"
 
 _ATR_PERIOD = 14
 _SWEEP_SCAN_ATR = Decimal("3")
-_STOPHUNT_WINDOW = 3  # SLS §4.7 P.liquidity.stophunt_window
+# §4.7's stophunt_window is enforced inside `detect_stop_hunt` and
+# `mark_displaced_after`; no application-layer copy of the bound exists.
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +120,7 @@ class LiquidityReplayService:
         transitions: LiquidityTransitionRepository,
         events: EngineEventRepository,
         snapshots: LiquidityStateStore,
+        evidence: IctEvidenceRepository,
         clock: Clock,
         *,
         algo_version: str = LIQUIDITY_ALGO_VERSION,
@@ -112,6 +130,7 @@ class LiquidityReplayService:
         self._transitions = transitions
         self._events = events
         self._snapshots = snapshots
+        self._evidence = evidence
         self._clock = clock
         self._algo_version = algo_version
 
@@ -319,6 +338,13 @@ class LiquidityReplayService:
                 broken += 1
             elif result == "EXPIRED":
                 expired += 1
+
+        await self._mature_recent_sweeps(
+            symbol,
+            timeframe,
+            candles,
+            atrs,
+        )
 
         active = await self._pools.list_active(
             symbol,
@@ -666,8 +692,6 @@ class LiquidityReplayService:
                 transitioned = await self._record_sweep(
                     record,
                     sweep,
-                    candles,
-                    atrs,
                 )
 
                 if transitioned:
@@ -723,8 +747,6 @@ class LiquidityReplayService:
                     transitioned = await self._record_sweep(
                         record,
                         two_candle_sweep,
-                        candles,
-                        atrs,
                     )
 
                     if transitioned:
@@ -758,8 +780,6 @@ class LiquidityReplayService:
         self,
         record: LiquidityPoolRecord,
         sweep: SweepEvent,
-        candles: Sequence[Candle],
-        atrs: Sequence[Decimal | None],
     ) -> bool:
         evidence = {
             "pool_id": sweep.pool_id,
@@ -814,124 +834,278 @@ class LiquidityReplayService:
             )
         )
 
-        await self._record_stop_hunt(record, sweep, candles, atrs)
-
         return True
 
-    async def _record_stop_hunt(
+    async def _mature_recent_sweeps(
         self,
-        record: LiquidityPoolRecord,
-        sweep: SweepEvent,
+        symbol: str,
+        timeframe: Timeframe,
         candles: Sequence[Candle],
         atrs: Sequence[Decimal | None],
-    ) -> bool:
-        """Detect the §4.7 stop-hunt composite on a just-confirmed sweep.
+    ) -> None:
+        """Re-examine §4.6's maturing facts on every pass.
+
+        `reclaimed`, `displaced_after` and §4.7's stop hunt all concern candles
+        that close AFTER the sweep confirms, and a live sweep confirms on the
+        newest candle -- at recording time none of those candles existed. The
+        transition row is append-only and its `false` meant "unknowable then",
+        so what matures is published as its own idempotent event, and
+        consumers read the events rather than the frozen evidence fields.
 
         Displacement lives in §5.10, which is the ICT engine. `domain.liquidity`
         may not import `domain.ict` — the Engine-acyclicity contract puts them
         on one layer — so the composition happens here, in the application
-        layer, which is above both. `detect_stop_hunt` was written to take
-        displacement as primitives rather than as a `Displacement`, precisely so
-        the domain never needs that import.
-
-        The measured range is the **penetration** candle's, not the
-        confirmation candle's (SLS v1.0.4 §4.7). For a single-candle sweep they
-        are the same candle, so one rule covers both windows.
+        layer, which is above both.
         """
+        duration = timeframe.duration
 
-        penetration_index = sweep.confirmed_index - (sweep.confirmation_window - 1)
+        rows = await self._evidence.list_liquidity(
+            symbol,
+            timeframe,
+            candles[0].open_time,
+            candles[-1].close_time + duration,
+        )
 
-        if penetration_index < 0 or sweep.confirmed_index >= len(candles):
-            return False
+        for row in rows:
+            if row.to_state != "SWEPT" or row.reason != "liquidity_sweep":
+                continue
 
-        penetration = candles[penetration_index]
+            sweep = _sweep_from_evidence(row, window_open=candles[0].open_time, duration=duration)
 
+            # No "already at the newest candle" skip: a sweep confirmed on the
+            # newest candle gets an empty walk range below, so the guard could
+            # not fail and was removed.
+            if sweep is None:
+                continue
+
+            await self._walk_sweep_maturation(
+                symbol,
+                timeframe,
+                sweep,
+                candles,
+                atrs,
+            )
+
+    async def _walk_sweep_maturation(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        sweep: SweepEvent,
+        candles: Sequence[Candle],
+        atrs: Sequence[Decimal | None],
+    ) -> None:
         reversal = (
             DisplacementDirection.BEARISH
             if sweep.side is LiquiditySide.BSL
             else DisplacementDirection.BULLISH
         )
 
-        # §4.7: the displacement must close within stophunt_window candles of
-        # sweep confirmation. Scan forward, stop at the first qualifying leg.
-        for offset in range(1, _STOPHUNT_WINDOW + 1):
-            index = sweep.confirmed_index + offset
+        hunt: StopHuntEvent | None = None
 
-            if index >= len(candles):
-                return False
+        # A scan-cost cap, not an enforcement: every per-fact window is
+        # decided inside the domain functions, and this bound only stops the
+        # walk from touching candles no window can reach. Setup expiry (15)
+        # is the longest horizon -- a hunt confirms by +3 and fails by +8.
+        # Without the cap each swept row would walk to the window's end on
+        # every pass, and the engine has a 104s/pass budget.
+        last = min(sweep.setup_expiry_index, len(candles) - 1)
+
+        for index in range(max(sweep.confirmed_index + 1, 0), last + 1):
+            candle = candles[index]
+
+            was_reclaimed = sweep.reclaimed
+            sweep = sweep_reclaimed(sweep, candle, candle_index=index)
+
+            if sweep.reclaimed and not was_reclaimed:
+                await self._append_sweep_fact(
+                    "LIQUIDITY_SWEEP_RECLAIMED",
+                    symbol,
+                    timeframe,
+                    object_id=sweep.pool_id,
+                    event_at=candle.close_time,
+                    payload={
+                        "pool_id": sweep.pool_id,
+                        "side": sweep.side.value,
+                        "liquidity_class": sweep.liquidity_class.value,
+                        "reference_level": str(sweep.reference_level),
+                        "close": str(candle.close),
+                        "sweep_confirmed_at": sweep.confirmed_at.isoformat(),
+                        "candles_since_confirmation": index - sweep.confirmed_index,
+                    },
+                )
 
             atr = _atr_at(atrs, index)
 
-            if atr <= 0:
-                continue
+            if atr > 0:
+                displacement = detect_displacement(candles, index, atr=atr)
 
-            displacement = detect_displacement(candles, index, atr=atr)
+                if displacement is not None and displacement.direction is reversal:
+                    was_displaced = sweep.displaced_after
 
-            if displacement is None or displacement.direction is not reversal:
-                continue
+                    sweep = mark_displaced_after(
+                        sweep,
+                        candle_index=index,
+                        displacement_in_reversal_direction=True,
+                    )
 
-            hunt = detect_stop_hunt(
-                sweep,
-                displacement_id=_build_displacement_id(
-                    symbol=record.symbol,
-                    timeframe=record.timeframe,
-                    at=candles[index].close_time,
-                ),
-                displacement_at=candles[index].close_time,
-                displacement_index=index,
-                # §4.7 speaks in UP/DOWN while §5.10's enum is BULLISH/BEARISH.
-                # The two vocabularies are not interchangeable and nothing
-                # enforces the mapping, so it is made explicit here.
-                displacement_direction=(
-                    "DOWN" if displacement.direction is DisplacementDirection.BEARISH else "UP"
-                ),
-                displacement_close=candles[index].close,
-                sweep_candle_high=penetration.high,
-                sweep_candle_low=penetration.low,
-            )
+                    if sweep.displaced_after and not was_displaced:
+                        await self._append_sweep_fact(
+                            "LIQUIDITY_SWEEP_DISPLACED",
+                            symbol,
+                            timeframe,
+                            object_id=sweep.pool_id,
+                            event_at=candle.close_time,
+                            payload={
+                                "pool_id": sweep.pool_id,
+                                "side": sweep.side.value,
+                                "liquidity_class": sweep.liquidity_class.value,
+                                "displacement_close": str(candle.close),
+                                "sweep_confirmed_at": sweep.confirmed_at.isoformat(),
+                                "candles_since_confirmation": (index - sweep.confirmed_index),
+                            },
+                        )
 
-            if hunt is None:
-                continue
+                    if hunt is None:
+                        hunt = await self._record_stop_hunt(
+                            symbol,
+                            timeframe,
+                            sweep,
+                            candles,
+                            displacement_index=index,
+                            displacement_direction=(
+                                "DOWN"
+                                if displacement.direction is DisplacementDirection.BEARISH
+                                else "UP"
+                            ),
+                        )
 
-            payload = json.dumps(
-                {
-                    "algo_version": self._algo_version,
-                    "sweep_pool_id": hunt.sweep_pool_id,
-                    "displacement_id": hunt.displacement_id,
-                    "elapsed_candles": hunt.elapsed_candles,
-                    "failed": hunt.failed,
-                    "penetration_index": penetration_index,
-                    "penetration_high": str(penetration.high),
-                    "penetration_low": str(penetration.low),
-                    "displacement_close": str(candles[index].close),
-                    "liquidity_class": sweep.liquidity_class.value,
-                    "side": sweep.side.value,
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            )
+            if hunt is not None and not hunt.failed:
+                was_failed = hunt.failed
 
-            return await self._events.append(
-                EngineEventRecord(
-                    event_key=_build_liquidity_event_key(
-                        symbol=record.symbol,
-                        timeframe=record.timeframe,
-                        event_type="LIQUIDITY_STOP_HUNT",
-                        event_at=hunt.confirmed_at,
-                        algo_version=self._algo_version,
-                        object_id=record.pool_id,
-                    ),
-                    symbol=record.symbol,
-                    timeframe=record.timeframe,
-                    event_type="LIQUIDITY_STOP_HUNT",
-                    event_at=hunt.confirmed_at,
-                    algo_version=self._algo_version,
-                    payload=payload,
-                    created_at=self._clock.now(),
+                hunt = mark_stop_hunt_failed(
+                    hunt,
+                    sweep,
+                    candle_index=index,
+                    candle_close=candle.close,
+                    sweep_extreme=sweep.penetration_price,
                 )
-            )
 
-        return False
+                if hunt.failed and not was_failed:
+                    await self._append_sweep_fact(
+                        "LIQUIDITY_STOP_HUNT_FAILED",
+                        symbol,
+                        timeframe,
+                        object_id=sweep.pool_id,
+                        event_at=candle.close_time,
+                        payload={
+                            "sweep_pool_id": hunt.sweep_pool_id,
+                            "displacement_id": hunt.displacement_id,
+                            "close": str(candle.close),
+                            "sweep_extreme": str(sweep.penetration_price),
+                            "candles_since_hunt": index - hunt.confirmed_index,
+                        },
+                    )
+
+    async def _record_stop_hunt(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        sweep: SweepEvent,
+        candles: Sequence[Candle],
+        *,
+        displacement_index: int,
+        displacement_direction: str,
+    ) -> StopHuntEvent | None:
+        """Detect and publish the §4.7 stop-hunt composite.
+
+        The measured range is the **penetration** candle's, not the
+        confirmation candle's (SLS v1.0.4 §4.7). For a single-candle sweep they
+        are the same candle, so one rule covers both windows.
+        """
+        penetration_index = sweep.confirmed_index - (sweep.confirmation_window - 1)
+
+        if penetration_index < 0:
+            return None
+
+        penetration = candles[penetration_index]
+
+        hunt = detect_stop_hunt(
+            sweep,
+            displacement_id=_build_displacement_id(
+                symbol=symbol,
+                timeframe=timeframe,
+                at=candles[displacement_index].close_time,
+            ),
+            displacement_at=candles[displacement_index].close_time,
+            displacement_index=displacement_index,
+            # §4.7 speaks in UP/DOWN while §5.10's enum is BULLISH/BEARISH.
+            # The two vocabularies are not interchangeable and nothing
+            # enforces the mapping, so it is made explicit at the call site.
+            displacement_direction=displacement_direction,
+            displacement_close=candles[displacement_index].close,
+            sweep_candle_high=penetration.high,
+            sweep_candle_low=penetration.low,
+        )
+
+        if hunt is None:
+            return None
+
+        await self._append_sweep_fact(
+            "LIQUIDITY_STOP_HUNT",
+            symbol,
+            timeframe,
+            object_id=sweep.pool_id,
+            event_at=hunt.confirmed_at,
+            payload={
+                "algo_version": self._algo_version,
+                "sweep_pool_id": hunt.sweep_pool_id,
+                "displacement_id": hunt.displacement_id,
+                "elapsed_candles": hunt.elapsed_candles,
+                "failed": hunt.failed,
+                "penetration_index": penetration_index,
+                "penetration_high": str(penetration.high),
+                "penetration_low": str(penetration.low),
+                "displacement_close": str(candles[displacement_index].close),
+                "liquidity_class": sweep.liquidity_class.value,
+                "side": sweep.side.value,
+            },
+        )
+
+        return hunt
+
+    async def _append_sweep_fact(
+        self,
+        event_type: str,
+        symbol: str,
+        timeframe: Timeframe,
+        *,
+        object_id: str,
+        event_at: datetime,
+        payload: Mapping[str, object],
+    ) -> None:
+        await self._events.append(
+            EngineEventRecord(
+                event_key=_build_liquidity_event_key(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    event_type=event_type,
+                    event_at=event_at,
+                    algo_version=self._algo_version,
+                    object_id=object_id,
+                ),
+                symbol=symbol,
+                timeframe=timeframe,
+                event_type=event_type,
+                event_at=event_at,
+                algo_version=self._algo_version,
+                payload=json.dumps(
+                    payload,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                created_at=self._clock.now(),
+            )
+        )
 
     async def _transition_pool(
         self,
@@ -980,6 +1154,43 @@ class LiquidityReplayService:
         )
 
         return True
+
+
+def _sweep_from_evidence(
+    row: LiquidityEvidenceRecord,
+    *,
+    window_open: datetime,
+    duration: timedelta,
+) -> SweepEvent | None:
+    """Rebuild the SweepEvent a SWEPT transition recorded, in today's window.
+
+    The confirmed index is derived from `transitioned_at`, never from the
+    stored `candle_index` -- that index froze in whichever 500-candle window
+    recorded the sweep and points nowhere in this one. `transitioned_at` is
+    the confirming candle's close time, so its position is one duration back
+    from the naive quotient.
+    """
+    try:
+        fields = json.loads(row.evidence)
+
+        return SweepEvent(
+            pool_id=row.pool_id,
+            side=LiquiditySide(fields["side"]),
+            liquidity_class=LiquidityClass(fields["liquidity_class"]),
+            confirmed_at=row.transitioned_at,
+            confirmed_index=int((row.transitioned_at - window_open) / duration) - 1,
+            penetration_price=Decimal(fields["penetration_price"]),
+            reference_level=Decimal(fields["reference_level"]),
+            close_back_price=Decimal(fields["close_back_price"]),
+            sweep_depth_atr=Decimal(fields["sweep_depth_atr"]),
+            confirmation_window=int(fields["confirmation_window"]),
+            gap_sweep=bool(fields["gap_sweep"]),
+        )
+    except (KeyError, ValueError, TypeError, ArithmeticError):
+        # Rows written by retired algo versions are historical facts, not
+        # this pass's work; a shape this code no longer writes is skipped
+        # rather than allowed to kill the whole maturation pass.
+        return None
 
 
 def _to_domain_pool(

@@ -134,6 +134,7 @@ def build_detection_pipeline(
             PgLiquidityTransitionRepository(sessions),
             events,
             RedisLiquidityStateStore(redis_client),
+            evidence,
             clock,
         ),
         structure_shift=StructureShiftReplayService(
