@@ -36,6 +36,7 @@ from scanner.domain.structure import (
     SwingKind,
     SwingPoint,
     detect_external_swings,
+    swing_window,
 )
 from scanner.shared import Timeframe
 
@@ -396,7 +397,9 @@ def _dealing_range_at(
     and G3 stayed a hardcoded pass. The `range_id` shape is preserved because
     it is already stored on every OTE zone.
     """
-    eligible = [swing for swing in swings if swing.index <= index]
+    # Same confirmation-aware cut as pd.dealing_range_at now enforces at the
+    # root; kept here only to size the slice handed on.
+    eligible = [swing for swing in swings if swing.index + swing_window(swing.strength) <= index]
 
     highs = [swing for swing in eligible if swing.kind is SwingKind.HIGH]
     lows = [swing for swing in eligible if swing.kind is SwingKind.LOW]
@@ -421,7 +424,7 @@ def _impulse_leg_at(
     index: int,
 ) -> ImpulseLeg | None:
     eligible = sorted(
-        (swing for swing in swings if swing.index <= index),
+        (swing for swing in swings if swing.index + swing_window(swing.strength) <= index),
         key=lambda swing: swing.index,
     )
 

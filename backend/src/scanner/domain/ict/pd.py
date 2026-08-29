@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 
-from scanner.domain.structure import SwingKind, SwingPoint
+from scanner.domain.structure import SwingKind, SwingPoint, swing_window
 
 _ZERO = Decimal("0")
 _HALF = Decimal("0.5")
@@ -97,13 +97,20 @@ def evaluate_pd_context(
 
     raw_position = (close - dealing_range.low) / dealing_range.height
 
-    range_position = min(
+    clamped = min(
         Decimal("1"),
         max(
             Decimal("0"),
             raw_position,
         ),
-    ).quantize(Decimal("0.0001"))
+    )
+
+    # §0.4: "quantisation is a presentation rule, never a decision rule, so
+    # it cannot change a verdict." The recorded position is quantised; every
+    # gate below is derived from the UNQUANTISED value -- deriving them from
+    # the quantised one flipped verdicts at the boundaries (0.50004 rounds to
+    # 0.5000 and opened the long gate the raw comparison refuses).
+    range_position = clamped.quantize(Decimal("0.0001"))
 
     equilibrium = dealing_range.equilibrium
 
@@ -122,10 +129,10 @@ def evaluate_pd_context(
         equilibrium=equilibrium,
         close=close,
         range_position=range_position,
-        long_gate=(range_position <= _HALF),
-        short_gate=(range_position >= _HALF),
-        sweep_long_gate=(range_position <= _EXTREME_THIRD),
-        sweep_short_gate=(range_position >= _UPPER_EXTREME_THIRD),
+        long_gate=(clamped <= _HALF),
+        short_gate=(clamped >= _HALF),
+        sweep_long_gate=(clamped <= _EXTREME_THIRD),
+        sweep_short_gate=(clamped >= _UPPER_EXTREME_THIRD),
     )
 
 
@@ -147,7 +154,13 @@ def dealing_range_at(
     bracket -- which is not a failure but §5.7's own condition: a range price
     is outside is not the range price is in.
     """
-    eligible = [swing for swing in swings if swing.index <= index]
+    # Confirmed as of `index`, not merely pivoted: §3.1 dates a swing's
+    # existence to the close of its k-th follow-up candle and says "no
+    # downstream logic may consume it earlier". Filtering on the pivot alone
+    # let a replay anchor ranges on swings a live engine could not yet see --
+    # up to k_ext = 5 candles of look-ahead, a §0.2 non-repaint break. The
+    # rule lives here, at the root, so every caller inherits it.
+    eligible = [swing for swing in swings if swing.index + swing_window(swing.strength) <= index]
 
     highs = [swing for swing in eligible if swing.kind is SwingKind.HIGH]
     lows = [swing for swing in eligible if swing.kind is SwingKind.LOW]
