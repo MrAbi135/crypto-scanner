@@ -16,6 +16,8 @@ from scanner.application.detection.confluence_replay import (
     HTF_STATE_UNREACHABLE,
     UNREACHABLE_INPUTS,
     ConfluenceReplayService,
+    _is_displacement_fvg,
+    _read_labels,
     _read_participation,
     _size_skew,
 )
@@ -2471,9 +2473,12 @@ async def test_a_clean_record_pays_because_it_is_now_measured() -> None:
 
     candidate = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
 
-    # 15 confirmed + 18 displaced + 10 mss + 15 for a record with no failure
-    # in it, and no trend history behind them.
-    assert candidate.factors["F1"] == Decimal(58)
+    # 15 confirmed + 10 mss + 15 for a record with no failure in it -- and no
+    # 18 for displacement, because this fixture's impulse leg is not
+    # displaced. The old expectation was 58: `displaced` was keyed on MSS
+    # presence (the identical predicate as the 10 two lines up), so one MSS
+    # paid twice and this fixture bought displacement it never printed.
+    assert candidate.factors["F1"] == Decimal(40)
 
     payload = json.loads(next(iter(repo.appended.values())).payload)
 
@@ -3044,3 +3049,148 @@ async def test_scoring_pins_its_zone_read_to_the_current_versions() -> None:
     await svc.run("BTCUSDT", TF, BASE, END)
 
     assert zones_repo.asked_versions is CURRENT_ZONE_VERSIONS
+
+
+@pytest.mark.asyncio
+async def test_f1_pays_displacement_from_the_leg_not_from_mss_presence() -> None:
+    """§8.3.1's +18 is for a *displaced* break (§3.5's quality grade).
+
+    Two directions of the same defect: an MSS with an undisplaced break must
+    not buy the 18 (it already earns its own 10), and a displaced break with
+    no MSS -- A3's defining shape -- must earn it. The old wiring keyed both
+    terms on the identical MSS-presence predicate, so the first paid 28 for
+    one fact and the second could never pay at all.
+    """
+    # The A3 fixture verbatim: BOS at index 30 inside a displaced 11->43
+    # impulse, no MSS anywhere, a zone at the pullback's close so G4 holds.
+    last_close = int(impulse_then_pullback()[-1].close)
+
+    displaced = bullish_setup()
+    displaced["events"] = [event("BOS_UP", 30, direction="UP")]
+    displaced["zones"] = [
+        zone(
+            "ob",
+            band_low=Decimal(last_close - 1),
+            band_high=Decimal(last_close + 1),
+        )
+    ]
+
+    svc, _ = service(**displaced, candles=impulse_then_pullback(), htf_trend="BULLISH")
+
+    up = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
+
+    contributions = {c.code for c in up.attribution["F1"]}
+
+    assert "displaced" in contributions
+    assert "mss" not in contributions
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_failed_break_blocks_g5_but_a_scarred_record_only_costs_points() -> None:
+    """§8.2 G5 hears the failed-break clause now, at the failure's OWN window.
+
+    §3.5 defines a failure by its 3-candle reclaim, so a failure fresher than
+    that is the trap-in-progress the gate exists for. Deliberately narrower
+    than F1's 20-candle clean-record window: §8.3.1 prices one failure at 7
+    points across twenty candles, which only means anything if the gate is
+    not blocking that whole span -- the two spec rows must both stay live.
+    """
+    setup = bullish_setup()
+
+    fresh, _ = service(
+        **{**setup, "events": [*setup["events"], failed_break_event(CANDLES - 2, "UP")]}
+    )
+    scarred, _ = service(
+        **{**setup, "events": [*setup["events"], failed_break_event(CANDLES - 5, "UP")]}
+    )
+
+    fresh_up = next(c for c in (await run(fresh, "BULLISH")).candidates if c.direction == "UP")
+    scarred_up = next(c for c in (await run(scarred, "BULLISH")).candidates if c.direction == "UP")
+
+    assert not fresh_up.gates_passed
+    assert "G5" in fresh_up.failed_gates
+
+    assert scarred_up.gates_passed
+
+
+def test_labels_are_ordered_by_event_time_not_by_frozen_payload_index() -> None:
+    """§7.4's pair count walks the label sequence assuming candle order.
+
+    The payload's `index` froze in whichever window recorded the swing --
+    live-recorded swings all cluster near the tail, ~495+ -- so sorting by it
+    interleaved labels from different passes in near-arbitrary order. Here the
+    payload indices say HL-before-HH while time says HH-before-HL; only the
+    time order is real.
+    """
+    # Built directly: the shared `event` helper's own parameter is named
+    # `index`, so a payload key of the same name cannot pass through it.
+    def label_event(event_type: str, at_candle: int, payload_index: int) -> EngineEventRecord:
+        at = BASE + TF.duration * at_candle
+
+        return EngineEventRecord(
+            event_key=f"{event_type}-{at_candle}",
+            symbol="BTCUSDT",
+            timeframe=TF,
+            event_type=event_type,
+            event_at=at,
+            algo_version="test",
+            payload=json.dumps({"index": payload_index}),
+            created_at=at,
+        )
+
+    # Two traps this fixture has to dodge, both learned by mutation: fed in
+    # arrival order, a deleted sort still passes; and if the arrival-order
+    # PATTERN equals the time-order pattern (the first shuffle's mistake --
+    # HH,HL,HH,HL reads the same both ways), the shuffle proves nothing.
+    # Time order here is HH,HH,HL,HL; arrival order is HH,HL,HH,HL.
+    events = (
+        label_event("STRUCTURE_EXTERNAL_HH", 10, 497),
+        label_event("STRUCTURE_EXTERNAL_HL", 30, 205),
+        label_event("STRUCTURE_EXTERNAL_HH", 20, 499),
+        label_event("STRUCTURE_EXTERNAL_HL", 40, 311),
+    )
+
+    labels = _read_labels(events)
+
+    assert [label.value for label in labels] == ["HH", "HH", "HL", "HL"]
+
+
+def test_the_phase_measured_flag_is_a_reading_not_a_claim() -> None:
+    """The caller half of F5's sentinel: `phase_measured` must come from the
+    phase actually running. Hardcoding it True re-opens the 32-point gap this
+    exists to close -- that mutation survived until this test read the flag
+    off a series too short to measure."""
+
+    short = make_series()[:22]
+    reading_short = _read_participation(short, [], TF)
+
+    long = make_series()
+    reading_long = _read_participation(long, [], TF)
+
+    assert reading_short.rvol is not None, "premise: volume IS warm at 22 candles"
+    assert not reading_short.phase_measured
+    assert reading_long.phase_measured
+
+
+def test_displacement_fvg_is_judged_in_time_not_against_todays_offsets() -> None:
+    """§8.6 A4's displacement-FVG origin, compared where both sides are real.
+
+    The zone's created_index froze at first detection (host medians 458-500)
+    while the displacement set is rebuilt over today's window -- the old
+    comparison qualified any stale gap whenever an unrelated displacement
+    printed near today's right edge, and refused genuine mid-window gaps.
+    created_at is the gap's third candle's close, so the three spanned candles
+    open at created_at - 3d .. created_at - d.
+    """
+    created_at = BASE + TF.duration * 50
+
+    gap = zone("fvg", zone_type="FVG")
+    gap = replace(gap, created_at=created_at)
+
+    inside = frozenset({created_at - TF.duration * 2})
+    before = frozenset({created_at - TF.duration * 4})
+    after = frozenset({created_at})
+
+    assert _is_displacement_fvg(gap, inside, TF)
+    assert not _is_displacement_fvg(gap, before, TF)
+    assert not _is_displacement_fvg(gap, after, TF)

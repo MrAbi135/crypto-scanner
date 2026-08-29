@@ -124,6 +124,9 @@ class TestAnchorAgainstTheWorkedExample:
                 accelerating=False,
                 decelerating=False,
                 exhaustion_against=False,
+                # §8.7's fixture is a measured reading -- steady means the
+                # phase ran and said neither, not that nobody looked.
+                measured=True,
             )
         )
 
@@ -173,9 +176,11 @@ class TestDeliberateZeroes:
         assert unclaimed.score - reclaimed.score == Decimal(6)
 
     def test_exhaustion_against_the_trade_removes_a_flat_twenty(self) -> None:
-        clean = momentum_factor(MomentumEvidence(score=Decimal(60), aligned=True))
+        clean = momentum_factor(MomentumEvidence(score=Decimal(60), aligned=True, measured=True))
         tired = momentum_factor(
-            MomentumEvidence(score=Decimal(60), aligned=True, exhaustion_against=True)
+            MomentumEvidence(
+                score=Decimal(60), aligned=True, exhaustion_against=True, measured=True
+            )
         )
 
         assert clean.score - tired.score == Decimal(20)
@@ -252,3 +257,25 @@ class TestTableIntegrity:
     )
     def test_every_grade_named_by_the_spec_is_priced(self, grade: str) -> None:
         assert grade in ZONE_GRADE_POINTS
+
+
+class TestUnmeasuredMomentumPaysNothing:
+    def test_the_negative_awards_need_a_measurement_behind_them(self) -> None:
+        """ "Steady" and "no exhaustion" are absence claims. On an all-default
+        MomentumEvidence both negative predicates are true, and before the
+        `measured` sentinel an unmeasured symbol collected 12 + 20 points for
+        readings nobody took -- 4.8 final-confidence points in the gap where
+        volume is warm (~20 candles) but momentum is not (~33)."""
+
+        unmeasured = momentum_factor(MomentumEvidence())
+
+        assert unmeasured.score == Decimal(0)
+        assert unmeasured.contributions == ()
+
+    def test_the_same_flags_pay_once_measured(self) -> None:
+        measured = momentum_factor(MomentumEvidence(measured=True))
+
+        codes = {c.code for c in measured.contributions}
+
+        assert codes == {"acceleration", "no_exhaustion"}
+        assert measured.score == Decimal(32)

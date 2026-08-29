@@ -139,6 +139,13 @@ class MomentumEvidence:
     accelerating: bool = False
     decelerating: bool = False
     exhaustion_against: bool = False
+    # False until §7's phase reading actually ran. The steady and
+    # no-exhaustion awards below are NEGATIVE predicates -- true on an
+    # all-default instance -- so without this sentinel an unmeasured symbol
+    # collected 32 points for measurements nobody made. Same hazard, same
+    # cure as F1's `failed_breaks: int | None`: an unread record pays
+    # nothing.
+    measured: bool = False
     evidence_ids: dict[str, str] = field(default_factory=dict)
 
 
@@ -258,12 +265,16 @@ def momentum_factor(e: MomentumEvidence) -> FactorScore:
         if aligned > 0:
             parts.append(_contrib(e.evidence_ids, "aligned_momentum", aligned))
 
-    if e.accelerating:
-        parts.append(_contrib(e.evidence_ids, "acceleration", ACCEL_ACCELERATING))
-    elif not e.decelerating:
-        parts.append(_contrib(e.evidence_ids, "acceleration", ACCEL_STEADY))
+    # Gated on `measured`, because "steady" and "no exhaustion" are absence
+    # claims: asserting either about a symbol whose momentum was never read
+    # is paying for evidence that does not exist.
+    if e.measured:
+        if e.accelerating:
+            parts.append(_contrib(e.evidence_ids, "acceleration", ACCEL_ACCELERATING))
+        elif not e.decelerating:
+            parts.append(_contrib(e.evidence_ids, "acceleration", ACCEL_STEADY))
 
-    if not e.exhaustion_against:
-        parts.append(_contrib(e.evidence_ids, "no_exhaustion", NO_EXHAUSTION))
+        if not e.exhaustion_against:
+            parts.append(_contrib(e.evidence_ids, "no_exhaustion", NO_EXHAUSTION))
 
     return from_contributions(Factor.MOMENTUM, tuple(parts))
