@@ -54,10 +54,11 @@ class TrendStateMachine:
     ) -> TrendState:
         """§3.4's entry edge: `RANGING --> BULLISH: 2 consecutive HH + HL pairs`.
 
-        Only from RANGING. The diagram draws no other edge into a trend except
-        `CAUTION --> trend` via a confirmed MSS, which `apply_mss` owns — so a
-        machine already in BULLISH is left alone here rather than re-deriving
-        itself and possibly falling out.
+        Only from RANGING. A machine already in BULLISH is left alone here
+        rather than re-deriving itself and possibly falling out; the ways back
+        into a trend from CAUTION are `apply_mss` (the opposite trend),
+        `apply_recovery` (a new confirmed HH/LL restores it) and
+        `fail_mss_candidate` (follow-through expiry restores it).
 
         That "left alone" is the whole correction. The rule reads the last two
         highs and the last two lows; a market in a genuine trend prints an
@@ -132,6 +133,45 @@ class TrendStateMachine:
 
         elif self.state is TrendState.BEARISH_CAUTION:
             self.state = TrendState.BEARISH
+
+        return self.state
+
+    def apply_recovery(self, label: StructureLabel) -> bool:
+        """§3.4's recovery edge: `BULLISH_CAUTION --> BULLISH: new confirmed
+        HH` (mirror LL). §3.8 says the same from the CHoCH's side: it is
+        "Superseded by new HH/LL (state returns)".
+
+        This edge was simply missing -- the module docstring above misread the
+        diagram as having no way back into a trend except a confirmed MSS, so
+        a CHoCH superseded by fresh trend structure kept the machine in
+        CAUTION, and a follow-through printing afterwards confirmed an MSS
+        from a warning the doctrine had already withdrawn.
+
+        Returns True when the caller's CHoCH candidate is superseded and must
+        be dropped.
+        """
+        if self.state is TrendState.BULLISH_CAUTION and label is StructureLabel.HH:
+            self.state = TrendState.BULLISH
+
+            return True
+
+        if self.state is TrendState.BEARISH_CAUTION and label is StructureLabel.LL:
+            self.state = TrendState.BEARISH
+
+            return True
+
+        return False
+
+    def demote_to_ranging(self) -> TrendState:
+        """§3.6's invalidation edge: a post-MSS reclaim of the pre-MSS
+        extreme within 10 candles demotes the NEW trend to RANGING.
+
+        The machine had no transition into RANGING at all (it was only the
+        initial state), so the doctrine's own demotion could not be
+        expressed and `mss_is_low_quality` sat with zero callers.
+        """
+        if self.state in {TrendState.BULLISH, TrendState.BEARISH}:
+            self.state = TrendState.RANGING
 
         return self.state
 

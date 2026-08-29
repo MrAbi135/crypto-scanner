@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from scanner.domain.structure.breaks import BreakDirection
 
 _MSS_FOLLOWTHROUGH_MAX = 5
-_MSS_INVALIDATION_MAX = 10
+# §3.6: P.structure.mss_invalid_candles. Public because the replay's watch
+# needs the same horizon the predicate applies.
+MSS_INVALIDATION_MAX = 10
+_MSS_INVALIDATION_MAX = MSS_INVALIDATION_MAX
 
 
 @dataclass(frozen=True, slots=True)

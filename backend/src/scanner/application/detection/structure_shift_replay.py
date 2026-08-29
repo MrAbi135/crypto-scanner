@@ -41,12 +41,21 @@ from scanner.domain.structure import (
     detect_external_swings,
     detect_internal_swings,
     evaluate_mss,
+    mss_is_low_quality,
     swing_window,
 )
 from scanner.shared import Timeframe
 from scanner.shared.errors import DomainInvariantError
 
-STRUCTURE_SHIFT_ALGO_VERSION = "s6-structure-shift-v2"
+# v3: two doctrine edges the machine could not express, plus one more
+# window-local comparison. §3.4's recovery edge (CAUTION -> trend on a new
+# confirmed HH/LL) supersedes the CHoCH and drops the MSS candidate; §3.6's
+# invalidation edge (post-MSS reclaim of the pre-MSS extreme within 10
+# candles) demotes the new trend to RANGING and records the MSS low_quality
+# -- `mss_is_low_quality` finally has its caller. And the MSS sweep-origin
+# lookback now compares the sweep's transitioned_at against candle times
+# instead of a frozen recorded index against today's offsets.
+STRUCTURE_SHIFT_ALGO_VERSION = "s6-structure-shift-v3"
 
 _ATR_PERIOD = 14
 _MSS_SWEEP_LOOKBACK = 10
@@ -74,6 +83,20 @@ class _MssCandidate:
     has_displacement: bool
     has_external_sweep: bool
     has_failure_swing: bool
+    # §3.6's "pre-MSS extreme (the swept low/high)": the sweep's reference
+    # level under origin 2(a), the failure-swing attempt's price under 2(b).
+    # Carried so the 10-candle invalidation watch has a level to test.
+    pre_mss_extreme: Decimal | None
+
+
+@dataclass(slots=True)
+class _MssWatch:
+    """§3.6's post-confirmation invalidation window."""
+
+    direction: BreakDirection
+    pre_mss_extreme: Decimal
+    confirmed_index: int
+    event_key: str
 
 
 class StructureShiftReplayService:
@@ -155,6 +178,17 @@ class StructureShiftReplayService:
         external_window = swing_window(SwingStrength.EXTERNAL)
         internal_window = swing_window(SwingStrength.INTERNAL)
 
+        mss_watch: _MssWatch | None = None
+        previous_external_count = 0
+
+        # §3.4's entry rule reads the last two pairs of whatever history it
+        # is shown. After §3.6 demotes to RANGING, the pre-demotion pairs are
+        # exactly the structure the market just proved fake -- shown again,
+        # they re-enter the trend on the next candle and the demotion edge
+        # means nothing. The floor hides them: re-entry needs two pairs
+        # printed AFTER the demotion.
+        structure_floor = 0
+
         for candle_index, candle in enumerate(candles):
             confirmed_external = tuple(
                 swing for swing in external_swings if swing.index + external_window <= candle_index
@@ -172,7 +206,56 @@ class StructureShiftReplayService:
             # returning a different type -- three implementations of one line
             # of doctrine, and the one the BOS gate consulted was the one that
             # did not persist.
-            machine.apply_structure(external_classified)
+            machine.apply_structure(external_classified[structure_floor:])
+
+            # §3.4's recovery edge, checked on the swings that confirmed at
+            # THIS close: a new HH during BULLISH_CAUTION restores the trend
+            # and supersedes the CHoCH (§3.8), so the MSS candidate is
+            # dropped -- a follow-through printing later would otherwise
+            # confirm an MSS from a warning the doctrine already withdrew.
+            # §3.6 edge case (1) orders swing events first within a close,
+            # which is why this runs before the candidate block.
+            for item in external_classified[previous_external_count:]:
+                if machine.apply_recovery(item.label):
+                    candidate = None
+
+            previous_external_count = len(external_classified)
+
+            # §3.6's invalidation: within 10 candles of an MSS, a close back
+            # beyond the pre-MSS extreme demotes the new trend to RANGING and
+            # marks the MSS low_quality -- a fact appended, never an edit.
+            if mss_watch is not None:
+                since = candle_index - mss_watch.confirmed_index
+
+                reclaimed = (
+                    candle.close > mss_watch.pre_mss_extreme
+                    if mss_watch.direction is BreakDirection.DOWN
+                    else candle.close < mss_watch.pre_mss_extreme
+                )
+
+                if since >= 1 and mss_is_low_quality(
+                    closes_back_beyond_pre_mss_extreme=reclaimed,
+                    candles_since_confirmation=since,
+                ):
+                    machine.demote_to_ranging()
+                    structure_floor = len(external_classified)
+
+                    if await self._persist_mss_invalidation(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        candle=candle,
+                        candle_index=candle_index,
+                        watch=mss_watch,
+                        candles_since_confirmation=since,
+                    ):
+                        inserted += 1
+
+                    mss_watch = None
+
+                # No explicit expiry branch: `mss_is_low_quality` already
+                # refuses anything past MSS_INVALIDATION_MAX, so an early
+                # watch-drop was pure housekeeping -- mutating it away changed
+                # no test, and redundant protection reads as load-bearing.
 
             if candidate is not None:
                 candidate.has_displacement = (
@@ -226,6 +309,20 @@ class StructureShiftReplayService:
                                 candidate.direction,
                             )
 
+                            if candidate.pre_mss_extreme is not None:
+                                mss_watch = _MssWatch(
+                                    direction=candidate.direction,
+                                    pre_mss_extreme=candidate.pre_mss_extreme,
+                                    confirmed_index=candle_index,
+                                    event_key=build_event_key(
+                                        symbol=symbol,
+                                        timeframe=timeframe,
+                                        event_type=f"MSS_{candidate.direction.value}",
+                                        event_at=candle.open_time,
+                                        algo_version=self._algo_version,
+                                    ),
+                                )
+
                             candidate = None
 
                 if candidate is not None and elapsed >= _MSS_FOLLOWTHROUGH_MAX:
@@ -276,17 +373,19 @@ class StructureShiftReplayService:
 
             machine.apply_choch(direction)
 
-            has_external_sweep = _has_external_sweep(
+            has_external_sweep, sweep_level = _external_sweep_level(
                 liquidity=liquidity,
                 direction=direction,
+                candles=candles,
                 choch_index=candle_index,
             )
 
-            has_failure_swing = _has_failure_swing(
+            failure_extreme = _failure_swing_extreme(
                 external_classified,
                 direction=direction,
                 choch_index=candle_index,
             )
+            has_failure_swing = failure_extreme is not None
 
             has_displacement = _has_directional_displacement(
                 candles,
@@ -308,6 +407,9 @@ class StructureShiftReplayService:
                 has_displacement=has_displacement,
                 has_external_sweep=has_external_sweep,
                 has_failure_swing=has_failure_swing,
+                # 2(a)'s level outranks 2(b)'s: the sweep is the engineered
+                # extreme the doctrine names first.
+                pre_mss_extreme=(sweep_level if sweep_level is not None else failure_extreme),
             )
 
         # §3.7's state is what §8.2's G2 and §8.3's F6 both ask for, and F6
@@ -371,6 +473,57 @@ class StructureShiftReplayService:
                     if previous_trend is TrendState.BULLISH
                     else TrendState.BEARISH_CAUTION.value
                 ),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+        return await self._events.append(
+            EngineEventRecord(
+                event_key=build_event_key(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    event_type=event_type,
+                    event_at=candle.open_time,
+                    algo_version=self._algo_version,
+                ),
+                symbol=symbol,
+                timeframe=timeframe,
+                event_type=event_type,
+                event_at=candle.open_time,
+                algo_version=self._algo_version,
+                payload=payload,
+                created_at=self._clock.now(),
+            )
+        )
+
+    async def _persist_mss_invalidation(
+        self,
+        *,
+        symbol: str,
+        timeframe: Timeframe,
+        candle: Candle,
+        candle_index: int,
+        watch: _MssWatch,
+        candles_since_confirmation: int,
+    ) -> bool:
+        """§3.6: "the MSS marked `low_quality: true` (fact preserved)".
+
+        The events table is append-only, so a fact ABOUT a prior event is a
+        follow-up event carrying the original's key -- never an edit. Readers
+        that grep for specific event types ignore the new one; §7.4's label
+        reader skips non-classifications by construction.
+        """
+        event_type = f"STRUCTURE_MSS_INVALIDATED_{watch.direction.value}"
+
+        payload = json.dumps(
+            {
+                "direction": watch.direction.value,
+                "mss_event_key": watch.event_key,
+                "pre_mss_extreme": str(watch.pre_mss_extreme),
+                "candle_close": str(candle.close),
+                "candles_since_confirmation": candles_since_confirmation,
+                "low_quality": True,
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -518,50 +671,70 @@ def _find_choch(
     return swing, direction
 
 
-def _has_failure_swing(
+def _failure_swing_extreme(
     classified: tuple[ClassifiedSwing, ...],
     *,
     direction: BreakDirection,
     choch_index: int,
-) -> bool:
+) -> Decimal | None:
+    """§3.6 origin 2(b): the failed attempt's price, or None.
+
+    Returns the extreme itself rather than a bool because §3.6's invalidation
+    watch needs "the pre-MSS extreme" -- for a failure-swing origin that IS
+    this attempt's price.
+    """
     eligible = [item for item in classified if item.swing.index < choch_index]
 
     if direction is BreakDirection.DOWN:
         highs = [item for item in eligible if item.swing.kind is SwingKind.HIGH]
 
-        return bool(
-            highs
-            and max(
-                highs,
-                key=lambda item: item.swing.index,
-            ).label
-            is StructureLabel.LH
-        )
+        if highs:
+            latest = max(highs, key=lambda item: item.swing.index)
+
+            if latest.label is StructureLabel.LH:
+                return latest.swing.price
+
+        return None
 
     lows = [item for item in eligible if item.swing.kind is SwingKind.LOW]
 
-    return bool(
-        lows
-        and max(
-            lows,
-            key=lambda item: item.swing.index,
-        ).label
-        is StructureLabel.HL
-    )
+    if lows:
+        latest = max(lows, key=lambda item: item.swing.index)
+
+        if latest.label is StructureLabel.HL:
+            return latest.swing.price
+
+    return None
 
 
-def _has_external_sweep(
+def _external_sweep_level(
     *,
     liquidity: tuple[LiquidityEvidenceRecord, ...],
     direction: BreakDirection,
+    candles: list[Candle],
     choch_index: int,
-) -> bool:
+) -> tuple[bool, Decimal | None]:
+    """§3.6 origin 2(a): (sweep found, its level) inside the lookback.
+
+    Two answers, not one: the origin condition and the invalidation anchor
+    are different facts. A sweep whose stored level is unreadable still
+    satisfies 2(a) -- but it must NOT anchor the watch, and a zero-level
+    stand-in would make a DOWN-MSS invalidate on its first candle (every
+    close is above zero).
+
+    Returns the level because §3.6's invalidation watch needs "the pre-MSS
+    extreme (the swept low/high)" -- for a sweep origin that IS this level.
+
+    Bounded in TIME: `record.candle_index` froze in whichever window recorded
+    the sweep (a SWEPT pool transitions once), while `choch_index` is today's
+    offset -- the same two-coordinate-system trap fixed across ob_replay,
+    quietly present here too. `transitioned_at` is the sweep candle's close.
+    """
     expected_side = "BSL" if direction is BreakDirection.DOWN else "SSL"
 
-    lower_bound = max(
-        0,
-        choch_index - _MSS_SWEEP_LOOKBACK,
-    )
+    duration = candles[choch_index].timeframe.duration
+    window_opens = candles[max(0, choch_index - _MSS_SWEEP_LOOKBACK)].open_time
+    choch_closes = candles[choch_index].open_time + duration
 
     for record in liquidity:
         if record.reason != "liquidity_sweep":
@@ -570,7 +743,7 @@ def _has_external_sweep(
         if record.to_state != "SWEPT":
             continue
 
-        if not (lower_bound <= record.candle_index <= choch_index):
+        if not (window_opens < record.transitioned_at <= choch_closes):
             continue
 
         # This blob is written by our own liquidity service, so a parse failure
@@ -595,9 +768,11 @@ def _has_external_sweep(
         if evidence.get("side") != expected_side:
             continue
 
-        return True
+        level = evidence.get("reference_level")
 
-    return False
+        return True, (Decimal(level) if isinstance(level, str) else None)
+
+    return False, None
 
 
 def _has_directional_displacement(
