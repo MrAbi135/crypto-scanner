@@ -108,11 +108,12 @@ def test_the_stored_form_is_the_hashed_form() -> None:
 def test_the_dedup_key_is_10_3s_five_parts() -> None:
     """§10.3: `(symbol, TF, direction, archetype, zone_band_rounded)`.
 
-    The band is quantised rather than merely rounded, so `104` and `104.004`
-    both render `104.00`. A key that carried whatever scale the zone happened
-    to be stored at would not match itself across two passes.
+    The band is rounded to significant figures and printed canonically, so
+    `104.004` and `104.0040` both render `104` at four figures. A key that
+    carried whatever scale the zone happened to be stored at would not match
+    itself across two passes.
     """
-    assert payload().dedup_key() == "BTCUSDT|H1|UP|A4|104.00:100.00"
+    assert payload().dedup_key() == "BTCUSDT|H1|UP|A4|104:100"
 
 
 def test_two_candidates_on_one_zone_share_a_dedup_key() -> None:
@@ -201,3 +202,94 @@ def test_incoherent_levels_are_caught_separately_from_the_rr_floor() -> None:
     decision = publication_checks(backwards, feeds_fresh=True, dedup_clear=True)
 
     assert SuppressionReason.INCOHERENT_LEVELS in decision.reasons
+
+
+def test_the_dedup_key_survives_a_sub_cent_symbol() -> None:
+    """The finding that forced significant-figure rounding.
+
+    At two absolute decimals every sub-cent band rendered "0.00:0.00", so for
+    a TTL window every distinct setup on one (symbol, TF, direction,
+    archetype) was swallowed as a duplicate -- or merged as a refresh of a
+    signal about a different zone. The universe's ~733 symbols are mostly
+    sub-dollar; this was a launch-blocking silence, found before launch.
+    """
+    shib_a = payload(
+        symbol="SHIBUSDT",
+        levels=SignalLevels(
+            direction="UP",
+            entry=entry_zone(
+                zone_id="z1",
+                direction="UP",
+                band_low=Decimal("0.00002810"),
+                band_high=Decimal("0.00002850"),
+            ),
+            invalidation=Invalidation(Decimal("0.00002700"), ZONE_DISTAL_EDGE),
+            primary_target=TargetBand(low=Decimal("0.00003100"), high=Decimal("0.00003100")),
+        ),
+    )
+    shib_b = payload(
+        symbol="SHIBUSDT",
+        levels=SignalLevels(
+            direction="UP",
+            entry=entry_zone(
+                zone_id="z2",
+                direction="UP",
+                band_low=Decimal("0.00003400"),
+                band_high=Decimal("0.00003460"),
+            ),
+            invalidation=Invalidation(Decimal("0.00003300"), ZONE_DISTAL_EDGE),
+            primary_target=TargetBand(low=Decimal("0.00003800"), high=Decimal("0.00003800")),
+        ),
+    )
+
+    assert shib_a.dedup_key() != shib_b.dedup_key()
+    assert "0.00:0.00" not in shib_a.dedup_key()
+
+
+def test_two_spellings_of_one_price_share_a_key() -> None:
+    """0.00002810 and 0.000028100 are one number; a dedup key that
+    distinguished the spellings would alert twice for one opportunity."""
+
+    a = payload(
+        levels=SignalLevels(
+            direction="UP",
+            entry=entry_zone(
+                zone_id="z1",
+                direction="UP",
+                band_low=Decimal("0.000028100"),
+                band_high=Decimal("0.00002850"),
+            ),
+            invalidation=Invalidation(Decimal("0.00002700"), ZONE_DISTAL_EDGE),
+            primary_target=TargetBand(low=Decimal("0.00003100"), high=Decimal("0.00003100")),
+        )
+    )
+    b = payload(
+        levels=SignalLevels(
+            direction="UP",
+            entry=entry_zone(
+                zone_id="z1",
+                direction="UP",
+                band_low=Decimal("0.00002810"),
+                band_high=Decimal("0.000028500"),
+            ),
+            invalidation=Invalidation(Decimal("0.00002700"), ZONE_DISTAL_EDGE),
+            primary_target=TargetBand(low=Decimal("0.00003100"), high=Decimal("0.00003100")),
+        )
+    )
+
+    assert a.dedup_key() == b.dedup_key()
+
+
+def test_significant_rounding_prints_one_spelling_per_value() -> None:
+    """The key's atoms: plain notation always, zero stable, scale-free."""
+
+    from scanner.domain.lifecycle.payload import _significant
+
+    # normalize() alone would render these 1E+2 and 6E+4.
+    assert _significant(Decimal("100.00"), 4) == "100"
+    assert _significant(Decimal("60000"), 4) == "60000"
+    assert _significant(Decimal("0.000028104"), 4) == "0.0000281"
+    # Zero has no significant digits; every stored spelling of it must key
+    # identically.
+    assert _significant(Decimal("0"), 4) == "0"
+    assert _significant(Decimal("0.00"), 4) == "0"

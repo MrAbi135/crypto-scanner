@@ -890,7 +890,7 @@ async def test_a_clean_candidate_is_published_and_sealed() -> None:
     assert row.archetype == "A4"
     assert (row.entry_proximal, row.entry_distal) == (Decimal(104), Decimal(100))
     assert row.invalidation_level == Decimal(98)
-    assert row.dedup_key == "BTCUSDT|H4|UP|A4|104.00:100.00"
+    assert row.dedup_key == "BTCUSDT|H4|UP|A4|104:100"
 
     # The hash is over the stored payload and nothing else, so a row can
     # always be re-verified from its own two columns.

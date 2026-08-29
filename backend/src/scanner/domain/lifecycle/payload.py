@@ -143,19 +143,56 @@ class SignalPayload:
 
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-    def dedup_key(self, *, band_dp: int = 2) -> str:
+    def dedup_key(self, *, band_figures: int = 4) -> str:
         """§10.3: `(symbol, TF, direction, archetype, zone_band_rounded)`.
 
         The band is rounded because two candidates on the same zone can differ
         in the last decimal of a refined edge and are the same opportunity.
         §10.3's whole purpose is that such a pair "is merged as a refresh
         event on the existing signal — never a second alert".
+
+        **Rounded to significant figures, not absolute decimal places.** The
+        first version rounded to 2 decimals, which is not scale-invariant in
+        either direction: on a sub-cent symbol (most of a 733-symbol crypto
+        universe) every band rendered "0.00:0.00", so for a TTL window every
+        distinct setup on one (symbol, TF, direction, archetype) was swallowed
+        as a duplicate or merged as a refresh of a signal about a different
+        zone — while on BTC at 60,000 two prints of the same zone 0.02 apart
+        counted as different opportunities. §10.3 says "rounded" and gives no
+        precision; four significant figures is the scale-free reading, chosen
+        so that edges differing by less than ~0.1% of the price merge and
+        anything coarser stays distinct, at every price magnitude.
         """
         entry = self.levels.entry
 
-        band = f"{round(entry.proximal, band_dp)}:{round(entry.distal, band_dp)}"
+        proximal = _significant(entry.proximal, band_figures)
+        distal = _significant(entry.distal, band_figures)
+        band = f"{proximal}:{distal}"
 
         return "|".join((self.symbol, self.timeframe, self.direction, self.archetype, band))
+
+
+def _significant(value: Decimal, figures: int) -> str:
+    """`value` rounded to `figures` significant digits, canonically printed.
+
+    Pure Decimal arithmetic (no floats in domain/), and printed via
+    `normalize()` so 0.00002810 and 0.000028100 render identically — a dedup
+    key must not distinguish two spellings of one number. Zero has no
+    significant digits and stays "0".
+    """
+    if value == 0:
+        return "0"
+
+    exponent = value.adjusted()  # position of the most significant digit
+    quantum = Decimal(1).scaleb(exponent - figures + 1)
+    rounded = value.quantize(quantum).normalize()
+
+    # 'f'-formatting alone is the whole plain-notation guarantee:
+    # `normalize()` renders 100 as 1E+2, and format(_, "f") prints that back
+    # as "100". An explicit integral re-quantise was written first and
+    # removed when mutating it away changed no test -- the format call
+    # already covered it.
+    return format(rounded, "f")
 
 
 @dataclass(frozen=True, slots=True)
