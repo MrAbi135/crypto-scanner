@@ -288,3 +288,71 @@ class TestPoolFromCluster:
         )
 
         assert pool.price == pool.band_low
+
+
+def test_a_member_skipped_for_gap_still_seeds_its_own_chain() -> None:
+    """The chain-advance defect, first half.
+
+    Highs at 10, 11 and 14: 11 cannot join a chain containing 10 (gap 1 < 3),
+    but if the (10, 14) pair FAILS -- here 10 sits outside epsilon of the
+    others -- (11, 14) is a perfectly valid §4.3 cluster on its own. The old
+    `index += len(chain)` advance skipped 11 without ever letting it seed, and
+    a real shelf vanished.
+    """
+    swings = (
+        make_swing(10, "104", SwingKind.HIGH),
+        make_swing(11, "100", SwingKind.HIGH),
+        make_swing(12, "98", SwingKind.LOW),
+        make_swing(14, "100.02", SwingKind.HIGH),
+    )
+
+    clusters = detect_equal_level_clusters(swings, atrs=flat_atr())
+
+    assert len(clusters) == 1
+    assert clusters[0].member_indices == (11, 14)
+
+
+def test_a_consumed_member_does_not_seed_an_overlapping_duplicate() -> None:
+    """The chain-advance defect, second half.
+
+    Highs at 10, 11(skipped), 14, 18: the chain [10, 14, 18] consumes three
+    members across four positions, and the old count-based advance landed the
+    outer loop back on the consumed 14 -- which seeded a second cluster
+    [14, 18] fully contained in the first, a duplicate pool at the same shelf.
+    One shelf, one cluster.
+    """
+    swings = (
+        make_swing(10, "100", SwingKind.HIGH),
+        make_swing(11, "100.01", SwingKind.HIGH),
+        make_swing(12, "98", SwingKind.LOW),
+        make_swing(14, "100.02", SwingKind.HIGH),
+        # 96, not 98: two equal lows would form a legitimate EQL cluster of
+        # their own and this test is about the HIGH side only -- the first
+        # draft did exactly that and asserted against its own accident.
+        make_swing(16, "96", SwingKind.LOW),
+        make_swing(18, "100.03", SwingKind.HIGH),
+    )
+
+    clusters = detect_equal_level_clusters(swings, atrs=flat_atr())
+
+    assert len(clusters) == 1
+    assert clusters[0].member_indices == (10, 14, 18)
+
+
+def test_a_member_consumed_by_one_chain_does_not_join_another() -> None:
+    """§4.3's "later qualifying members join incrementally" describes one
+    chain per shelf growing -- not one member belonging to two clusters. 11
+    seeds after [10, 14] has consumed 14; refusing it the consumed 14 leaves
+    11 alone, and the shelf is already covered by the first cluster's pool."""
+
+    swings = (
+        make_swing(10, "100", SwingKind.HIGH),
+        make_swing(11, "100.01", SwingKind.HIGH),
+        make_swing(12, "98", SwingKind.LOW),
+        make_swing(14, "100.02", SwingKind.HIGH),
+    )
+
+    clusters = detect_equal_level_clusters(swings, atrs=flat_atr())
+
+    assert len(clusters) == 1
+    assert clusters[0].member_indices == (10, 14)

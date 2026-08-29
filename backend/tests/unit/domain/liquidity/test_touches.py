@@ -44,7 +44,7 @@ def bsl(candles: list[Candle], *, level: str = "100") -> int:
         side=LiquiditySide.BSL,
         band_low=Decimal(level),
         band_high=Decimal(level),
-        epsilon=EPSILON,
+        epsilons=[EPSILON] * len(candles),
     )
 
 
@@ -54,7 +54,7 @@ def ssl(candles: list[Candle], *, level: str = "100") -> int:
         side=LiquiditySide.SSL,
         band_low=Decimal(level),
         band_high=Decimal(level),
-        epsilon=EPSILON,
+        epsilons=[EPSILON] * len(candles),
     )
 
 
@@ -166,7 +166,7 @@ def test_a_band_counts_a_turn_anywhere_inside_it() -> None:
         side=LiquiditySide.BSL,
         band_low=Decimal("100"),
         band_high=Decimal("101"),
-        epsilon=EPSILON,
+        epsilons=[EPSILON] * 3,
     )
 
     assert counted == 1
@@ -180,7 +180,7 @@ def test_a_band_is_breached_only_past_its_far_edge() -> None:
         side=LiquiditySide.BSL,
         band_low=Decimal("100"),
         band_high=Decimal("101"),
-        epsilon=EPSILON,
+        epsilons=[EPSILON] * 3,
     )
 
     assert counted == 0
@@ -201,7 +201,7 @@ def test_deep_inside_the_band_is_still_not_a_breach() -> None:
         side=LiquiditySide.BSL,
         band_low=Decimal("100"),
         band_high=Decimal("101"),
-        epsilon=EPSILON,
+        epsilons=[EPSILON] * 3,
     )
 
     assert counted == 1
@@ -216,7 +216,7 @@ def test_deep_inside_a_sell_side_band_is_not_a_breach_either() -> None:
         side=LiquiditySide.SSL,
         band_low=Decimal("99"),
         band_high=Decimal("100"),
-        epsilon=EPSILON,
+        epsilons=[EPSILON] * 3,
     )
 
     assert counted == 1
@@ -230,11 +230,21 @@ def test_no_candles_is_zero_rather_than_an_error() -> None:
 def test_it_refuses_arguments_that_cannot_mean_anything() -> None:
     with pytest.raises(ValueError):
         count_pool_touches(
-            [],
+            [candle(0, high="100", low="99")],
             side=LiquiditySide.BSL,
             band_low=Decimal("100"),
             band_high=Decimal("100"),
-            epsilon=Decimal("-1"),
+            epsilons=[Decimal("-1")],
+        )
+
+    with pytest.raises(ValueError):
+        count_pool_touches(
+            [candle(0, high="100", low="99")],
+            side=LiquiditySide.BSL,
+            band_low=Decimal("100"),
+            band_high=Decimal("100"),
+            # Misaligned lengths are a caller bug, not a shrug.
+            epsilons=[],
         )
 
     with pytest.raises(ValueError):
@@ -243,5 +253,36 @@ def test_it_refuses_arguments_that_cannot_mean_anything() -> None:
             side=LiquiditySide.BSL,
             band_low=Decimal("101"),
             band_high=Decimal("100"),
-            epsilon=EPSILON,
+            epsilons=[],
         )
+
+
+def test_each_candle_is_judged_by_its_own_epsilon() -> None:
+    """The reason the signature is per-candle at all.
+
+    Candle 1 reaches 99.6 under an epsilon of 0.5 (a touch); judged by the
+    window-newest candle's tighter 0.1 it would not be. One epsilon for the
+    whole walk made a stored candle's verdict move as the window slid --
+    §4.2 promises every component is recomputable from stored evidence.
+    """
+    near = {"high": "99.6", "low": "95"}
+
+    counted = count_pool_touches(
+        series(AWAY, near, AWAY),
+        side=LiquiditySide.BSL,
+        band_low=Decimal("100"),
+        band_high=Decimal("100"),
+        epsilons=[Decimal("0.1"), Decimal("0.5"), Decimal("0.1")],
+    )
+
+    assert counted == 1
+
+    counted_tight = count_pool_touches(
+        series(AWAY, near, AWAY),
+        side=LiquiditySide.BSL,
+        band_low=Decimal("100"),
+        band_high=Decimal("100"),
+        epsilons=[Decimal("0.5"), Decimal("0.1"), Decimal("0.5")],
+    )
+
+    assert counted_tight == 0
