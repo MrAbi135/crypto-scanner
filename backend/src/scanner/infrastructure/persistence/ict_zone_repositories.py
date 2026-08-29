@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 
+import sqlalchemy as sa
 from sqlalchemy import select, update
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -111,15 +114,46 @@ class PgIctZoneRepository:
         self,
         symbol: str,
         timeframe: Timeframe,
+        *,
+        only_versions: Mapping[str, str] | None = None,
     ) -> tuple[IctZoneRecord, ...]:
+        """Live zones, optionally pinned to each type's current algo version.
+
+        The filter runs in SQL, **before** the limit, deliberately: applied in
+        Python afterwards, superseded rows would still occupy the strength-
+        ordered top slots and evict current zones from the bounded answer --
+        the reader would see fewer real zones because dead versions crowded
+        the doorway.
+
+        `None` means every version, which is what a lifecycle wants: it is
+        the read that retires old rows, and pinning it would freeze them
+        live forever. See `application/detection/zone_versions.py`.
+        """
+        conditions = [
+            IctZoneRow.symbol == symbol,
+            IctZoneRow.timeframe == timeframe.value,
+            ~IctZoneRow.state.in_(_TERMINAL_STATES),
+        ]
+
+        if only_versions is not None:
+            # evidence is a JSON text column; there is no algo_version column
+            # (detection rows are self-contained evidence, DDD v1.0.1). The
+            # live set per context is bounded, so the cast is cheap.
+            version_of = sa.cast(IctZoneRow.evidence, postgresql.JSONB)["algo_version"].astext
+
+            conditions.append(
+                sa.or_(
+                    *(
+                        sa.and_(IctZoneRow.zone_type == zone_type, version_of == version)
+                        for zone_type, version in sorted(only_versions.items())
+                    )
+                )
+            )
+
         async with self._sessions() as session:
             result = await session.execute(
                 select(IctZoneRow)
-                .where(
-                    IctZoneRow.symbol == symbol,
-                    IctZoneRow.timeframe == timeframe.value,
-                    ~IctZoneRow.state.in_(_TERMINAL_STATES),
-                )
+                .where(*conditions)
                 # `created_at`, not `created_index`. The index is the zone's
                 # offset inside whichever 500-candle window first detected it,
                 # frozen there while the window slides on -- so ordering the

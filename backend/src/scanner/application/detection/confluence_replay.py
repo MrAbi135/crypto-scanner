@@ -35,6 +35,10 @@ from scanner.application.detection.structure_events import (
     is_classification,
     read_classification,
 )
+from scanner.application.detection.zone_versions import (
+    CURRENT_ZONE_VERSIONS,
+    assert_covers_all_zone_types,
+)
 from scanner.application.marketdata.contexts import higher_timeframe
 from scanner.application.parameters import PARAM_SET_VERSION
 from scanner.application.ports import CandleRepository, Clock
@@ -110,6 +114,7 @@ from scanner.domain.ict import (
     detect_displacement,
     evaluate_pd_context,
 )
+from scanner.domain.ict.model import ZoneType
 from scanner.domain.lifecycle import (
     TERMINAL_STATES,
     SignalPayload,
@@ -150,7 +155,15 @@ from scanner.domain.volume import (
 )
 from scanner.shared import Timeframe
 
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v22"
+# v23: zone reads pinned to CURRENT_ZONE_VERSIONS. During a version
+# migration the live table holds both generations of the same physical zone
+# (ids carry the version), and an unpinned read scored the same gap twice --
+# observed 2026-08-29 with 642 v2 FVGs live beside their v3 twins.
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v23"
+
+# Import-time, not call-time: a zone type with no version entry is invisible
+# to scoring, and that must refuse to boot rather than run quietly blind.
+assert_covers_all_zone_types(frozenset(t.value for t in ZoneType))
 
 # §8.2 G5: "no opposing displacement in last 3 candles".
 # §4.6's epsilon, reused to ask whether a sweep took the dealing range's own
@@ -382,7 +395,15 @@ class ConfluenceReplayService:
         # market that offered nothing.
         events = await self._events.list_events(symbol, timeframe, start, end)
         liquidity = await self._evidence.list_liquidity(symbol, timeframe, start, end)
-        live_zones = await self._zones.list_live(symbol, timeframe)
+        # Pinned to each type's current version: during a migration window the
+        # table holds both generations of the same physical zone, and scoring
+        # both is counting one gap twice. Lifecycles read unpinned on purpose
+        # -- see zone_versions.py.
+        live_zones = await self._zones.list_live(
+            symbol,
+            timeframe,
+            only_versions=CURRENT_ZONE_VERSIONS,
+        )
 
         # SLS 4.5 defines resting liquidity as the ACTIVE pool map, and
         # names target selection as one of its consumers. Read once per

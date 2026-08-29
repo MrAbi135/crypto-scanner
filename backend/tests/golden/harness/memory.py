@@ -13,7 +13,7 @@ exists to catch.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
 
@@ -274,6 +274,18 @@ class InMemoryLiquidityTransitionRepository:
         return True
 
 
+def _evidence_version(zone: IctZoneRecord) -> str | None:
+    """The version the row's own evidence claims, exactly as the SQL reads it."""
+    try:
+        parsed = json.loads(zone.evidence)
+    except ValueError:
+        return None
+
+    value = parsed.get("algo_version") if isinstance(parsed, dict) else None
+
+    return value if isinstance(value, str) else None
+
+
 class InMemoryIctZoneRepository:
     """Mirrors `PgIctZoneRepository`, including the resurrection guard.
 
@@ -321,13 +333,23 @@ class InMemoryIctZoneRepository:
         self,
         symbol: str,
         timeframe: Timeframe,
+        *,
+        only_versions: Mapping[str, str] | None = None,
     ) -> tuple[IctZoneRecord, ...]:
+        # Mirrors the SQL's version pin, including filtering BEFORE the bound:
+        # applied after, superseded rows would evict current ones from the
+        # bounded answer here while the real repository kept them -- and the
+        # goldens would then certify behaviour production does not have.
         matching = [
             zone
             for zone in self.zones.values()
             if zone.symbol == symbol
             and zone.timeframe is timeframe
             and zone.state not in _TERMINAL_ZONE_STATES
+            and (
+                only_versions is None
+                or _evidence_version(zone) == only_versions.get(zone.zone_type)
+            )
         ]
 
         # Mirrors the SQL: §5.1's bound, and `created_at` rather than the

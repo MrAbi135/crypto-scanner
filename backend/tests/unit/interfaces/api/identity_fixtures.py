@@ -174,7 +174,7 @@ class EmptySignals:
     async def list_for_signal(self, signal_id):
         return ()
 
-    async def list_live(self, symbol, timeframe):
+    async def list_live(self, symbol, timeframe, *, only_versions=None):
         return ()
 
     async def history(self, filters, *, limit, after=None):

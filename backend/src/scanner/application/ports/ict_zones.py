@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -65,6 +66,8 @@ class IctZoneRepository(Protocol):
         self,
         symbol: str,
         timeframe: Timeframe,
+        *,
+        only_versions: Mapping[str, str] | None = None,
     ) -> tuple[IctZoneRecord, ...]: ...
 
     async def transition(
