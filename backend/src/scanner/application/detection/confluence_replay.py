@@ -159,7 +159,17 @@ from scanner.shared import Timeframe
 # migration the live table holds both generations of the same physical zone
 # (ids carry the version), and an unpinned read scored the same gap twice --
 # observed 2026-08-29 with 642 v2 FVGs live beside their v3 twins.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v23"
+#
+# v24: five scoring corrections from the 2026-08-29 full-domain review.
+# F1's `displaced` reads the impulse leg's own displacement instead of MSS
+# presence (one MSS paid 18+10 for one fact; a displaced BOS without an MSS
+# could never earn its 18). F5 pays nothing while momentum is unmeasured
+# (the negative predicates awarded 32 points in the ~13-candle gap between
+# volume warm-up and momentum warm-up). G5 hears its failed-break clause.
+# `_is_displacement_fvg` compares times, not a frozen created_index against
+# current-window offsets. §7.4's labels are ordered by event time, not by
+# offsets minted in different windows.
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v24"
 
 # Import-time, not call-time: a zone type with no version entry is invisible
 # to scoring, and that must refuse to boot rather than run quietly blind.
@@ -207,6 +217,8 @@ class _Reading:
     rvol: Decimal | None
     score: Decimal
     direction: str | None
+    # Whether §7's phase reading ran at all -- see MomentumEvidence.measured.
+    phase_measured: bool
     accelerating: bool
     decelerating: bool
     exhausted: bool
@@ -231,6 +243,11 @@ class _Legs:
 
     legs: tuple[Leg, ...]
     displacement: frozenset[int]
+    # The same set as times, for consumers comparing against anything that
+    # crossed the events table or the zones table: their indices froze in
+    # whichever window recorded them, and `_bos_inside`'s docstring already
+    # made this argument for BOS breaks.
+    displacement_times: frozenset[datetime]
     swings: tuple[SwingPoint, ...]
 
     # The window's open times, positionally. Legs are indexed into the current
@@ -611,6 +628,31 @@ class ConfluenceReplayService:
         # Sweep-Reversal conditions §8.6".
         trend_following = _state_direction(trend_state) == direction
 
+        # Hoisted above the gates because two consumers need them now: G5's
+        # failed-break clause here, and F1/A3 below. Computing twice invited
+        # the two to drift.
+        impulse = legs.latest(LegKind.IMPULSE, direction)
+        recent_failed_breaks = _count_failed_breaks(events, direction, opened_at, timeframe)
+
+        # G5's failed-break clause reads "within its window" -- the failure's
+        # OWN window, which §3.5 defines as the 3-candle reclaim that made it
+        # a failure. Deliberately narrower than F1's 20-candle clean-record
+        # window: §8.3.1 prices a failure at 7 points for twenty candles,
+        # which only means anything if the gate is not blocking that whole
+        # span. A fresher-than-3-candles refusal of this very direction is the
+        # trap-in-progress the gate exists for; an older one is a scar the
+        # factor prices.
+        fresh_failed_break = (
+            _count_failed_breaks(
+                events,
+                direction,
+                opened_at,
+                timeframe,
+                window=FAILED_BREAK_WINDOW,
+            )
+            > 0
+        )
+
         # The MSS is deliberately *not* a separate branch. §3.6 is explicit that
         # "on MSS confirmation: trend flips", so a live MSS already reaches G2
         # through the trend state. Testing the window for any MSS instead let a
@@ -636,7 +678,24 @@ class ConfluenceReplayService:
                 # restriction it implies is applied to the archetype below.
                 pd_context_ok=_pd_gate(pd, direction),
                 zone_present=bool(matching_zones),
-                contrary_fact_present=bool(contrary) or counter_displacement,
+                # §8.2 G5's three clauses, all three wired now: an opposing
+                # reclaimed sweep, a failed break against the direction within
+                # its window, an opposing displacement. The failed-break clause
+                # was parsed forty lines below for F1 and never reached the
+                # gate -- one of G5's documented contrary facts was
+                # structurally unhearable.
+                contrary_fact_present=(
+                    bool(contrary) or counter_displacement or fresh_failed_break
+                ),
+                # True is currently CORRECT, not a stub, and the distinction
+                # matters: §8.2 G6 fails a symbol "wash_risk-capped below the
+                # archetype's minimum volume requirement", and §8.6 defines no
+                # archetype volume minimum -- so nothing can be capped below
+                # one, and the gate's condition is vacuously satisfied. The
+                # binding protections wash_risk does have are §6.6/§6.7's hard
+                # cap of F4 at 50, which IS applied (domain/volume/factor.py).
+                # The day an amendment defines archetype volume minimums, this
+                # is the line that stops being a constant.
                 volume_integrity_ok=True,
             )
         )
@@ -674,7 +733,15 @@ class ConfluenceReplayService:
             Factor.STRUCTURE: structure_factor(
                 StructureEvidence(
                     break_confirmed=f"BOS_{direction}" in event_types,
-                    displaced=f"MSS_{direction}" in event_types,
+                    # §8.3.1 pays +18 for a *displaced* break (§3.5's quality
+                    # grade), and the BOS event does not record displacement --
+                    # the impulse leg it sits in does, which is exactly how
+                    # §8.6 A3 already reads it below. The first wiring keyed
+                    # this on MSS presence, the same predicate as `mss` two
+                    # lines down: one MSS paid 28 points for one fact, and the
+                    # common continuation case (displaced BOS, no MSS) could
+                    # never earn its 18.
+                    displaced=_bos_inside(impulse, bos_breaks.get(direction, frozenset()), legs),
                     external=any(
                         is_classification(t, strength=SwingStrength.EXTERNAL) for t in event_types
                     ),
@@ -683,7 +750,7 @@ class ConfluenceReplayService:
                     # SWING_* payload. Left at zero, the 30 points of trend
                     # maturity could never be earned by any candidate.
                     unbroken_pairs=unbroken_pairs(labels, direction),
-                    failed_breaks=_count_failed_breaks(events, direction, opened_at, timeframe),
+                    failed_breaks=recent_failed_breaks,
                 )
             ),
             Factor.LIQUIDITY: liquidity_factor(
@@ -725,6 +792,10 @@ class ConfluenceReplayService:
                     accelerating=reading.accelerating,
                     decelerating=reading.decelerating,
                     exhaustion_against=reading.exhausted,
+                    # §7's phase needs ~33 candles while gate G1 opens on
+                    # RVOL at ~20. In that gap the three flags above are not
+                    # False readings, they are the absence of a reading.
+                    measured=reading.phase_measured,
                 )
             ),
             Factor.HTF_ALIGNMENT: htf_alignment_factor(
@@ -750,7 +821,6 @@ class ConfluenceReplayService:
         # no read method -- and A5 wants the dealing range's width. Their terms
         # below are the ones genuinely readable, so those chains fail on the
         # link that is missing rather than on a fabricated one.
-        impulse = legs.latest(LegKind.IMPULSE, direction)
 
         match = explain_archetype(
             ArchetypeEvidence(
@@ -776,7 +846,9 @@ class ConfluenceReplayService:
                 htf_aligned=htf == direction,
                 retracement_leg=_is_retracement_against(legs.current(), direction),
                 counter_displacement=counter_displacement,
-                displacement_fvg=_is_displacement_fvg(best_zone, legs.displacement),
+                displacement_fvg=_is_displacement_fvg(
+                    best_zone, legs.displacement_times, timeframe
+                ),
                 fvg_first_touch=_is_first_touch(best_zone, price),
                 fvg_age_candles=_age_in_candles(best_zone.created_at, at, timeframe),
                 ranging=trend_state == TrendState.RANGING.value,
@@ -1847,6 +1919,7 @@ def _read_legs(series: list[Candle]) -> _Legs:
     return _Legs(
         legs=segment_legs(series, swings, displacement),
         displacement=displacement,
+        displacement_times=frozenset(series[index].open_time for index in displacement),
         swings=swings,
         open_times=tuple(candle.open_time for candle in series),
     )
@@ -1918,19 +1991,36 @@ def _bos_inside(
     return any(start <= at <= end for at in breaks)
 
 
-def _is_displacement_fvg(zone: IctZoneRecord, displacement: frozenset[int]) -> bool:
+def _is_displacement_fvg(
+    zone: IctZoneRecord,
+    displacement_times: frozenset[datetime],
+    timeframe: Timeframe,
+) -> bool:
     """§8.6 A4 wants a *displacement* FVG, and the zone record does not say.
 
     §5.4 detects gaps without asking what made them, so the origin is recovered
     from the same §5.10 set §7.5 uses: a displacement on any candle of the
     three the gap spans.
+
+    Compared in TIME, not indices. `zone.created_index` froze in whichever
+    window first detected the zone (upserts never revise it; host medians sit
+    at 458-500) while the displacement set is rebuilt over today's window --
+    the first version asked whether an old zone's frozen offset landed near
+    today's right edge, which qualified stale gaps whenever an unrelated
+    displacement printed there and refused genuine ones from mid-window. The
+    same conversion `_bos_inside` and `_age_in_candles` already made.
+
+    `created_at` is the gap's third candle's CLOSE (§5.4 detection), so the
+    three spanned candles OPEN at created_at - 3d .. created_at - d.
     """
     if zone.zone_type not in {"FVG", "IFVG", "BPR"}:
         return False
 
-    return any(
-        index in displacement for index in range(zone.created_index - 2, zone.created_index + 1)
-    )
+    duration = timeframe.duration
+    newest_open = zone.created_at - duration
+    oldest_open = zone.created_at - 3 * duration
+
+    return any(oldest_open <= at <= newest_open for at in displacement_times)
 
 
 def _is_mss_origin(zone: IctZoneRecord) -> bool:
@@ -2028,12 +2118,19 @@ def _state_direction(trend_state: str) -> str | None:
 # §8.3.1's clean-break window: "no failed break against D in 20 candles".
 CLEAN_RECORD_WINDOW = 20
 
+# §8.2 G5's failed-break lookback: the failure's own window, which §3.5
+# defines as the 3-candle reclaim that made it a failure. See the comment at
+# the gate call for why this is narrower than the clean-record window.
+FAILED_BREAK_WINDOW = 3
+
 
 def _count_failed_breaks(
     events: tuple[EngineEventRecord, ...],
     direction: str,
     opened_at: datetime,
     timeframe: Timeframe,
+    *,
+    window: int = CLEAN_RECORD_WINDOW,
 ) -> int:
     """§8.3.1: failed breaks against D inside the clean-record window.
 
@@ -2062,7 +2159,7 @@ def _count_failed_breaks(
     count is available without an offset.
     """
     failed = 0
-    horizon = timeframe.duration * CLEAN_RECORD_WINDOW
+    horizon = timeframe.duration * window
 
     for record in events:
         if record.event_type != f"STRUCTURE_FAILED_BREAK_{direction}":
@@ -2152,7 +2249,7 @@ def _read_labels(events: tuple[EngineEventRecord, ...]) -> tuple[StructureLabel,
     would let a k=2 LH inside an intact external uptrend read as the trend
     breaking.
     """
-    labelled: list[tuple[int, StructureLabel]] = []
+    labelled: list[tuple[datetime, StructureLabel]] = []
 
     for record in events:
         label = read_classification(record.event_type, strength=SwingStrength.EXTERNAL)
@@ -2163,14 +2260,14 @@ def _read_labels(events: tuple[EngineEventRecord, ...]) -> tuple[StructureLabel,
         if label is None:
             continue
 
-        index = json.loads(record.payload).get("index")
+        # Ordered by event time, never by the payload's index: that index
+        # froze in whichever window recorded the swing (live-recorded swings
+        # all cluster near the tail, ~495+), so sorting by it interleaved
+        # labels from different passes in near-arbitrary order -- and §7.4's
+        # pair count walks this sequence assuming candle order.
+        labelled.append((record.event_at, label))
 
-        if index is None:
-            continue
-
-        labelled.append((int(index), label))
-
-    labelled.sort()
+    labelled.sort(key=lambda item: item[0])
 
     return tuple(label for _, label in labelled)
 
@@ -2251,6 +2348,7 @@ def _read_participation(
         rvol=relative_volume(series, last),
         score=score.score if score else Decimal(0),
         direction=score.direction.value if score else None,
+        phase_measured=phase is not None,
         accelerating=phase.accelerating if phase else False,
         # §8.3.1 pays "accelerating 25 - neither 12 - decelerating 0".
         # `momentum_factor` reads this and nothing set it, so a fading
