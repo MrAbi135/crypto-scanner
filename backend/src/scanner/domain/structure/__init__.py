@@ -18,6 +18,7 @@ from scanner.domain.structure.model import (
     unbroken_pairs,
 )
 from scanner.domain.structure.mss import (
+    MSS_INVALIDATION_MAX,
     MssDecision,
     MssEvidence,
     evaluate_mss,
@@ -39,6 +40,7 @@ from scanner.domain.structure.trend import (
 __all__ = [
     "FAILED_BREAK_CANDLES",
     "IDLE_CANDLES",
+    "MSS_INVALIDATION_MAX",
     "BosEvent",
     "BreakDirection",
     "ClassifiedSwing",

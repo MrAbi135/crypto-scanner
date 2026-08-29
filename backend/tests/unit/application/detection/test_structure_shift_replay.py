@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -449,3 +450,169 @@ async def test_unparseable_liquidity_evidence_raises_rather_than_downgrading(
     # The pool must be named, or the operator cannot find the bad row.
     assert caught.value.details["pool_id"] == "external-bsl"
     assert caught.value.details["candle_index"] == 18
+
+
+def _service(series, evidence_rows):
+    events = FakeEventRepository()
+
+    service = StructureShiftReplayService(
+        FakeCandleRepository(series),
+        events,
+        FakeEvidenceRepository(evidence_rows),
+        FakeClock(),
+        EngineStateManager(InMemoryEngineStateStore(), namespace=SHIFT_NAMESPACE),
+    )
+
+    return service, events
+
+
+def _sweep_row(series, *, reference_level: str | None):
+    payload: dict = {"liquidity_class": "EXTERNAL", "side": "BSL"}
+
+    if reference_level is not None:
+        payload["reference_level"] = reference_level
+
+    return LiquidityEvidenceRecord(
+        pool_id="external-bsl",
+        from_state="ACTIVE",
+        to_state="SWEPT",
+        reason="liquidity_sweep",
+        transitioned_at=series[18].close_time,
+        candle_index=18,
+        evidence=json.dumps(payload),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_new_confirmed_hh_supersedes_the_choch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """§3.4's recovery edge and §3.8's "Superseded by new HH/LL".
+
+    The CHoCH prints at 20; a higher high pivoted at 17 confirms at 22
+    (k_ext = 5). Doctrine restores BULLISH and withdraws the warning -- so
+    the follow-through that would have confirmed a bearish MSS afterwards
+    must find no candidate left to confirm.
+    """
+    series = candles()
+    # Defuse the original fixture's immediate follow-through at 21...
+    series[21] = replace(series[21], open=Decimal("91"), close=Decimal("91"), low=Decimal("90"))
+    # ...and give 23 a close that WOULD be follow-through if the candidate
+    # were still alive.
+    series[23] = replace(series[23], open=Decimal("95"), close=Decimal("88"), low=Decimal("87"))
+
+    swings = (
+        *external_swings(series),
+        SwingPoint(
+            17,
+            series[17].open_time,
+            Decimal("130"),
+            SwingKind.HIGH,
+            SwingStrength.EXTERNAL,
+        ),
+    )
+
+    monkeypatch.setattr(shift_module, "detect_external_swings", lambda _: swings)
+    monkeypatch.setattr(shift_module, "detect_internal_swings", lambda _: ())
+
+    service, events = _service(series, (_sweep_row(series, reference_level=None),))
+
+    report = await service.run("BTCUSDT", Timeframe.H1, series[0].open_time, series[-1].close_time)
+
+    event_types = {event.event_type for event in events.events.values()}
+
+    assert "CHOCH_DOWN" in event_types
+    assert "MSS_DOWN" not in event_types, "a superseded warning must not confirm"
+    assert report.trend_state == "BULLISH"
+
+
+@pytest.mark.asyncio
+async def test_a_reclaim_within_ten_candles_demotes_the_mss_to_ranging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """§3.6's invalidation: close back beyond the pre-MSS extreme within 10
+    candles -> trend demoted to RANGING, MSS marked low_quality by an
+    APPENDED fact carrying the original event's key (the table is
+    append-only; a fact about a prior event is a follow-up event)."""
+
+    series = candles()
+    # Candle 24 reclaims the swept high (120).
+    series[24] = replace(series[24], open=Decimal("118"), close=Decimal("121"), high=Decimal("122"))
+
+    monkeypatch.setattr(shift_module, "detect_external_swings", lambda _: external_swings(series))
+    monkeypatch.setattr(shift_module, "detect_internal_swings", lambda _: ())
+
+    service, events = _service(series, (_sweep_row(series, reference_level="120"),))
+
+    report = await service.run("BTCUSDT", Timeframe.H1, series[0].open_time, series[-1].close_time)
+
+    invalidations = [
+        e for e in events.events.values() if e.event_type == "STRUCTURE_MSS_INVALIDATED_DOWN"
+    ]
+    mss_events = [e for e in events.events.values() if e.event_type == "MSS_DOWN"]
+
+    assert report.trend_state == "RANGING"
+    assert len(invalidations) == 1
+
+    payload = json.loads(invalidations[0].payload)
+
+    assert payload["low_quality"] is True
+    assert payload["mss_event_key"] == mss_events[0].event_key
+    assert payload["pre_mss_extreme"] == "120"
+
+
+@pytest.mark.asyncio
+async def test_a_reclaim_after_the_window_changes_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    series = candles()
+    # Stretch the series and reclaim only at candle 33 -- 12 candles after
+    # the MSS at 21, outside §3.6's 10.
+    while len(series) < 36:
+        last = series[-1]
+        series.append(replace(last, open_time=last.open_time + timedelta(hours=1)))
+
+    series[33] = replace(series[33], open=Decimal("118"), close=Decimal("121"), high=Decimal("122"))
+
+    monkeypatch.setattr(shift_module, "detect_external_swings", lambda _: external_swings(series))
+    monkeypatch.setattr(shift_module, "detect_internal_swings", lambda _: ())
+
+    service, events = _service(series, (_sweep_row(series, reference_level="120"),))
+
+    report = await service.run("BTCUSDT", Timeframe.H1, series[0].open_time, series[-1].close_time)
+
+    assert report.trend_state == "BEARISH"
+    assert not [e for e in events.events.values() if "MSS_INVALIDATED" in e.event_type]
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_origin_is_found_by_time_not_by_its_frozen_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sweep row's candle_index froze in whichever window recorded it
+    (live sweeps freeze near ~497). Judged by index against today's CHoCH at
+    20, this sweep does not exist and the MSS silently downgrades to a
+    warning; judged by transitioned_at it is two candles before the CHoCH,
+    exactly §3.6's origin 2(a)."""
+
+    series = candles()
+
+    monkeypatch.setattr(shift_module, "detect_external_swings", lambda _: external_swings(series))
+    monkeypatch.setattr(shift_module, "detect_internal_swings", lambda _: ())
+
+    frozen_junk = LiquidityEvidenceRecord(
+        pool_id="external-bsl",
+        from_state="ACTIVE",
+        to_state="SWEPT",
+        reason="liquidity_sweep",
+        transitioned_at=series[18].close_time,
+        candle_index=497,
+        evidence=json.dumps({"liquidity_class": "EXTERNAL", "side": "BSL"}),
+    )
+
+    service, _ = _service(series, (frozen_junk,))
+
+    report = await service.run("BTCUSDT", Timeframe.H1, series[0].open_time, series[-1].close_time)
+
+    assert report.mss_created == 1
+    assert report.trend_state == "BEARISH"
