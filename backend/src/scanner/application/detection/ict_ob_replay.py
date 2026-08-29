@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
 
+from scanner.application.detection.window_time import rebased_indices
 from scanner.application.ports import (
     CandleRepository,
     Clock,
@@ -53,7 +54,11 @@ from scanner.shared import Timeframe
 # the tail, ~495+), while OBs and displacements are indexed in today's window
 # -- so origin_swept, the structure-break levels, and the failure-swing test
 # were all comparing two coordinate systems. The host's 4 breakers against
-# 351 OBs is what that looks like.
+# 351 OBs is what that looks like. The same v5 also rebases lifecycle
+# indices by created_at (window_time.py): §5.1's 250-without-a-test expiry
+# was unreachable for tail-frozen OBs, and OB age is measured from
+# CONFIRMATION, so both indices rebase together -- a mixed-frame object is
+# the same defect one layer down.
 ICT_OB_ALGO_VERSION = "s6-ob-v5"
 
 _ATR_PERIOD = 14
@@ -431,9 +436,18 @@ class IctOrderBlockReplayService:
             ...,
         ],
     ) -> tuple[int, int, int]:
-        current = _record_to_ob(record)
+        created, confirmed = rebased_indices(record, candles, record.timeframe)
+        # Both indices rebased: OB age is measured from CONFIRMATION
+        # (order_blocks.py: `age = candle_index - ob.confirmed_index`, §5.1's
+        # "without a test" clock starts there), and the failure-swing bracket
+        # reads it too -- a mixed-frame object would be the same defect one
+        # layer down.
+        current = _record_to_ob(record, created_index=created, confirmed_index=confirmed)
 
-        start_index = record.confirmed_index + 1
+        # Rebased by created_at -- see window_time.py. Frozen tail offsets
+        # made the OB's 250-without-a-test expiry unreachable and skipped
+        # restart gaps.
+        start_index = max(confirmed + 1, 0)
 
         if start_index >= len(candles):
             return 0, 0, 0
@@ -625,9 +639,13 @@ class IctOrderBlockReplayService:
         record: IctZoneRecord,
         candles: list[Candle],
     ) -> int:
-        current = _record_to_breaker(record)
+        created, confirmed = rebased_indices(record, candles, record.timeframe)
+        current = _record_to_breaker(record, created_index=created)
 
-        start_index = record.confirmed_index + 1
+        # Rebased by created_at -- see window_time.py. Frozen tail offsets
+        # made the OB's 250-without-a-test expiry unreachable and skipped
+        # restart gaps.
+        start_index = max(confirmed + 1, 0)
 
         if start_index >= len(candles):
             return 0
@@ -764,9 +782,13 @@ class IctOrderBlockReplayService:
         record: IctZoneRecord,
         candles: list[Candle],
     ) -> int:
-        current = _record_to_mitigation(record)
+        created, confirmed = rebased_indices(record, candles, record.timeframe)
+        current = _record_to_mitigation(record, created_index=created)
 
-        start_index = record.confirmed_index + 1
+        # Rebased by created_at -- see window_time.py. Frozen tail offsets
+        # made the OB's 250-without-a-test expiry unreachable and skipped
+        # restart gaps.
+        start_index = max(confirmed + 1, 0)
 
         if start_index >= len(candles):
             return 0
@@ -1502,6 +1524,9 @@ def _mitigation_record(
 
 def _record_to_ob(
     record: IctZoneRecord,
+    *,
+    created_index: int | None = None,
+    confirmed_index: int | None = None,
 ) -> OrderBlock:
     if record.zone_type != "OB":
         raise ValueError("record is not an OB")
@@ -1548,8 +1573,8 @@ def _record_to_ob(
             low=record.refined_low,
             high=record.refined_high,
         ),
-        created_index=(record.created_index),
-        confirmed_index=(record.confirmed_index),
+        created_index=(record.created_index if created_index is None else created_index),
+        confirmed_index=(record.confirmed_index if confirmed_index is None else confirmed_index),
         created_at=(record.created_at),
         grade=record.grade,
         mss_origin=mss_origin,
@@ -1562,6 +1587,8 @@ def _record_to_ob(
 
 def _record_to_breaker(
     record: IctZoneRecord,
+    *,
+    created_index: int | None = None,
 ) -> BreakerBlock:
     if record.zone_type != "BREAKER":
         raise ValueError("record is not a breaker")
@@ -1600,7 +1627,7 @@ def _record_to_breaker(
             low=record.refined_low,
             high=record.refined_high,
         ),
-        created_index=(record.created_index),
+        created_index=(record.created_index if created_index is None else created_index),
         created_at=(record.created_at),
         grade=record.grade,
         gap_break=gap_break,
@@ -1610,6 +1637,8 @@ def _record_to_breaker(
 
 def _record_to_mitigation(
     record: IctZoneRecord,
+    *,
+    created_index: int | None = None,
 ) -> MitigationBlock:
     if record.zone_type != "MITIGATION":
         raise ValueError("record is not a mitigation block")
@@ -1632,7 +1661,7 @@ def _record_to_mitigation(
             low=record.refined_low,
             high=record.refined_high,
         ),
-        created_index=(record.created_index),
+        created_index=(record.created_index if created_index is None else created_index),
         created_at=(record.created_at),
         grade=record.grade,
         state=ZoneState(record.state),

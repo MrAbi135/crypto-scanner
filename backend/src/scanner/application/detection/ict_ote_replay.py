@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
+from scanner.application.detection.window_time import rebased_indices
 from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.ict_zones import (
     IctZoneRecord,
@@ -38,7 +39,11 @@ from scanner.domain.structure import (
 )
 from scanner.shared import Timeframe
 
-ICT_OTE_ALGO_VERSION = "s6-ote-v2"
+# v3: lifecycle indices rebased into today's window by created_at (see
+# window_time.py) -- §5.8's 100-candle expiry was unreachable for
+# tail-frozen OTEs -- and the origin-candle read guards against a rebased
+# negative index wrapping to the window's far end.
+ICT_OTE_ALGO_VERSION = "s6-ote-v3"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")
@@ -209,9 +214,11 @@ class IctOteReplayService:
         external_swings: tuple[SwingPoint, ...],
         atrs: Sequence[Decimal | None],
     ) -> int:
-        current = _record_to_ote(record)
+        created, confirmed = rebased_indices(record, candles, record.timeframe)
+        current = _record_to_ote(record, created_index=created)
 
-        start_index = record.confirmed_index + 1
+        # Rebased by created_at -- see window_time.py.
+        start_index = max(confirmed + 1, 0)
 
         if start_index >= len(candles):
             return 0
@@ -496,6 +503,8 @@ def _ote_record(
 
 def _record_to_ote(
     record: IctZoneRecord,
+    *,
+    created_index: int | None = None,
 ) -> OptimalTradeEntry:
     if record.zone_type != "OTE":
         raise ValueError("record is not an OTE")
@@ -525,7 +534,7 @@ def _record_to_ote(
         ),
         origin_price=Decimal(origin),
         extreme_price=Decimal(extreme),
-        created_index=record.created_index,
+        created_index=(record.created_index if created_index is None else created_index),
         created_at=record.created_at,
         state=ZoneState(record.state),
     )
@@ -540,12 +549,19 @@ def _trend_matches_ote(
         return True
 
     current = candles[index].close
-    origin = candles[ote.created_index].close
+
+    # The stored origin_price is the durable half of this test. The origin
+    # CANDLE's close is only readable while that candle is still in the
+    # window -- a rebased created_index is negative once the zone predates
+    # it, and Python's negative indexing would silently hand back a candle
+    # from the WRONG END of the window.
+    in_window = 0 <= ote.created_index < len(candles)
+    origin = candles[ote.created_index].close if in_window else None
 
     if ote.polarity is ZonePolarity.BULLISH:
-        return current >= ote.origin_price or current >= origin
+        return current >= ote.origin_price or (origin is not None and current >= origin)
 
-    return current <= ote.origin_price or current <= origin
+    return current <= ote.origin_price or (origin is not None and current <= origin)
 
 
 def _leg_end_consumed(
