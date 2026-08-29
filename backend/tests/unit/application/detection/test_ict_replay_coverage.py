@@ -726,15 +726,12 @@ def test_ob_evidence_parsers_and_structure_helpers() -> None:
         ),
     )
 
-    assert (
-        ob_mod._latest_break_level(
-            contested,
-            strength="EXTERNAL",
-            direction=ob_mod.DisplacementDirection.BULLISH,
-            before_at=now + timedelta(hours=3),
-        )
-        == Decimal("112")
-    )
+    assert ob_mod._latest_break_level(
+        contested,
+        strength="EXTERNAL",
+        direction=ob_mod.DisplacementDirection.BULLISH,
+        before_at=now + timedelta(hours=3),
+    ) == Decimal("112")
 
     assert ob_mod._closes_beyond_level(
         Decimal("111"),
