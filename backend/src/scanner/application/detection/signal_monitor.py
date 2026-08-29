@@ -9,6 +9,10 @@ from datetime import datetime
 from decimal import Decimal
 
 from scanner.application.ports import CandleRepository, Clock
+from scanner.application.ports.ict_evidence import IctEvidenceRepository
+from scanner.application.ports.ict_zone_interactions import (
+    IctZoneInteractionContextRepository,
+)
 from scanner.application.ports.signal_outcomes import (
     SignalOutcomeRecord,
     SignalOutcomeRepository,
@@ -57,12 +61,17 @@ class SignalMonitorService:
         transitions: SignalTransitionRepository,
         clock: Clock,
         outcomes: SignalOutcomeRepository | None = None,
+        *,
+        zone_context: IctZoneInteractionContextRepository | None = None,
+        evidence: IctEvidenceRepository | None = None,
     ) -> None:
         self._candles = candles
         self._signals = signals
         self._transitions = transitions
         self._clock = clock
         self._outcomes = outcomes
+        self._zone_context = zone_context
+        self._evidence = evidence
 
     async def run(
         self,
@@ -107,12 +116,19 @@ class SignalMonitorService:
 
             source = SignalState(state)
 
+            premise = (
+                await self._broken_premise(signal, timeframe, at)
+                if source is SignalState.PUBLISHED
+                else None
+            )
+
             observation = observe(
                 source,
                 candle,
                 levels=_levels_of(signal),
                 elapsed_candles=_elapsed(signal, at, timeframe),
                 ttl_candles=signal.ttl_candles,
+                premise_broken=premise is not None,
             )
 
             if observation.to_state is None and not observation.stress_test:
@@ -136,6 +152,7 @@ class SignalMonitorService:
                             "high": str(closed.high),
                             "low": str(closed.low),
                             "close": str(closed.close),
+                            **({"premise": premise} if premise is not None else {}),
                         },
                         sort_keys=True,
                     ),
@@ -171,6 +188,64 @@ class SignalMonitorService:
             stress_tests=stress,
             resolved=resolved,
         )
+
+    async def _broken_premise(
+        self,
+        signal: SignalRecord,
+        timeframe: Timeframe,
+        at: datetime,
+    ) -> str | None:
+        """§12.3's premise checks, pre-touch only: the reason, or None.
+
+        Two of the doctrine's three premises are checked, each with exact
+        linkage:
+
+        * **zone violated** -- the entry zone's own transition rows;
+        * **MSS demoted** -- the STRUCTURE_MSS_INVALIDATED_{dir} events the
+          shift engine publishes when §3.6's reclaim demotes an MSS.
+
+        The third, "sweep reclaimed", needs the setup's seeding sweep
+        identity, and that lives in `evidence_ids` -- which nothing populates
+        yet (a defect of its own). Named here so the gap stays visible.
+
+        Both checks bound the fact to **strictly before** the candle being
+        observed (`<= at`, the candle's open). A premise that broke on the
+        same candle the entry was touched is an unknowable order, and
+        INVALIDATED_EARLY takes the signal out of the accounting -- awarding
+        the exclusion on the favourable reading of an unknowable order is
+        what §15.4 forbids. The fact is not lost: if the entry stays
+        untouched, the next candle's pass reads it.
+        """
+        if self._zone_context is not None:
+            zone_id = _entry_zone_id(signal)
+
+            if zone_id is not None:
+                for transition in await self._zone_context.list_transitions(zone_id):
+                    if (
+                        transition.to_state == "INVALIDATED"
+                        and signal.published_at < transition.transitioned_at <= at
+                    ):
+                        return "entry_zone_invalidated"
+
+        if self._evidence is not None:
+            wanted = f"STRUCTURE_MSS_INVALIDATED_{signal.direction}"
+
+            # The strictly-before bound is the query's exclusive end:
+            # event_at is always a close time on the TF grid, so everything
+            # `< at + duration` closed at or before `at` -- no second,
+            # in-code copy of the bound exists to drift from this one.
+            records = await self._evidence.list_structure(
+                signal.symbol,
+                timeframe,
+                signal.published_at,
+                at + timeframe.duration,
+            )
+
+            for record in records:
+                if record.event_type == wanted:
+                    return "mss_demoted_to_ranging"
+
+        return None
 
     async def _record_outcome(
         self,
@@ -238,6 +313,26 @@ _RESOLVED = frozenset(
         SignalState.INVALIDATED_EARLY,
     }
 )
+
+
+def _entry_zone_id(signal: SignalRecord) -> str | None:
+    """The entry zone's id, from the sealed §15.2 payload.
+
+    The priced columns beside the payload deliberately do not carry it --
+    they exist so the per-candle level checks never parse JSON -- and the
+    premise check runs only while the signal is PUBLISHED, which is at most
+    a handful of signals per pass.
+    """
+    try:
+        payload = json.loads(signal.payload)
+        zone_id = payload["entry_zone"]["zone_id"]
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    if not isinstance(zone_id, str) or zone_id == "":
+        return None
+
+    return zone_id
 
 
 def _elapsed(signal: SignalRecord, at: datetime, timeframe: Timeframe) -> int:
