@@ -89,13 +89,19 @@ def candle(index: int, *, high: str, low: str, close: str) -> Candle:
     )
 
 
-def signal(*, published_at: datetime = T0, ttl: int = 24) -> SignalRecord:
+def signal(
+    *,
+    published_at: datetime = T0,
+    ttl: int = 24,
+    payload: str = "{}",
+    direction: str = "UP",
+) -> SignalRecord:
     return SignalRecord(
         signal_id="sig-1",
         setup_id="sig-1",
         symbol="BTCUSDT",
         timeframe=TF,
-        direction="UP",
+        direction=direction,
         archetype="A4",
         grade="A",
         final_confidence=Decimal(82),
@@ -109,7 +115,7 @@ def signal(*, published_at: datetime = T0, ttl: int = 24) -> SignalRecord:
         ttl_candles=ttl,
         algo_version="s8-test",
         param_set_version="2026.08.24.2",
-        payload="{}",
+        payload=payload,
         payload_hash="a" * 64,
         dedup_key="BTCUSDT|H1|UP|A4|104.00:100.00",
     )
@@ -131,7 +137,33 @@ class FakeOutcomes:
         return self.rows.get(signal_id)
 
 
-def monitor(*, live=("sig-1",), state=SignalState.PUBLISHED.value, candles=None, **kw):
+class FakeZoneContext:
+    """`list_transitions` for exactly one zone, as the premise check asks."""
+
+    def __init__(self, transitions_by_zone: dict[str, tuple] | None = None) -> None:
+        self.transitions_by_zone = transitions_by_zone or {}
+
+    async def list_transitions(self, zone_id: str):
+        return self.transitions_by_zone.get(zone_id, ())
+
+
+class FakeStructureEvidence:
+    def __init__(self, records: tuple = ()) -> None:
+        self.records = records
+
+    async def list_structure(self, symbol, timeframe, start, end):
+        return tuple(r for r in self.records if start <= r.event_at < end)
+
+
+def monitor(
+    *,
+    live=("sig-1",),
+    state=SignalState.PUBLISHED.value,
+    candles=None,
+    zone_context=None,
+    evidence=None,
+    **kw,
+):
     transitions = FakeTransitions(live, state)
     outcomes = FakeOutcomes()
 
@@ -141,6 +173,8 @@ def monitor(*, live=("sig-1",), state=SignalState.PUBLISHED.value, candles=None,
         transitions,
         FakeClock(),
         outcomes,
+        zone_context=zone_context,
+        evidence=evidence,
     )
 
     svc.outcomes = outcomes
@@ -323,3 +357,199 @@ async def test_a_signal_that_does_not_resolve_gets_no_outcome_row() -> None:
     await svc.run("BTCUSDT", TF, T0 + timedelta(hours=3))
 
     assert await svc.outcomes.get("sig-1") is None
+
+
+def _zone_payload(zone_id: str) -> str:
+    return json.dumps({"entry_zone": {"zone_id": zone_id}})
+
+
+def _zone_invalidated(zone_id: str, at: datetime):
+    from scanner.application.ports.ict_zones import IctZoneTransitionRecord
+
+    return IctZoneTransitionRecord(
+        transition_id="zt-1",
+        zone_id=zone_id,
+        symbol="BTCUSDT",
+        timeframe=TF,
+        zone_type="FVG",
+        from_state="FRESH",
+        to_state="INVALIDATED",
+        reason="close_through",
+        transitioned_at=at,
+        candle_index=497,
+        evidence="{}",
+    )
+
+
+def _mss_invalidated(direction: str, at: datetime):
+    from scanner.application.ports.ict_evidence import StructureEvidenceRecord
+
+    return StructureEvidenceRecord(
+        event_type=f"STRUCTURE_MSS_INVALIDATED_{direction}",
+        event_at=at,
+        algo_version="s6-structure-shift-v3",
+        payload="{}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_invalidated_entry_zone_invalidates_the_signal_early() -> None:
+    """§12.3: "zone violated ⇒ INVALIDATED_EARLY (pre-touch only)".
+
+    The candle itself is quiet — nothing touches the entry — so the only
+    thing that can move the signal is the premise check reading the zone's
+    own transition rows.
+    """
+    svc, transitions = monitor(
+        candles=[candle(3, high="108", low="106", close="107")],
+        zone_context=FakeZoneContext(
+            {"zone-7": (_zone_invalidated("zone-7", T0 + timedelta(hours=2)),)}
+        ),
+        payload=_zone_payload("zone-7"),
+    )
+
+    report = await svc.run("BTCUSDT", TF, T0 + timedelta(hours=3))
+
+    assert report.transitions == 1
+    assert transitions.written[0].to_state == "INVALIDATED_EARLY"
+
+    evidence = json.loads(transitions.written[0].trigger_evidence)
+
+    assert evidence["premise"] == "entry_zone_invalidated"
+
+
+@pytest.mark.asyncio
+async def test_an_mss_demotion_invalidates_the_signal_early() -> None:
+    """§12.3: "MSS demoted" — the §3.6 reclaim event, direction-matched."""
+
+    svc, transitions = monitor(
+        candles=[candle(3, high="108", low="106", close="107")],
+        evidence=FakeStructureEvidence((_mss_invalidated("UP", T0 + timedelta(hours=2)),)),
+    )
+
+    report = await svc.run("BTCUSDT", TF, T0 + timedelta(hours=3))
+
+    assert report.transitions == 1
+    assert transitions.written[0].to_state == "INVALIDATED_EARLY"
+
+    evidence = json.loads(transitions.written[0].trigger_evidence)
+
+    assert evidence["premise"] == "mss_demoted_to_ranging"
+
+
+@pytest.mark.asyncio
+async def test_the_opposite_directions_demotion_is_not_this_premise() -> None:
+    """An UP signal is premised on the bullish MSS; the bearish one dying
+    says nothing about it."""
+
+    svc, transitions = monitor(
+        candles=[candle(3, high="108", low="106", close="107")],
+        evidence=FakeStructureEvidence((_mss_invalidated("DOWN", T0 + timedelta(hours=2)),)),
+    )
+
+    report = await svc.run("BTCUSDT", TF, T0 + timedelta(hours=3))
+
+    assert report.transitions == 0
+    assert transitions.written == []
+
+
+@pytest.mark.asyncio
+async def test_a_premise_broken_on_the_observed_candle_waits_one_candle() -> None:
+    """Same-candle order is unknowable, and INVALIDATED_EARLY takes the
+    signal out of the accounting — the exclusion is never awarded on the
+    favourable reading (§15.4). The event is read on the next pass instead.
+    """
+    at = T0 + timedelta(hours=3)
+
+    svc, transitions = monitor(
+        candles=[candle(3, high="108", low="106", close="107")],
+        evidence=FakeStructureEvidence(
+            # event_at is THIS candle's close: strictly after `at`.
+            (_mss_invalidated("UP", at + TF.duration),)
+        ),
+    )
+
+    report = await svc.run("BTCUSDT", TF, at)
+
+    assert report.transitions == 0
+    assert transitions.written == []
+
+
+@pytest.mark.asyncio
+async def test_a_dead_premise_resolves_and_records_the_outcome() -> None:
+    """INVALIDATED_EARLY is terminal, so §12.4's row is written with it."""
+
+    svc, _ = monitor(
+        candles=[candle(3, high="108", low="106", close="107")],
+        zone_context=FakeZoneContext(
+            {"zone-7": (_zone_invalidated("zone-7", T0 + timedelta(hours=1)),)}
+        ),
+        payload=_zone_payload("zone-7"),
+    )
+
+    report = await svc.run("BTCUSDT", TF, T0 + timedelta(hours=3))
+
+    assert report.resolved == 1
+    assert svc.outcomes.rows["sig-1"].outcome == "INVALIDATED_EARLY"
+
+
+@pytest.mark.asyncio
+async def test_a_zone_invalidated_on_a_later_candle_is_not_read_early() -> None:
+    """§0.2 non-repaint: the monitor may replay a historical candle while
+    the zone lifecycle has already recorded a LATER invalidation. That
+    future fact must not reach back."""
+
+    svc, transitions = monitor(
+        candles=[candle(3, high="108", low="106", close="107")],
+        zone_context=FakeZoneContext(
+            {"zone-7": (_zone_invalidated("zone-7", T0 + timedelta(hours=5)),)}
+        ),
+        payload=_zone_payload("zone-7"),
+    )
+
+    report = await svc.run("BTCUSDT", TF, T0 + timedelta(hours=3))
+
+    assert report.transitions == 0
+    assert transitions.written == []
+
+
+@pytest.mark.asyncio
+async def test_an_expired_entry_zone_is_not_a_violated_one() -> None:
+    """§12.3 says "zone violated"; a zone that merely aged out asserts
+    nothing about the premise being wrong."""
+
+    from dataclasses import replace as dc_replace
+
+    expired = dc_replace(
+        _zone_invalidated("zone-7", T0 + timedelta(hours=2)),
+        to_state="EXPIRED",
+        reason="max_age",
+    )
+
+    svc, transitions = monitor(
+        candles=[candle(3, high="108", low="106", close="107")],
+        zone_context=FakeZoneContext({"zone-7": (expired,)}),
+        payload=_zone_payload("zone-7"),
+    )
+
+    report = await svc.run("BTCUSDT", TF, T0 + timedelta(hours=3))
+
+    assert report.transitions == 0
+    assert transitions.written == []
+
+
+@pytest.mark.asyncio
+async def test_a_down_signal_reads_its_own_directions_demotion() -> None:
+    """The premise event type is built from the signal's direction, both
+    ways round — an UP-only reading would leave every short unmonitored."""
+
+    svc, transitions = monitor(
+        candles=[candle(3, high="108", low="106", close="107")],
+        evidence=FakeStructureEvidence((_mss_invalidated("DOWN", T0 + timedelta(hours=2)),)),
+        direction="DOWN",
+    )
+
+    report = await svc.run("BTCUSDT", TF, T0 + timedelta(hours=3))
+
+    assert report.transitions == 1
+    assert transitions.written[0].to_state == "INVALIDATED_EARLY"
