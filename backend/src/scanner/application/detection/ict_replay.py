@@ -10,6 +10,7 @@ from datetime import datetime
 from decimal import Decimal
 from itertools import combinations
 
+from scanner.application.detection.window_time import rebased_indices
 from scanner.application.ports import (
     CandleRepository,
     Clock,
@@ -44,7 +45,12 @@ from scanner.shared import Timeframe
 # v3: BPR parents are replayed to the registration index before composing, so
 # §5.6's "still OPEN/TOUCHED" can actually refuse a consumed parent. Detector
 # output changes (fewer BPRs), so Constitution §44.5 makes this a version bump.
-ICT_ALGO_VERSION = "s6-v3"
+#
+# v4: lifecycle indices rebased into today's window by created_at (see
+# window_time.py). Tail-frozen zones could never age -- FVG's 200-candle
+# expiry was unreachable for them (21 of 909 ever expired on the host) and
+# the resume walk skipped whatever a restart missed.
+ICT_ALGO_VERSION = "s6-v4"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")
@@ -338,9 +344,17 @@ class IctReplayService:
         record: IctZoneRecord,
         candles: list[Candle],
     ) -> tuple[int, int]:
-        current = _record_to_fvg(record)
+        created, confirmed = rebased_indices(record, candles, record.timeframe)
+        current = _record_to_fvg(record, created_index=created)
 
-        start_index = record.confirmed_index + 1
+        # Rebased into TODAY's window by created_at, not resumed from the
+        # frozen confirmed_index: the frozen offsets cluster at the tail of
+        # whichever window first recorded the zone, so ages computed against
+        # them could never grow (FVG expiry unreachable for tail-frozen
+        # zones) and the walk skipped whatever a restart had missed. A zone
+        # confirmed before this window starts the walk at candle 0 -- the
+        # liquidity pools' aging fix, ported.
+        start_index = max(confirmed + 1, 0)
 
         if start_index >= len(candles):
             return 0, 0
@@ -433,9 +447,10 @@ class IctReplayService:
         candles: list[Candle],
         atrs: Sequence[Decimal | None],
     ) -> int:
-        current = _record_to_ifvg(record)
+        created, confirmed = rebased_indices(record, candles, record.timeframe)
+        current = _record_to_ifvg(record, created_index=created)
 
-        start_index = record.confirmed_index + 1
+        start_index = max(confirmed + 1, 0)
 
         if start_index >= len(candles):
             return 0
@@ -514,9 +529,10 @@ class IctReplayService:
         record: IctZoneRecord,
         candles: list[Candle],
     ) -> int:
-        current = _record_to_bpr(record)
+        created, confirmed = rebased_indices(record, candles, record.timeframe)
+        current = _record_to_bpr(record, created_index=created)
 
-        start_index = record.confirmed_index + 1
+        start_index = max(confirmed + 1, 0)
 
         if start_index >= len(candles):
             return 0
@@ -774,6 +790,8 @@ def _bpr_record(
 
 def _record_to_fvg(
     record: IctZoneRecord,
+    *,
+    created_index: int | None = None,
 ) -> FairValueGap:
     if record.zone_type != "FVG":
         raise ValueError("record is not an FVG")
@@ -788,7 +806,9 @@ def _record_to_fvg(
         polarity=ZonePolarity(record.polarity),
         band=band,
         consequent_encroachment=(band.midpoint),
-        created_index=(record.created_index),
+        # The caller's rebased position when given; the frozen offset is only
+        # a same-window delta carrier otherwise.
+        created_index=(record.created_index if created_index is None else created_index),
         created_at=record.created_at,
         dealing_range_id=(record.dealing_range_id),
         state=FvgState(record.state),
@@ -798,6 +818,8 @@ def _record_to_fvg(
 
 def _record_to_ifvg(
     record: IctZoneRecord,
+    *,
+    created_index: int | None = None,
 ) -> InverseFairValueGap:
     if record.zone_type != "IFVG":
         raise ValueError("record is not an IFVG")
@@ -823,7 +845,9 @@ def _record_to_ifvg(
             low=record.band_low,
             high=record.band_high,
         ),
-        created_index=(record.created_index),
+        # The caller's rebased position when given; the frozen offset is only
+        # a same-window delta carrier otherwise.
+        created_index=(record.created_index if created_index is None else created_index),
         created_at=record.created_at,
         remaining_age=(remaining_age_raw),
         state=IfvgState(record.state),
@@ -832,6 +856,8 @@ def _record_to_ifvg(
 
 def _record_to_bpr(
     record: IctZoneRecord,
+    *,
+    created_index: int | None = None,
 ) -> BalancedPriceRange:
     if record.zone_type != "BPR":
         raise ValueError("record is not a BPR")
@@ -862,7 +888,9 @@ def _record_to_bpr(
             low=record.band_low,
             high=record.band_high,
         ),
-        created_index=(record.created_index),
+        # The caller's rebased position when given; the frozen offset is only
+        # a same-window delta carrier otherwise.
+        created_index=(record.created_index if created_index is None else created_index),
         created_at=record.created_at,
         state=record.state,
     )
