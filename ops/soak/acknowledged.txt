@@ -23,6 +23,5 @@
 # Format: pattern | until (UTC date) | why
 # The pattern is matched against the whole violation line as a fixed substring.
 
-E. archetype term never met|A1|mss_origin_zone_retested | 2026-09-05 | §3.6 MSS spans were compared on window-local indices, so the retest test could never pass. Fixed in PR #148, merged 2026-08-27, not yet deployed: the engine is mid-soak until 2026-08-29 11:06Z and only an engine deploy resets that clock. Delete this line after the deploy proves the count falls.
 
 I. pool strength component cannot vary|touches | 2026-09-05 | §4.2's `touches` was a hardcoded 0 at both pool-construction sites, so a quarter of the strength score could not vary. Fixed in PR #179, merged 2026-08-28, not yet deployed: the engine is mid-soak until 2026-08-29 11:06Z. This check is the one that found it. Delete this line after the deploy proves the component varies.

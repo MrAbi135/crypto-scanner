@@ -123,8 +123,7 @@ rm -f "$ACK_FILE"
 #     the matching violation here too and this stays honest.
 ACK_FILE=ops/soak/acknowledged.txt
 problems=0
-triage_violations "$(printf 'E. archetype term never met|A1|mss_origin_zone_retested|80|80
-I. pool strength component cannot vary|touches|1412|0')" > "$OUT"
+triage_violations "I. pool strength component cannot vary|touches|1412|0" > "$OUT"
 check "the shipped file's own patterns match, and none is stale" "0" "$problems"
 
 echo
