@@ -51,7 +51,7 @@ class FakeZones:
         self.zones = tuple(zones)
         self.calls: list[tuple[str, Timeframe]] = []
 
-    async def list_live(self, symbol, timeframe):
+    async def list_live(self, symbol, timeframe, *, only_versions=None):
         self.calls.append((symbol, timeframe))
         return self.zones
 

@@ -23,6 +23,7 @@ from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSIO
 from scanner.application.detection.structure_shift_replay import (
     STRUCTURE_SHIFT_ALGO_VERSION,
 )
+from scanner.application.detection.zone_versions import CURRENT_ZONE_VERSIONS
 from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.ict_evidence import IctEvidenceRepository
 from scanner.application.ports.ict_zones import IctZoneRepository
@@ -113,7 +114,14 @@ async def get_zones_endpoint(
     """
     parsed = _timeframe(request, timeframe)
 
-    live = await zones.list_live(symbol_id.upper(), parsed)
+    # The chart draws the current doctrine's view: superseded-version rows are
+    # mid-retirement bookkeeping, and drawing both generations of one gap
+    # would show doubled zones for weeks after any algo bump.
+    live = await zones.list_live(
+        symbol_id.upper(),
+        parsed,
+        only_versions=CURRENT_ZONE_VERSIONS,
+    )
 
     rows = [
         {

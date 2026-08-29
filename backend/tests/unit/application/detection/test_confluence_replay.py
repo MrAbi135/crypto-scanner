@@ -162,8 +162,15 @@ class FakeEventRepository:
 class FakeZoneRepository:
     def __init__(self, zones: list[IctZoneRecord]) -> None:
         self.zones = zones
+        self.asked_versions: object = "never asked"
 
-    async def list_live(self, symbol, timeframe):
+    async def list_live(self, symbol, timeframe, *, only_versions=None):
+        # Recorded so the contract test below can assert scoring pins its
+        # read. The fixture zones themselves are served unfiltered: these
+        # tests build zones with fixture evidence, and filtering here would
+        # make every existing test's zones vanish for the wrong reason.
+        self.asked_versions = only_versions
+
         return tuple(self.zones)
 
 
@@ -3017,3 +3024,23 @@ class TestTheFreshnessLadderSpeaksBothVocabularies:
             assert payable(family) == set(ZONE_STATE_POINTS), (
                 f"{family.__name__} reaches {sorted(payable(family))}"
             )
+
+
+async def test_scoring_pins_its_zone_read_to_the_current_versions() -> None:
+    """The 2026-08-29 migration-window lesson, as a wiring contract.
+
+    During a version bump the live table holds both generations of the same
+    physical zone. Scoring must ask for the current ones BY NAME -- an
+    unpinned read here scored 642 superseded FVGs beside their twins. The
+    reader's map must be the writer's map (`CURRENT_ZONE_VERSIONS`), not a
+    copy that can drift.
+    """
+    from scanner.application.detection.zone_versions import CURRENT_ZONE_VERSIONS
+
+    svc, _ = service()
+
+    zones_repo = svc._zones
+
+    await svc.run("BTCUSDT", TF, BASE, END)
+
+    assert zones_repo.asked_versions is CURRENT_ZONE_VERSIONS
