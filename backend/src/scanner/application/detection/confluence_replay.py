@@ -175,7 +175,15 @@ from scanner.shared import Timeframe
 # sweeps -- so §4.6's contrary-evidence reading joins LIQUIDITY_SWEEP_RECLAIMED
 # events onto the sweeps by pool id. §4.7's stop-hunt credit is likewise
 # withdrawn when the hunt's own pool has a LIQUIDITY_STOP_HUNT_FAILED event.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v25"
+#
+# v26: the attribution trees carry real evidence ids. Every contribution had
+# `evidence_id: null` (1841/1841 on the host) because no call site passed the
+# ids §8.3's "reproducible from the evidence alone" asks for. F1 names its
+# BOS/MSS/classification events, F2 its sweep pool, surviving hunt event and
+# target pool, F3 the zone it scores (its tree was dropped entirely before),
+# F4 joins the tree as the published VFS. The payload's evidence_ids widens
+# from the zone alone to the distinct ids the factors actually cited.
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v26"
 
 # Import-time, not call-time: a zone type with no version entry is invisible
 # to scoring, and that must refuse to boot rather than run quietly blind.
@@ -442,10 +450,12 @@ class ConfluenceReplayService:
 
         # §4.7: a hunt whose own pool later recorded a failure is withdrawn
         # credit; pool-matched so one failed hunt does not poison another
-        # pool's clean one for the rest of the window.
-        stop_hunt_alive = bool(
-            _pool_ids_of(events, "LIQUIDITY_STOP_HUNT", key="sweep_pool_id")
-            - _pool_ids_of(events, "LIQUIDITY_STOP_HUNT_FAILED", key="sweep_pool_id")
+        # pool's clean one for the rest of the window. The newest surviving
+        # hunt's event key doubles as F1's attribution id -- None means no
+        # credit, so the flag and the id cannot disagree.
+        stop_hunt_key = _newest_surviving_hunt(
+            events,
+            failed_pools=_pool_ids_of(events, "LIQUIDITY_STOP_HUNT_FAILED", key="sweep_pool_id"),
         )
 
         # §6.5 compares this candle's p90 print size against the median of
@@ -518,7 +528,7 @@ class ConfluenceReplayService:
                 bos_breaks=bos_breaks,
                 pd=pd,
                 reclaimed_pools=reclaimed_pools,
-                stop_hunt_alive=stop_hunt_alive,
+                stop_hunt_key=stop_hunt_key,
             )
 
             candidates.append(candidate)
@@ -566,7 +576,7 @@ class ConfluenceReplayService:
         bos_breaks: dict[str, frozenset[datetime]],
         pd: PdContext | None,
         reclaimed_pools: frozenset[str],
-        stop_hunt_alive: bool,
+        stop_hunt_key: str | None,
     ) -> SetupCandidate:
         polarity = "BULLISH" if direction == "UP" else "BEARISH"
 
@@ -756,6 +766,37 @@ class ConfluenceReplayService:
         # Confirmation -- are about this one's own history.
         history = _History(await self._interactions.list_for_zone(best_zone.zone_id))
 
+        # §8.3: "reproducible from the evidence alone". Each id names the
+        # newest record behind its predicate; a predicate with no discrete
+        # record behind it (trend maturity from many labels, momentum from a
+        # candle computation) carries none rather than an invented one.
+        bos_key = _newest_event_key(events, f"BOS_{direction}")
+        mss_key = _newest_event_key(events, f"MSS_{direction}")
+        external_key = _newest_classification_key(events)
+
+        structure_ids = _present(
+            {
+                "break_confirmed": bos_key,
+                # §3.5's quality grade is read off the impulse leg, which has
+                # no persisted identity -- the displaced break IS the BOS.
+                "displaced": bos_key,
+                "external": external_key,
+                "mss": mss_key,
+            }
+        )
+
+        liquidity_ids = _present(
+            {
+                "sweep_confirmed": best_sweep.pool_id if best_sweep else None,
+                "external": best_sweep.pool_id if best_sweep else None,
+                "depth": best_sweep.pool_id if best_sweep else None,
+                "unclaimed": best_sweep.pool_id if best_sweep else None,
+                "fresh": best_sweep.pool_id if best_sweep else None,
+                "stop_hunt": stop_hunt_key,
+                "target_pool": target_pool.pool_id if target_pool else None,
+            }
+        )
+
         scored = {
             Factor.STRUCTURE: structure_factor(
                 StructureEvidence(
@@ -778,6 +819,7 @@ class ConfluenceReplayService:
                     # maturity could never be earned by any candidate.
                     unbroken_pairs=unbroken_pairs(labels, direction),
                     failed_breaks=recent_failed_breaks,
+                    evidence_ids=structure_ids,
                 )
             ),
             Factor.LIQUIDITY: liquidity_factor(
@@ -796,20 +838,22 @@ class ConfluenceReplayService:
                     # must stop paying for it.
                     unclaimed=not best_sweep.reclaimed if best_sweep else False,
                     fresh=best_sweep.live(at, timeframe) if best_sweep else False,
-                    stop_hunt=stop_hunt_alive,
+                    stop_hunt=stop_hunt_key is not None,
                     target_pool_strength=(target_pool.strength if target_pool else Decimal(0)),
+                    evidence_ids=liquidity_ids,
                 )
             ),
-            Factor.ZONE: FactorScore(
-                Factor.ZONE,
-                _zone_score(
-                    best_zone,
-                    len(matching_zones),
-                    entry_confirmation=history.confirmed,
-                ),
+            # The full FactorScore, not `.score` rewrapped -- rewrapping
+            # dropped F3's contributions from the attribution tree entirely.
+            Factor.ZONE: _zone_factor(
+                best_zone,
+                len(matching_zones),
+                entry_confirmation=history.confirmed,
+                attribute_to=best_zone.zone_id,
             ),
-            Factor.VOLUME: FactorScore(
-                Factor.VOLUME,
+            # §8.3 "as published": the tree entry is the §6.7 score itself.
+            # No discrete record carries it, so the id stays None.
+            Factor.VOLUME: volume_factor(
                 _volume_score(reading, direction, structural, wash_risk),
             ),
             Factor.MOMENTUM: momentum_factor(
@@ -857,7 +901,7 @@ class ConfluenceReplayService:
                 # G4 already established price is at this zone, so a zone that
                 # records an MSS origin *is* the MSS-origin zone being retested.
                 mss_origin_zone_retested=_is_mss_origin(best_zone),
-                stop_hunt_confirmed=stop_hunt_alive,
+                stop_hunt_confirmed=stop_hunt_key is not None,
                 breaker_formed=any(z.grade == "BRK_A" for z in matching_zones),
                 breaker_grade_a=best_zone.grade == "BRK_A",
                 breaker_first_retest_respected=history.first_retest_respected,
@@ -935,6 +979,12 @@ class ConfluenceReplayService:
                 wash_risk=wash_risk,
                 reading=reading,
                 algo_version=self._algo_version,
+                cited_ids=tuple(
+                    contribution.evidence_id
+                    for item in scored.values()
+                    for contribution in item.contributions
+                    if contribution.evidence_id is not None
+                ),
             )
             if levels is not None and archetype is not None
             else None
@@ -1450,6 +1500,68 @@ class ConfluenceReplayService:
         return _f6_vocabulary(state.trend_state)
 
 
+def _newest_event_key(
+    events: Sequence[EngineEventRecord],
+    event_type: str,
+) -> str | None:
+    """The newest matching event's key, for §8.3's attribution ids."""
+
+    best: EngineEventRecord | None = None
+
+    for record in events:
+        if record.event_type == event_type and (best is None or record.event_at >= best.event_at):
+            best = record
+
+    return best.event_key if best else None
+
+
+def _newest_classification_key(events: Sequence[EngineEventRecord]) -> str | None:
+    """The newest EXTERNAL swing classification's key — F1's `external` id."""
+
+    best: EngineEventRecord | None = None
+
+    for record in events:
+        if is_classification(record.event_type, strength=SwingStrength.EXTERNAL) and (
+            best is None or record.event_at >= best.event_at
+        ):
+            best = record
+
+    return best.event_key if best else None
+
+
+def _newest_surviving_hunt(
+    events: Sequence[EngineEventRecord],
+    *,
+    failed_pools: frozenset[str],
+) -> str | None:
+    """The newest §4.7 hunt whose own pool never recorded a failure."""
+
+    best: EngineEventRecord | None = None
+
+    for record in events:
+        if record.event_type != "LIQUIDITY_STOP_HUNT":
+            continue
+
+        try:
+            pool_id = json.loads(record.payload).get("sweep_pool_id")
+        except ValueError:
+            continue
+
+        if not isinstance(pool_id, str) or not pool_id or pool_id in failed_pools:
+            continue
+
+        if best is None or record.event_at >= best.event_at:
+            best = record
+
+    return best.event_key if best else None
+
+
+def _present(ids: dict[str, str | None]) -> dict[str, str]:
+    """Drop the absent ids: a contribution with no source keeps id None."""
+
+    return {code: value for code, value in ids.items() if value is not None}
+
+
 def _pool_ids_of(
     events: Sequence[EngineEventRecord],
     event_type: str,
@@ -1478,7 +1590,7 @@ def _pool_ids_of(
 class _Sweep:
     """A §4.6 sweep transition, read through the questions §8 asks of it."""
 
-    __slots__ = ("_e", "_reclaimed_by_event", "confirmed_at")
+    __slots__ = ("_e", "_reclaimed_by_event", "confirmed_at", "pool_id")
 
     def __init__(
         self,
@@ -1488,6 +1600,10 @@ class _Sweep:
     ) -> None:
         self._e = json.loads(record.evidence)
         self._reclaimed_by_event = record.pool_id in reclaimed_pools
+
+        # The transition row's own column, not the evidence copy: it is the
+        # pool the sweep consumed, and it doubles as F2's attribution id.
+        self.pool_id = record.pool_id
 
         # The transition's real time, not its `candle_index`. That index is
         # the offset inside whichever window recorded the sweep, and it is
@@ -1683,6 +1799,7 @@ def _payload_for(
     wash_risk: bool,
     reading: _Reading,
     algo_version: str,
+    cited_ids: tuple[str, ...] = (),
 ) -> SignalPayload | None:
     """§15.2's nine rows, assembled where every input is still in scope.
 
@@ -1706,11 +1823,15 @@ def _payload_for(
         symbol=symbol,
         timeframe=timeframe.value,
         direction=direction,
-        # §15.2's "complete event-id chain". The attribution trees carry the
-        # evidence id behind each scored contribution, which is the chain §8
-        # actually built; the zone is added because §15.2 names zones
-        # separately and a zone with no interaction contributes no id.
-        evidence_ids=(zone.zone_id,),
+        # §15.2's "complete event-id chain": the zone first, then every
+        # distinct id the factors actually cited (sorted, so the sealed
+        # payload is deterministic). The attribution trees carry the same
+        # ids per contribution; this is the flat form the detail surface
+        # lists.
+        evidence_ids=(
+            zone.zone_id,
+            *sorted(set(cited_ids) - {zone.zone_id}),
+        ),
         confidence=confidence.final,
         grade=confidence.published_grade.value if confidence.published_grade else "",
         factors={f.value: str(score) for f, score in factors.items()},
@@ -2462,27 +2583,48 @@ _FVG_STATE_EQUIVALENT: dict[str, str] = {
 }
 
 
-def _zone_score(
+def _zone_factor(
     zone: IctZoneRecord,
     stack_depth: int,
     *,
     entry_confirmation: bool = False,
-) -> Decimal:
+    attribute_to: str | None = None,
+) -> FactorScore:
     """F3 for one zone — §8.3.1.
 
-    The ranking key that picks `best_zone` leaves `entry_confirmation` at its
-    default: reading every candidate zone's interaction history to choose
-    between them would be a query per zone, and the term is worth 10 of 100 —
-    not enough to reorder a stack, and the chosen zone is scored with it.
+    `attribute_to` stamps every contribution with the zone's id: each of the
+    four terms (grade, state, stack, confirmation) is a claim about this zone,
+    so this zone is the evidence for all of them.
     """
+    ids = (
+        {}
+        if attribute_to is None
+        else dict.fromkeys(("grade", "state", "stack", "entry_confirmation"), attribute_to)
+    )
+
     return zone_factor(
         ZoneEvidence(
             grade=zone.grade,
             state=_FVG_STATE_EQUIVALENT.get(zone.state, zone.state),
             stack_depth=stack_depth,
             entry_confirmation=entry_confirmation,
+            evidence_ids=ids,
         )
-    ).score
+    )
+
+
+def _zone_score(
+    zone: IctZoneRecord,
+    stack_depth: int,
+) -> Decimal:
+    """The ranking key that picks `best_zone`.
+
+    Leaves `entry_confirmation` at its default: reading every candidate
+    zone's interaction history to choose between them would be a query per
+    zone, and the term is worth 10 of 100 — not enough to reorder a stack,
+    and the chosen zone is scored with it.
+    """
+    return _zone_factor(zone, stack_depth).score
 
 
 def _synergies(
