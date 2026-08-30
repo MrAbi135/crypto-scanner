@@ -9,14 +9,13 @@ from __future__ import annotations
 
 from scanner.domain.ranking.decay import TTL_CANDLES, display_rank, ttl_candles
 from scanner.domain.ranking.model import RankableSetup, tier_priority
-from scanner.domain.ranking.order import rank, rank_positions
+from scanner.domain.ranking.order import rank
 
 __all__ = [
     "TTL_CANDLES",
     "RankableSetup",
     "display_rank",
     "rank",
-    "rank_positions",
     "tier_priority",
     "ttl_candles",
 ]

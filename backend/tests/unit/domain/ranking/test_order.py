@@ -5,11 +5,9 @@ from __future__ import annotations
 import random
 from decimal import Decimal
 
-import pytest
-
 from scanner.domain.common.universe import UniverseTier
 from scanner.domain.confluence import Archetype
-from scanner.domain.ranking import RankableSetup, rank, rank_positions
+from scanner.domain.ranking import RankableSetup, rank
 from scanner.shared import Timeframe
 
 
@@ -133,28 +131,6 @@ def test_a_shuffled_universe_ranks_identically() -> None:
         shuffler.shuffle(shuffled)
 
         assert [s.symbol for s in rank(shuffled)] == expected
-
-
-def test_positions_are_keyed_by_symbol_and_direction() -> None:
-    """§9.2 ranks signals, not symbols.
-
-    One symbol can carry a long and a short at the same close, so keying the
-    board on the symbol alone would have silently dropped one of the pair.
-    The remaining guard is against a genuine duplicate -- the same symbol and
-    the same direction twice, which is one signal recorded twice.
-    """
-    positions = rank_positions(
-        [
-            setup("BBB", confidence="70"),
-            setup("AAA", confidence="90"),
-            setup("AAA", confidence="80", direction="DOWN"),
-        ]
-    )
-
-    assert positions == {("AAA", "UP"): 1, ("AAA", "DOWN"): 2, ("BBB", "UP"): 3}
-
-    with pytest.raises(ValueError, match=r"one \(symbol, direction\)"):
-        rank_positions([setup("AAA", confidence="90"), setup("AAA", confidence="70")])
 
 
 def test_direction_settles_a_tie_9_2_leaves_open() -> None:

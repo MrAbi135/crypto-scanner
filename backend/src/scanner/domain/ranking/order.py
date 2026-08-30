@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 
 from scanner.domain.confluence import ranking_priority
 from scanner.domain.ranking.model import RankableSetup, tier_priority
@@ -49,19 +49,3 @@ def rank(setups: Iterable[RankableSetup]) -> tuple[RankableSetup, ...]:
     result and look correct on any single run.
     """
     return tuple(sorted(setups, key=_key))
-
-
-def rank_positions(setups: Sequence[RankableSetup]) -> dict[tuple[str, str], int]:
-    """1-based board position, keyed by (symbol, direction).
-
-    Keyed on both because one symbol can carry a long and a short candidate at
-    the same close, and §9.2 ranks *published signals* rather than symbols.
-    Keying on the symbol alone would have silently dropped one of the pair.
-    """
-    ordered = rank(setups)
-    keys = [(setup.symbol, setup.direction) for setup in ordered]
-
-    if len(set(keys)) != len(keys):
-        raise ValueError("two signals with one (symbol, direction) at one close")
-
-    return {key: position for position, key in enumerate(keys, start=1)}
