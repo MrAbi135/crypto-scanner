@@ -3392,3 +3392,76 @@ def test_the_payload_chain_carries_what_the_factors_cited() -> None:
 
     assert payload is not None
     assert payload.evidence_ids == ("z1", "BOS_UP-3", "p1")
+
+
+@pytest.mark.asyncio
+async def test_a_break_in_its_failure_window_suspends_the_clean_record() -> None:
+    """§3.5 gives every break 3 candles to fail, and only failures are
+    persisted -- so inside that window "no failure" is not an observation.
+    The clean-record 15 must not be paid on a break still in jeopardy; the
+    term goes unread (absent from the tree), not zero."""
+
+    setup = bullish_setup()
+    setup["events"].append(event("BOS_UP", LAST_INDEX - 1, direction="UP"))
+
+    svc, repo = service(**setup)
+
+    await run(svc, "BULLISH")
+
+    recorded = [
+        json.loads(r.payload)
+        for r in repo.appended.values()
+        if r.event_type == "SETUP_CANDIDATE_UP"
+    ]
+
+    assert recorded
+
+    codes = [item["code"] for item in recorded[0]["attribution"]["F1"]]
+
+    assert "clean_record" not in codes, codes
+
+
+@pytest.mark.asyncio
+async def test_an_elapsed_window_restores_the_clean_record() -> None:
+    """The positive control: the bullish fixture's own BOS is hundreds of
+    candles old, so its window elapsed clean and the 15 is earned."""
+
+    svc, repo = service(**bullish_setup())
+
+    await run(svc, "BULLISH")
+
+    recorded = [
+        json.loads(r.payload)
+        for r in repo.appended.values()
+        if r.event_type == "SETUP_CANDIDATE_UP"
+    ]
+
+    codes = [item["code"] for item in recorded[0]["attribution"]["F1"]]
+
+    assert "clean_record" in codes
+
+
+@pytest.mark.asyncio
+async def test_a_confirmed_failure_is_a_fact_even_inside_the_window() -> None:
+    """A recorded failure keeps its 7-point scar reading -- the jeopardy
+    rule only withholds the UNOBSERVED clean claim. The scar is an older
+    break's (4 candles back, past G5's 3-candle freshness, inside F1's 20)
+    while a new break sits in its unelapsed window."""
+
+    setup = bullish_setup()
+    setup["events"].append(event("BOS_UP", LAST_INDEX - 1, direction="UP"))
+    setup["events"].append(event("STRUCTURE_FAILED_BREAK_UP", LAST_INDEX - 4, direction="UP"))
+
+    svc, repo = service(**setup)
+
+    await run(svc, "BULLISH")
+
+    recorded = [
+        json.loads(r.payload)
+        for r in repo.appended.values()
+        if r.event_type == "SETUP_CANDIDATE_UP"
+    ]
+
+    f1 = {item["code"]: item["points"] for item in recorded[0]["attribution"]["F1"]}
+
+    assert f1.get("clean_record") == "7"

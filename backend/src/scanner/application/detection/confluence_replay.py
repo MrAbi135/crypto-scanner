@@ -188,7 +188,11 @@ from scanner.shared import Timeframe
 # v28: the 0.75-1.5 x ATR with-trend leg is RETRACEMENT, not MICRO -- the
 # mislabel removed every moderate leg from trend strength and OTE anchoring,
 # and F1's displaced term, A3 and the PD context all read the legs.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v28"
+# v29: Sec 3.5's unelapsed failure window suspends the clean-record term --
+# only failures are persisted, so inside the 3-candle window "no failure"
+# read identically to "window elapsed clean" and the 15 was paid on a break
+# still in jeopardy. failed_breaks=None (unread) until the window settles.
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v29"
 
 # Import-time, not call-time: a zone type with no version entry is invisible
 # to scoring, and that must refuse to boot rather than run quietly blind.
@@ -676,6 +680,20 @@ class ConfluenceReplayService:
         impulse = legs.latest(LegKind.IMPULSE, direction)
         recent_failed_breaks = _count_failed_breaks(events, direction, opened_at, timeframe)
 
+        # §3.5 gives every break a 3-candle failure window. Inside it, "no
+        # failure recorded" is not yet an observation -- the replay persists
+        # only failures, so an unelapsed window and a clean one read
+        # identically -- and §8.3.1's clean-record 15 was being paid on a
+        # break still in jeopardy. None is factor_points' unread value and
+        # pays nothing; the next passes read the settled answer. A failure
+        # that already confirmed is a fact and keeps its count either way.
+        failed_break_record = (
+            None
+            if recent_failed_breaks == 0
+            and _break_in_jeopardy(events, direction, opened_at, timeframe)
+            else recent_failed_breaks
+        )
+
         # G5's failed-break clause reads "within its window" -- the failure's
         # OWN window, which §3.5 defines as the 3-candle reclaim that made it
         # a failure. Deliberately narrower than F1's 20-candle clean-record
@@ -823,7 +841,7 @@ class ConfluenceReplayService:
                     # SWING_* payload. Left at zero, the 30 points of trend
                     # maturity could never be earned by any candidate.
                     unbroken_pairs=unbroken_pairs(labels, direction),
-                    failed_breaks=recent_failed_breaks,
+                    failed_breaks=failed_break_record,
                     evidence_ids=structure_ids,
                 )
             ),
@@ -2121,6 +2139,27 @@ def _is_retracement_against(leg: Leg | None, direction: str) -> bool:
     trending context as a setup.
     """
     return leg is not None and leg.kind is LegKind.RETRACEMENT and leg.direction != direction
+
+
+def _break_in_jeopardy(
+    events: tuple[EngineEventRecord, ...],
+    direction: str,
+    opened_at: datetime,
+    timeframe: Timeframe,
+) -> bool:
+    """Is a BOS in D still inside §3.5's 3-candle failure window?
+
+    `event_at` is the break candle's open, so `opened_at - event_at` counts
+    the candles that have closed since it -- exactly the candles a failure
+    could have printed on. Fewer than `FAILED_BREAK_WINDOW` of them means the
+    break's record is not yet attestable either way.
+    """
+    horizon = timeframe.duration * FAILED_BREAK_WINDOW
+
+    return any(
+        record.event_type == f"BOS_{direction}" and opened_at - record.event_at < horizon
+        for record in events
+    )
 
 
 def _bos_break_times(
