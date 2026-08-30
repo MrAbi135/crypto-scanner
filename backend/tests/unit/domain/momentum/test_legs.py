@@ -410,3 +410,32 @@ class TestTrendStrength:
 
         assert result.pullback == Decimal(0)
         assert result.total == Decimal(70)
+
+
+class TestModerateWithTrendLegs:
+    def test_a_displaced_leg_between_the_bands_is_not_micro(self) -> None:
+        """§7.5 defines micro as "below 0.75 x ATR net progress". A displaced
+        with-trend leg of 1.2 x ATR misses the impulse bar (needs 1.5) but
+        clears the micro one by construction -- the first draft's fallback
+        sent it to MICRO anyway, which removed every moderate with-trend leg
+        from trend strength and OTE anchoring."""
+
+        legs = segment_legs(
+            candles(),
+            [swing(20, "100"), swing(30, "112", SwingKind.HIGH)],
+            frozenset({25}),
+        )
+
+        assert legs[0].kind is LegKind.RETRACEMENT
+        assert legs[0].net_progress_atr == Decimal("1.2")
+        assert legs == anchoring_legs(legs)
+
+    def test_an_undisplaced_leg_between_the_bands_is_not_micro_either(self) -> None:
+        legs = segment_legs(
+            candles(),
+            [swing(20, "100"), swing(30, "112", SwingKind.HIGH)],
+            frozenset(),
+        )
+
+        assert legs[0].kind is LegKind.RETRACEMENT
+        assert legs == anchoring_legs(legs)
