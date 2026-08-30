@@ -55,6 +55,14 @@ class PgSetupRepository:
 
             return written is not None
 
+    async def get(self, setup_id: str) -> SetupRecord | None:
+        stmt = select(SetupRow).where(SetupRow.setup_id == setup_id)
+
+        async with self._sessions() as session:
+            row = (await session.execute(stmt)).scalar_one_or_none()
+
+        return _record(row) if row is not None else None
+
     async def list_at(
         self,
         symbols: tuple[str, ...],
@@ -78,22 +86,23 @@ class PgSetupRepository:
         async with self._sessions() as session:
             rows = (await session.execute(stmt)).scalars().all()
 
-        return tuple(
-            SetupRecord(
-                setup_id=row.setup_id,
-                symbol=row.symbol,
-                timeframe=Timeframe(row.timeframe),
-                direction=row.direction,
-                archetype=row.archetype,
-                gate_results=row.gate_results,
-                factor_scores=row.factor_scores,
-                adjustments=row.adjustments,
-                base_confidence=row.base_confidence,
-                final_confidence=row.final_confidence,
-                floor_passed=row.floor_passed,
-                algo_version=row.algo_version,
-                evaluated_at=row.evaluated_at,
-                evidence=row.evidence,
-            )
-            for row in rows
-        )
+        return tuple(_record(row) for row in rows)
+
+
+def _record(row: SetupRow) -> SetupRecord:
+    return SetupRecord(
+        setup_id=row.setup_id,
+        symbol=row.symbol,
+        timeframe=Timeframe(row.timeframe),
+        direction=row.direction,
+        archetype=row.archetype,
+        gate_results=row.gate_results,
+        factor_scores=row.factor_scores,
+        adjustments=row.adjustments,
+        base_confidence=row.base_confidence,
+        final_confidence=row.final_confidence,
+        floor_passed=row.floor_passed,
+        algo_version=row.algo_version,
+        evaluated_at=row.evaluated_at,
+        evidence=row.evidence,
+    )

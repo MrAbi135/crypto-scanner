@@ -9,10 +9,12 @@ from datetime import datetime
 from decimal import Decimal
 
 from scanner.application.ports import CandleRepository, Clock
+from scanner.application.ports.detection import EngineEventRepository
 from scanner.application.ports.ict_evidence import IctEvidenceRepository
 from scanner.application.ports.ict_zone_interactions import (
     IctZoneInteractionContextRepository,
 )
+from scanner.application.ports.setups import SetupRecord, SetupRepository
 from scanner.application.ports.signal_outcomes import (
     SignalOutcomeRecord,
     SignalOutcomeRepository,
@@ -64,6 +66,8 @@ class SignalMonitorService:
         *,
         zone_context: IctZoneInteractionContextRepository | None = None,
         evidence: IctEvidenceRepository | None = None,
+        setups: SetupRepository | None = None,
+        events: EngineEventRepository | None = None,
     ) -> None:
         self._candles = candles
         self._signals = signals
@@ -72,6 +76,8 @@ class SignalMonitorService:
         self._outcomes = outcomes
         self._zone_context = zone_context
         self._evidence = evidence
+        self._setups = setups
+        self._events = events
 
     async def run(
         self,
@@ -197,18 +203,18 @@ class SignalMonitorService:
     ) -> str | None:
         """§12.3's premise checks, pre-touch only: the reason, or None.
 
-        Two of the doctrine's three premises are checked, each with exact
-        linkage:
+        All three of the doctrine's premises, each with exact linkage:
 
         * **zone violated** -- the entry zone's own transition rows;
         * **MSS demoted** -- the STRUCTURE_MSS_INVALIDATED_{dir} events the
-          shift engine publishes when §3.6's reclaim demotes an MSS.
+          shift engine publishes when §3.6's reclaim demotes an MSS;
+        * **sweep reclaimed** -- the seeding sweep's pool, read from the
+          setup's own F2 attribution (signal and setup share one id), matched
+          against LIQUIDITY_SWEEP_RECLAIMED events. A setup recorded before
+          the attribution carried ids yields no pool and the check stays
+          quiet -- honest for old rows, exact for new ones.
 
-        The third, "sweep reclaimed", needs the setup's seeding sweep
-        identity, and that lives in `evidence_ids` -- which nothing populates
-        yet (a defect of its own). Named here so the gap stays visible.
-
-        Both checks bound the fact to **strictly before** the candle being
+        Every check bounds the fact to **strictly before** the candle being
         observed (`<= at`, the candle's open). A premise that broke on the
         same candle the entry was touched is an unknowable order, and
         INVALIDATED_EARLY takes the signal out of the accounting -- awarding
@@ -244,6 +250,32 @@ class SignalMonitorService:
             for record in records:
                 if record.event_type == wanted:
                     return "mss_demoted_to_ranging"
+
+        if self._setups is not None and self._events is not None:
+            setup = await self._setups.get(signal.setup_id)
+            pool_id = _seeding_sweep_pool(setup)
+
+            if pool_id is not None:
+                # Same strictly-before bound as the MSS check: list_events'
+                # end is exclusive and event_at sits on the TF grid.
+                events = await self._events.list_events(
+                    signal.symbol,
+                    timeframe,
+                    signal.published_at,
+                    at + timeframe.duration,
+                )
+
+                for event in events:
+                    if event.event_type != "LIQUIDITY_SWEEP_RECLAIMED":
+                        continue
+
+                    try:
+                        reclaimed_pool = json.loads(event.payload).get("pool_id")
+                    except ValueError:
+                        continue
+
+                    if reclaimed_pool == pool_id:
+                        return "seeding_sweep_reclaimed"
 
         return None
 
@@ -313,6 +345,32 @@ _RESOLVED = frozenset(
         SignalState.INVALIDATED_EARLY,
     }
 )
+
+
+def _seeding_sweep_pool(setup: SetupRecord | None) -> str | None:
+    """The pool behind the setup's F2 `sweep_confirmed` award, if it cited one.
+
+    That contribution's evidence id IS the seeding sweep's pool -- the same
+    id the maturation events carry -- so the reclaim premise needs no second
+    bookkeeping of which sweep a signal stood on.
+    """
+    if setup is None:
+        return None
+
+    try:
+        contributions = json.loads(setup.evidence)["attribution"]["F2"]
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    for item in contributions:
+        if isinstance(item, dict) and item.get("code") == "sweep_confirmed":
+            pool_id = item.get("evidence_id")
+
+            # isinstance narrows the JSON Any; it is not a validity check.
+            # Pre-v26 rows carry null here and correctly yield None.
+            return pool_id if isinstance(pool_id, str) else None
+
+    return None
 
 
 def _entry_zone_id(signal: SignalRecord) -> str | None:

@@ -207,5 +207,7 @@ def build_detection_pipeline(
             PgSignalOutcomeRepository(sessions),
             zone_context=PgIctZoneInteractionContextRepository(sessions),
             evidence=evidence,
+            setups=PgSetupRepository(sessions),
+            events=events,
         ),
     )

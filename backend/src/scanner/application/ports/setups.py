@@ -46,6 +46,15 @@ class SetupRepository(Protocol):
         """
         ...
 
+    async def get(self, setup_id: str) -> SetupRecord | None:
+        """One candidate by id.
+
+        §12.1 makes the signal from the setup and gives both one id, so this
+        is how the monitor reaches the attribution tree behind a signal --
+        the seeding sweep's pool for §12.3's reclaim premise lives there.
+        """
+        ...
+
     async def list_at(
         self,
         symbols: tuple[str, ...],
