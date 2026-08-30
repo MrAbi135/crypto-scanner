@@ -101,12 +101,13 @@ class StructureEvidence:
     mss: bool = False
     unbroken_pairs: int = 0
     failed_breaks: int | None = None
-    """§3.5 records a failed break as a fact; nothing in this build does.
+    """§3.5's failed breaks against D inside the clean-record window.
 
-    None means unread, and an unread record pays nothing. Zero would mean the
-    market produced no failed break, which is a claim no detector has made --
-    and it would hand every candidate the full 15 points for evidence that was
-    never gathered.
+    None means unread, and an unread record pays nothing. The caller passes
+    None while the newest break's 3-candle failure window is unelapsed --
+    only failures are persisted, so inside that window "no failure recorded"
+    is not yet an observation, and zero would hand the candidate 15 points
+    for evidence that could still change on the next close.
     """
     evidence_ids: dict[str, str] = field(default_factory=dict)
 
