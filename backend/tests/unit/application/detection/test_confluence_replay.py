@@ -717,10 +717,17 @@ async def test_the_record_carries_the_gate_results_and_the_attribution_tree() ->
         assert tree
         assert all({"code", "points", "evidence_id"} <= set(item) for item in tree)
 
-    # ZONE and VOLUME have no enumerated contributions yet, and say so by
-    # being absent rather than by an empty list.
-    assert "F3" not in recorded[0]["attribution"]
-    assert "F4" not in recorded[0]["attribution"]
+    # F3 and F4 joined the tree in v26: the zone factor's contributions were
+    # being dropped by a `.score` rewrap, and F4 now records the published
+    # VFS as its single entry (id None -- no discrete record carries it).
+    f3 = recorded[0]["attribution"]["F3"]
+
+    assert f3
+    assert all(item["evidence_id"] == "z1" for item in f3)
+
+    f4 = recorded[0]["attribution"]["F4"]
+
+    assert [item["code"] for item in f4] == ["volume_factor_score"]
 
 
 @pytest.mark.asyncio
@@ -3284,3 +3291,104 @@ async def test_a_failed_stop_hunt_withdraws_its_own_credit_only() -> None:
     up = next(c for c in report.candidates if c.direction == "UP")
 
     assert up.archetype == "A1"
+
+
+@pytest.mark.asyncio
+async def test_every_paying_contribution_names_its_evidence() -> None:
+    """§8.3: "reproducible from the evidence alone". 1841 of 1841 recorded
+    contributions on the host carried `evidence_id: null` because no call
+    site passed the ids -- the dict plumbing existed with nothing in it.
+
+    F1's break/mss name their events, F2's sweep terms name the pool the
+    sweep consumed, F3 names the zone. The ids must be the NEWEST matching
+    record: an older BOS with a different key is planted to prove selection,
+    not just presence.
+    """
+    setup = bullish_setup()
+    setup["events"] = [
+        event("BOS_UP", 2, direction="UP"),
+        event("BOS_UP", 3, direction="UP"),
+        event("MSS_UP", 6, direction="UP"),
+    ]
+
+    svc, repo = service(**setup)
+
+    await run(svc, "BULLISH")
+
+    recorded = [
+        json.loads(r.payload)
+        for r in repo.appended.values()
+        if r.event_type == "SETUP_CANDIDATE_UP"
+    ]
+
+    assert recorded
+
+    attribution = recorded[0]["attribution"]
+
+    f1 = {item["code"]: item["evidence_id"] for item in attribution["F1"]}
+
+    assert f1["break_confirmed"] == "BOS_UP-3"
+    assert f1["mss"] == "MSS_UP-6"
+
+    f2 = {item["code"]: item["evidence_id"] for item in attribution["F2"]}
+
+    assert f2["sweep_confirmed"] == "p1"
+
+
+def test_the_payload_chain_carries_what_the_factors_cited() -> None:
+    """§15.2's "complete event-id chain" was the zone alone; now it is the
+    zone plus every distinct id the factors cited, deterministic: zone
+    first, the rest sorted, duplicates collapsed.
+
+    Tested directly for the same reason `_publish` is: no scoring fixture in
+    this file clears the §8.6 floor, so `run` cannot reach a payload.
+    """
+    from scanner.application.detection.confluence_replay import _payload_for, _Reading
+    from scanner.domain.confluence import Archetype, Confidence, Grade
+
+    candidate = publishable_candidate()
+
+    reading = _Reading(
+        rvol=None,
+        score=Decimal(0),
+        direction=None,
+        phase_measured=False,
+        accelerating=False,
+        decelerating=False,
+        exhausted=False,
+        spike_direction=None,
+        expansion_direction=None,
+        contracting=False,
+        suspect=False,
+        delta=None,
+        p90=None,
+        median_p90=None,
+    )
+
+    payload = _payload_for(
+        symbol="BTCUSDT",
+        timeframe=TF,
+        direction="UP",
+        archetype=Archetype.FVG_CONTINUATION,
+        confidence=Confidence(
+            base=Decimal(82),
+            synergy=Decimal(0),
+            penalty=Decimal(0),
+            final=Decimal(82),
+            published_grade=Grade.A,
+        ),
+        factors={},
+        levels=candidate.payload.levels,
+        atr=Decimal(10),
+        price=Decimal(100),
+        htf="BULLISH",
+        zone=zone("z1"),
+        wash_risk=False,
+        reading=reading,
+        algo_version="s8-test",
+        # "z1" duplicated on purpose: the zone must appear once, first.
+        cited_ids=("p1", "BOS_UP-3", "z1", "p1"),
+    )
+
+    assert payload is not None
+    assert payload.evidence_ids == ("z1", "BOS_UP-3", "p1")
