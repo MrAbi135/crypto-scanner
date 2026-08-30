@@ -183,7 +183,9 @@ from scanner.shared import Timeframe
 # target pool, F3 the zone it scores (its tree was dropped entirely before),
 # F4 joins the tree as the published VFS. The payload's evidence_ids widens
 # from the zone alone to the distinct ids the factors actually cited.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v26"
+# v27: swing walk-back fix (Sec 3.1) -- the flat pause in a descent or
+# ascent no longer mints a pivot, so which swings exist changes.
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v27"
 
 # Import-time, not call-time: a zone type with no version entry is invisible
 # to scoring, and that must refuse to boot rather than run quietly blind.

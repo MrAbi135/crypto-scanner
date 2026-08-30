@@ -76,7 +76,7 @@ def test_structure_does_not_seed_from_its_own_namespace() -> None:
     pipeline = build()
     structure = pipeline._structure
 
-    own = structure._states.context_key("BTCUSDT", "H1", "s4-v8")
+    own = structure._states.context_key("BTCUSDT", "H1", "s4-v9")
     seed = structure._shift_state.context_key("BTCUSDT", "H1", structure._shift_algo_version)
 
     assert own != seed

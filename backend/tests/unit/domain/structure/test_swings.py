@@ -224,3 +224,47 @@ def test_an_equal_run_filling_the_left_window_is_still_a_swing() -> None:
 
     # The invariant itself: the external pivot is among the internal ones.
     assert (6, SwingKind.HIGH) in [(s.index, s.kind) for s in internal]
+
+
+def test_a_flat_pause_in_a_descent_is_not_a_swing_high() -> None:
+    """§3.1's left-hand guard, taken literally: the shelf must rise above
+    what precedes it.
+
+    Highs: 90, then the 105 peak, then a three-candle pause at 100 that
+    fills the whole `k_int = 2` left window, then two lower rights. The
+    walk-back used to consume the 105 as if it were part of the equal set
+    (`>= candidate - epsilon` is true of higher candles too) and kept
+    going until it found the 90 -- so the pause on the way down from 105
+    minted a swing high, and on real data something lower always exists
+    further back.
+    """
+    highs = ["90", "105", "100", "100", "100", "98", "97"]
+    candles = [candle(i, high=high, low="80") for i, high in enumerate(highs)]
+
+    swings = detect_internal_swings(candles)
+
+    assert [(s.index, s.kind) for s in swings if s.kind is SwingKind.HIGH] == []
+
+
+def test_a_flat_pause_in_an_ascent_is_not_a_swing_low() -> None:
+    """The mirror: a shelf on the way up from a lower low is not a trough."""
+
+    lows = ["110", "95", "100", "100", "100", "102", "103"]
+    candles = [candle(i, high="120", low=low) for i, low in enumerate(lows)]
+
+    swings = detect_internal_swings(candles)
+
+    assert [(s.index, s.kind) for s in swings if s.kind is SwingKind.LOW] == []
+
+
+def test_a_shelf_that_rises_above_its_left_is_still_a_swing() -> None:
+    """The positive control for the guard: the same shape with the candle
+    before the equal run materially LOWER confirms, so the fix cannot have
+    thrown the legitimate case out with the false one."""
+
+    highs = ["90", "95", "100", "100", "100", "98", "97"]
+    candles = [candle(i, high=high, low="80") for i, high in enumerate(highs)]
+
+    swings = detect_internal_swings(candles)
+
+    assert [(s.index, s.kind) for s in swings if s.kind is SwingKind.HIGH] == [(4, SwingKind.HIGH)]

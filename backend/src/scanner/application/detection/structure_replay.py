@@ -47,7 +47,9 @@ from scanner.shared import Timeframe
 # s4-v2 (2026-08-17): first swing of each kind now emits an explicit SEED
 # classification event. Output-changing, hence the increment — Constitution
 # §44.5. Ratified as SLS v1.0.2 §3.3.
-STRUCTURE_ALGO_VERSION = "s4-v8"
+# v9: swing walk-back fix (Sec 3.1) -- the flat pause in a descent or
+# ascent no longer mints a pivot, so which swings exist changes.
+STRUCTURE_ALGO_VERSION = "s4-v9"
 
 
 @dataclass(frozen=True, slots=True)

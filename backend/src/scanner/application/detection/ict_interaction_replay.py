@@ -38,7 +38,9 @@ from scanner.domain.structure import (
 )
 from scanner.shared import Timeframe
 
-ICT_INTERACTION_ALGO_VERSION = "s6-interaction-v3"
+# v4: swing walk-back fix (Sec 3.1) -- the flat pause in a descent or
+# ascent no longer mints a pivot, so which swings exist changes.
+ICT_INTERACTION_ALGO_VERSION = "s6-interaction-v4"
 
 _ATR_PERIOD = 14
 _CONFIRMATION_MAX_LTF_CANDLES = 5
