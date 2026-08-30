@@ -31,8 +31,8 @@ class FakeCandleRepository:
         return self.counts.get((symbol, timeframe), 0)
 
 
-def warmth(count: int) -> ContextWarmth:
-    return ContextWarmth("BTCUSDT", Timeframe.H1, count)
+def warmth(count: int, timeframe: Timeframe = Timeframe.H1) -> ContextWarmth:
+    return ContextWarmth("BTCUSDT", timeframe, count)
 
 
 def test_the_gate_boundary_is_inclusive() -> None:
@@ -45,24 +45,58 @@ def test_the_gate_boundary_is_inclusive() -> None:
     assert warmth(DETECTION_MIN_CANDLES - 1).detection_warm is False
 
 
-def test_volume_warms_long_before_detection() -> None:
-    partial = warmth(VOLUME_MOMENTUM_MIN_CANDLES)
+def test_volume_warms_long_before_detection_on_a_non_seasonal_timeframe() -> None:
+    partial = warmth(VOLUME_MOMENTUM_MIN_CANDLES, Timeframe.H4)
 
     assert partial.volume_warm is True
     assert partial.detection_warm is False
 
 
+def test_seasonal_volume_needs_its_days_not_one_hundred_candles() -> None:
+    """§2.11's RVOL compares against the same slot on each of the previous
+    twenty days, so on H1 the volume floor is 480 candles, not 100 -- the
+    flat floor reported volume-ready while RVOL still returned None (on M5
+    the gap is ~19 days). G1 never lied -- it reads RVOL itself -- but this
+    report did, and an operator reading it would hunt a defect that was
+    arithmetic."""
+
+    assert warmth(100, Timeframe.H1).volume_warm is False
+    assert warmth(479, Timeframe.H1).volume_warm is False
+    assert warmth(480, Timeframe.H1).volume_warm is True
+
+    # M5: 20 days x 288 candles/day.
+    assert warmth(5759, Timeframe.M5).volume_warm is False
+    assert warmth(5760, Timeframe.M5).volume_warm is True
+
+
+def test_detection_before_seasonal_volume_says_so() -> None:
+    """On H1 detection (300) warms before volume (480); the report must not
+    fold that window into WARM."""
+
+    partial = warmth(DETECTION_MIN_CANDLES, Timeframe.H1)
+
+    assert partial.detection_warm is True
+    assert partial.volume_warm is False
+    assert partial.describe().startswith("DETECTION_ONLY")
+    assert "180 more" in partial.describe()
+
+
 @pytest.mark.parametrize(
-    ("count", "expected"),
+    ("count", "timeframe", "expected"),
     [
-        (0, "EMPTY"),
-        (50, "COLD"),
-        (150, "VOLUME_ONLY"),
-        (DETECTION_MIN_CANDLES, "WARM"),
+        (0, Timeframe.H1, "EMPTY"),
+        (50, Timeframe.H1, "COLD"),
+        # H1 is seasonal: at 150 candles volume (480) is as unmet as
+        # detection (300), so VOLUME_ONLY belongs to a non-seasonal rung.
+        (150, Timeframe.H1, "COLD"),
+        (150, Timeframe.H4, "VOLUME_ONLY"),
+        (DETECTION_MIN_CANDLES, Timeframe.H1, "DETECTION_ONLY"),
+        (480, Timeframe.H1, "WARM"),
+        (DETECTION_MIN_CANDLES, Timeframe.H4, "WARM"),
     ],
 )
-def test_each_state_describes_itself(count: int, expected: str) -> None:
-    assert warmth(count).describe().startswith(expected)
+def test_each_state_describes_itself(count: int, timeframe: Timeframe, expected: str) -> None:
+    assert warmth(count, timeframe).describe().startswith(expected)
 
 
 def test_a_cold_context_reports_how_far_it_has_to_go() -> None:
