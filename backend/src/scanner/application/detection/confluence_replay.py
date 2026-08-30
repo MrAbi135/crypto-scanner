@@ -185,7 +185,10 @@ from scanner.shared import Timeframe
 # from the zone alone to the distinct ids the factors actually cited.
 # v27: swing walk-back fix (Sec 3.1) -- the flat pause in a descent or
 # ascent no longer mints a pivot, so which swings exist changes.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v27"
+# v28: the 0.75-1.5 x ATR with-trend leg is RETRACEMENT, not MICRO -- the
+# mislabel removed every moderate leg from trend strength and OTE anchoring,
+# and F1's displaced term, A3 and the PD context all read the legs.
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v28"
 
 # Import-time, not call-time: a zone type with no version entry is invisible
 # to scoring, and that must refuse to boot rather than run quietly blind.

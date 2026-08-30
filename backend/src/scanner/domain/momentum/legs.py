@@ -206,10 +206,14 @@ def _classify(
     if displaced and progress_atr >= IMPULSE_MIN_ATR:
         return build(LegKind.IMPULSE)
 
-    # Enough progress but no displacement, or displacement without progress:
-    # §7.5 requires both for an impulse, and there is no third named category
-    # for a with-trend leg that is neither.
-    return build(LegKind.MICRO if progress_atr < IMPULSE_MIN_ATR else LegKind.RETRACEMENT)
+    # Enough progress but no displacement, or displacement without the 1.5x
+    # progress: §7.5 requires both for an impulse, and there is no third named
+    # category for a with-trend leg that is neither. RETRACEMENT is the
+    # residual, never MICRO -- §7.5 defines micro as "below 0.75 x ATR net
+    # progress", and everything reaching this line already cleared that bar.
+    # The first draft sent the 0.75-1.5 band to MICRO, which silently removed
+    # every moderate with-trend leg from trend strength and OTE anchoring.
+    return build(LegKind.RETRACEMENT)
 
 
 def anchoring_legs(legs: Sequence[Leg]) -> tuple[Leg, ...]:
