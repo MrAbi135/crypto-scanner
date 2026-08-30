@@ -23,9 +23,9 @@ from datetime import datetime
 from scanner.application.ports import CandleRepository
 from scanner.domain.common.warmup import (
     DETECTION_MIN_CANDLES,
-    VOLUME_MOMENTUM_MIN_CANDLES,
     WarmupCapability,
     is_warm,
+    minimum_candles,
 )
 from scanner.shared import Timeframe
 
@@ -55,9 +55,15 @@ class ContextWarmth:
 
     @property
     def volume_warm(self) -> bool:
+        # Timeframe-aware: §2.11's seasonal RVOL needs BASELINE_DAYS of
+        # same-slot history on M5/M15/H1. The flat 100-candle floor here
+        # reported M5 volume-ready ~19 days before RVOL could return a value
+        # -- an operator reading VOLUME_ONLY would go looking for a defect
+        # that was actually arithmetic.
         return is_warm(
             WarmupCapability.VOLUME,
             closed_candles=self.closed_candles,
+            timeframe=self.timeframe,
         )
 
     @property
@@ -66,8 +72,15 @@ class ContextWarmth:
         return max(0, DETECTION_MIN_CANDLES - self.closed_candles)
 
     def describe(self) -> str:
-        if self.detection_warm:
+        # WARM is deliberately gated on both: on M5 the seasonal volume floor
+        # (5,760) is far above the detection floor (300), and a context past
+        # detection but short of RVOL is exactly what an operator needs to
+        # see spelled out rather than folded into "WARM".
+        if self.detection_warm and self.volume_warm:
             return "WARM"
+
+        if self.detection_warm:
+            return f"DETECTION_ONLY (needs {self._volume_short} more for volume/RVOL)"
 
         if self.volume_warm:
             return f"VOLUME_ONLY (needs {self.candles_short} more for detection)"
@@ -76,9 +89,14 @@ class ContextWarmth:
             return "EMPTY"
 
         return (
-            f"COLD (needs {self.candles_short} more for detection, "
-            f"{max(0, VOLUME_MOMENTUM_MIN_CANDLES - self.closed_candles)} for volume)"
+            f"COLD (needs {self.candles_short} more for detection, {self._volume_short} for volume)"
         )
+
+    @property
+    def _volume_short(self) -> int:
+        floor = minimum_candles(WarmupCapability.VOLUME, timeframe=self.timeframe)
+
+        return max(0, floor - self.closed_candles)
 
 
 async def assess_context(

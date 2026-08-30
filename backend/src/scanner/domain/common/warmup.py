@@ -88,11 +88,33 @@ class WarmupCapability(str, Enum):
     """Momentum analytics: >= 100 closed candles."""
 
 
-def minimum_candles(capability: WarmupCapability) -> int:
-    """Return the §1.9 closed-candle floor for one capability."""
+def minimum_candles(
+    capability: WarmupCapability,
+    *,
+    timeframe: Timeframe | None = None,
+) -> int:
+    """Return the §1.9 closed-candle floor for one capability.
 
+    VOLUME is the one capability whose real floor depends on the timeframe:
+    §2.11's RVOL baseline is time-of-day aware on the seasonal timeframes and
+    needs `BASELINE_DAYS` *days* of same-slot history, not 100 candles. On M5
+    that is 5,760 candles against the flat floor's 100 -- a warmth report
+    built on the flat number claims volume readiness ~19 days early, while
+    §8's own gate (which reads whether RVOL actually returned a value) keeps
+    refusing. Pass the timeframe wherever it is known; the flat floor is only
+    the answer when the capability is not seasonal.
+    """
     if capability is WarmupCapability.DETECTION:
         return DETECTION_MIN_CANDLES
+
+    if (
+        capability is WarmupCapability.VOLUME
+        and timeframe is not None
+        and uses_seasonal_baseline(timeframe)
+    ):
+        per_day = _MINUTES_PER_DAY // timeframe.minutes
+
+        return max(VOLUME_MOMENTUM_MIN_CANDLES, BASELINE_DAYS * per_day)
 
     return VOLUME_MOMENTUM_MIN_CANDLES
 
@@ -101,6 +123,7 @@ def is_warm(
     capability: WarmupCapability,
     *,
     closed_candles: int,
+    timeframe: Timeframe | None = None,
 ) -> bool:
     """Whether `closed_candles` clears the §1.9 floor for `capability`.
 
@@ -111,7 +134,7 @@ def is_warm(
     if closed_candles < 0:
         raise ValueError("closed_candles must be non-negative")
 
-    return closed_candles >= minimum_candles(capability)
+    return closed_candles >= minimum_candles(capability, timeframe=timeframe)
 
 
 def detection_is_warm(closed_candles: int) -> bool:
