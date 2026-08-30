@@ -72,7 +72,11 @@ describe('StatusStrip', () => {
 
     render(<StatusStrip />)
 
-    const strip = await screen.findByTestId('status-strip')
+    // Awaited via role, not the status-strip testid: the loading placeholder
+    // carries the same testid, so findByTestId resolves before the fetch
+    // settles and reads "reading…" instead of the error. Only the settled
+    // error state is role="alert".
+    const strip = await screen.findByRole('alert')
 
     expect(strip.textContent).toContain('unknown')
     expect(strip.textContent).toContain('cid-1')
@@ -88,7 +92,7 @@ describe('StatusStrip', () => {
 
     render(<StatusStrip />)
 
-    const strip = await screen.findByTestId('status-strip')
+    const strip = await screen.findByRole('alert')
 
     expect(strip.textContent).toContain('unknown')
     expect(strip.textContent).not.toContain('covered')
@@ -108,7 +112,7 @@ describe('StatusStrip', () => {
 
       render(<StatusStrip />)
 
-      expect((await screen.findByTestId('status-strip')).textContent).toContain('unknown')
+      expect((await screen.findByRole('alert')).textContent).toContain('unknown')
     },
   )
 
