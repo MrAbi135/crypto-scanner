@@ -55,7 +55,9 @@ from scanner.shared.errors import DomainInvariantError
 # -- `mss_is_low_quality` finally has its caller. And the MSS sweep-origin
 # lookback now compares the sweep's transitioned_at against candle times
 # instead of a frozen recorded index against today's offsets.
-STRUCTURE_SHIFT_ALGO_VERSION = "s6-structure-shift-v3"
+# v4: swing walk-back fix (Sec 3.1) -- the flat pause in a descent or
+# ascent no longer mints a pivot, so which swings exist changes.
+STRUCTURE_SHIFT_ALGO_VERSION = "s6-structure-shift-v4"
 
 _ATR_PERIOD = 14
 _MSS_SWEEP_LOOKBACK = 10

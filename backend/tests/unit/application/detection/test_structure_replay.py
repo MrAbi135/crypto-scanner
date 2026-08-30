@@ -252,7 +252,7 @@ async def test_replay_persists_structure_events_and_state() -> None:
     state = await states.load(
         "BTCUSDT",
         Timeframe.H1.value,
-        "s4-v8",
+        "s4-v9",
     )
 
     assert state is not None
@@ -311,7 +311,7 @@ async def test_rebuild_state_replaces_old_snapshot() -> None:
     await store.save(
         (f"structure:s4-v8:BTCUSDT:{Timeframe.H1.value}"),
         (
-            '{"algo_version":"s4-v8",'
+            '{"algo_version":"s4-v9",'
             '"last_processed_open_time":null,'
             '"symbol":"BTCUSDT",'
             f'"timeframe":"{Timeframe.H1.value}",'
@@ -347,7 +347,7 @@ async def test_rebuild_state_replaces_old_snapshot() -> None:
     state = await states.load(
         "BTCUSDT",
         Timeframe.H1.value,
-        "s4-v8",
+        "s4-v9",
     )
 
     assert state is not None

@@ -44,7 +44,9 @@ from scanner.shared import Timeframe
 # window_time.py) -- §5.8's 100-candle expiry was unreachable for
 # tail-frozen OTEs -- and the origin-candle read guards against a rebased
 # negative index wrapping to the window's far end.
-ICT_OTE_ALGO_VERSION = "s6-ote-v3"
+# v4: swing walk-back fix (Sec 3.1) -- the flat pause in a descent or
+# ascent no longer mints a pivot, so which swings exist changes.
+ICT_OTE_ALGO_VERSION = "s6-ote-v4"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")

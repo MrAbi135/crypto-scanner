@@ -82,7 +82,9 @@ from scanner.shared import Timeframe
 # backfill. Every pass now revisits recent sweeps and publishes what matured
 # as LIQUIDITY_SWEEP_RECLAIMED / LIQUIDITY_SWEEP_DISPLACED /
 # LIQUIDITY_STOP_HUNT / LIQUIDITY_STOP_HUNT_FAILED events.
-LIQUIDITY_ALGO_VERSION = "s5-v9"
+# v10: swing walk-back fix (Sec 3.1) -- the flat pause in a descent or
+# ascent no longer mints a pivot, so which swings exist changes.
+LIQUIDITY_ALGO_VERSION = "s5-v10"
 
 _ATR_PERIOD = 14
 _SWEEP_SCAN_ATR = Decimal("3")

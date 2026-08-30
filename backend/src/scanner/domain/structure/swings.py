@@ -131,19 +131,27 @@ def _has_lower_left(
     candidate: Decimal,
     epsilon: Decimal,
 ) -> bool:
-    """Is anything materially lower to the left, looking past the equal run?
+    """Is the candle just past the equal run materially lower?
 
     Walks back over candles whose high matches the candidate within epsilon --
     the equal set the candidate terminates -- and asks whether the candle
     before the set is lower. A run that reaches the start of the series has no
     such candle, which is how a flat shelf is still refused.
+
+    The walk consumes ONLY the equal set. The first draft's condition was
+    `high >= candidate - epsilon`, which also consumed materially HIGHER
+    candles and kept walking until it found a lower one anywhere to the left
+    -- so the flat pause in a descent, a shelf whose left neighbour is the
+    higher high it fell from, minted a swing high as long as any lower candle
+    existed further back, which on real data is always. A shelf is only a
+    peak if it rises above what precedes it.
     """
     cursor = index - 1
 
-    while cursor >= 0 and candles[cursor].high >= candidate - epsilon:
+    while cursor >= 0 and abs(candles[cursor].high - candidate) <= epsilon:
         cursor -= 1
 
-    return cursor >= 0
+    return cursor >= 0 and candles[cursor].high < candidate - epsilon
 
 
 def _has_higher_left(
@@ -156,10 +164,10 @@ def _has_higher_left(
     """Mirror of `_has_lower_left` on lows."""
     cursor = index - 1
 
-    while cursor >= 0 and candles[cursor].low <= candidate + epsilon:
+    while cursor >= 0 and abs(candles[cursor].low - candidate) <= epsilon:
         cursor -= 1
 
-    return cursor >= 0
+    return cursor >= 0 and candles[cursor].low > candidate + epsilon
 
 
 def _is_swing_high(
