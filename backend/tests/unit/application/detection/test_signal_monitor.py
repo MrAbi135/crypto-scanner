@@ -155,6 +155,22 @@ class FakeStructureEvidence:
         return tuple(r for r in self.records if start <= r.event_at < end)
 
 
+class FakeSetups:
+    def __init__(self, rows: dict[str, object] | None = None) -> None:
+        self.rows = rows or {}
+
+    async def get(self, setup_id: str):
+        return self.rows.get(setup_id)
+
+
+class FakeEngineEvents:
+    def __init__(self, records: tuple = ()) -> None:
+        self.records = records
+
+    async def list_events(self, symbol, timeframe, start, end):
+        return tuple(r for r in self.records if start <= r.event_at < end)
+
+
 def monitor(
     *,
     live=("sig-1",),
@@ -162,6 +178,8 @@ def monitor(
     candles=None,
     zone_context=None,
     evidence=None,
+    setups=None,
+    events=None,
     **kw,
 ):
     transitions = FakeTransitions(live, state)
@@ -175,6 +193,8 @@ def monitor(
         outcomes,
         zone_context=zone_context,
         evidence=evidence,
+        setups=setups,
+        events=events,
     )
 
     svc.outcomes = outcomes
@@ -553,3 +573,112 @@ async def test_a_down_signal_reads_its_own_directions_demotion() -> None:
 
     assert report.transitions == 1
     assert transitions.written[0].to_state == "INVALIDATED_EARLY"
+
+
+def _setup_with_sweep(pool_id: str | None):
+    from scanner.application.ports.setups import SetupRecord
+
+    contribution = {"code": "sweep_confirmed", "points": "20", "evidence_id": pool_id}
+
+    return SetupRecord(
+        setup_id="sig-1",
+        symbol="BTCUSDT",
+        timeframe=TF,
+        direction="UP",
+        archetype="A1",
+        gate_results="{}",
+        factor_scores="{}",
+        adjustments="{}",
+        base_confidence=Decimal(70),
+        final_confidence=Decimal(75),
+        floor_passed=True,
+        algo_version="s8-test",
+        evaluated_at=T0,
+        evidence=json.dumps({"attribution": {"F2": [contribution]}}),
+    )
+
+
+def _reclaim_event(pool_id: str, at: datetime):
+    from scanner.application.ports.detection import EngineEventRecord
+
+    return EngineEventRecord(
+        event_key=f"reclaim-{pool_id}-{at.isoformat()}",
+        symbol="BTCUSDT",
+        timeframe=TF,
+        event_type="LIQUIDITY_SWEEP_RECLAIMED",
+        event_at=at,
+        algo_version="s5-test",
+        payload=json.dumps({"pool_id": pool_id}),
+        created_at=at,
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_seeding_sweeps_reclaim_invalidates_the_signal_early() -> None:
+    """§12.3's third premise, wired through the setup's own attribution:
+    the F2 sweep_confirmed contribution names the pool the setup stood on,
+    and that pool's LIQUIDITY_SWEEP_RECLAIMED event kills the premise."""
+
+    svc, transitions = monitor(
+        candles=[candle(3, high="108", low="106", close="107")],
+        setups=FakeSetups({"sig-1": _setup_with_sweep("pool-9")}),
+        events=FakeEngineEvents((_reclaim_event("pool-9", T0 + timedelta(hours=2)),)),
+    )
+
+    report = await svc.run("BTCUSDT", TF, T0 + timedelta(hours=3))
+
+    assert report.transitions == 1
+    assert transitions.written[0].to_state == "INVALIDATED_EARLY"
+
+    evidence = json.loads(transitions.written[0].trigger_evidence)
+
+    assert evidence["premise"] == "seeding_sweep_reclaimed"
+
+
+@pytest.mark.asyncio
+async def test_another_pools_reclaim_is_not_this_signals_premise() -> None:
+    svc, transitions = monitor(
+        candles=[candle(3, high="108", low="106", close="107")],
+        setups=FakeSetups({"sig-1": _setup_with_sweep("pool-9")}),
+        events=FakeEngineEvents((_reclaim_event("pool-other", T0 + timedelta(hours=2)),)),
+    )
+
+    report = await svc.run("BTCUSDT", TF, T0 + timedelta(hours=3))
+
+    assert report.transitions == 0
+    assert transitions.written == []
+
+
+@pytest.mark.asyncio
+async def test_a_setup_without_attribution_ids_stays_quiet() -> None:
+    """Setups recorded before v26 carry evidence_id: null. The check must
+    no-op for them rather than match a reclaim to nothing."""
+
+    svc, transitions = monitor(
+        candles=[candle(3, high="108", low="106", close="107")],
+        setups=FakeSetups({"sig-1": _setup_with_sweep(None)}),
+        events=FakeEngineEvents((_reclaim_event("pool-9", T0 + timedelta(hours=2)),)),
+    )
+
+    report = await svc.run("BTCUSDT", TF, T0 + timedelta(hours=3))
+
+    assert report.transitions == 0
+    assert transitions.written == []
+
+
+@pytest.mark.asyncio
+async def test_a_reclaim_on_the_observed_candle_waits_one_candle() -> None:
+    """The same strictly-before rule as the other two premises."""
+
+    at = T0 + timedelta(hours=3)
+
+    svc, transitions = monitor(
+        candles=[candle(3, high="108", low="106", close="107")],
+        setups=FakeSetups({"sig-1": _setup_with_sweep("pool-9")}),
+        events=FakeEngineEvents((_reclaim_event("pool-9", at + TF.duration),)),
+    )
+
+    report = await svc.run("BTCUSDT", TF, at)
+
+    assert report.transitions == 0
+    assert transitions.written == []
