@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.7
-**Ratified:** 2026-07-12 · **Last amended:** 2026-08-28 (v1.0.7; see Amendment History)
+**Version:** 1.0.8
+**Ratified:** 2026-07-12 · **Last amended:** 2026-08-30 (v1.0.8; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -526,7 +526,7 @@ Zones and context: where institutional orders were placed, where inefficiency re
 
 **Inputs.** INVALIDATED OBs; sweeps; structure events.
 
-**Detection Logic (bullish breaker; mirror for bearish).** A *bearish* OB transitions to bullish Breaker when: (1) the OB is INVALIDATED by an upward close through its distal edge; (2) that invalidating move satisfies displacement **and** breaks structure (internal BOS minimum); (3) qualifying precondition: the bearish OB's own down-move had swept a liquidity pool (`sweep-origin breaker`, grade `BRK_A`) or was preceded by a failure swing (`BRK_B`). Zone geometry inherited from the OB; polarity flipped; state machine restarts at `FRESH`.
+**Detection Logic (bullish breaker; mirror for bearish).** A *bearish* OB transitions to bullish Breaker when: (1) the OB is INVALIDATED by an upward close through its distal edge; (2) that invalidating move satisfies displacement **and** breaks structure (internal BOS minimum); (3) qualifying precondition: the bearish OB's own down-move had swept a liquidity pool (`sweep-origin breaker`, grade `BRK_A`). The failure-swing-without-sweep case is NOT a breaker grade: it is §5.4's Mitigation Block (`MIT`), which claims exactly that shape — see v1.0.8, which retired the stray `BRK_B` label this clause used to carry (no grade table ever priced it). Zone geometry inherited from the OB; polarity flipped; state machine restarts at `FRESH`.
 
 **Validation.** The invalidating break must be confirmed before breaker registration (no simultaneous-candle promotion). **Invalidation.** Same state machine as OB; a breaker invalidated in turn is terminal (no second polarity flip — re-flipping zones is curve-fitting, not doctrine).
 
@@ -729,7 +729,7 @@ A candidate setup on symbol S, timeframe T, direction D must pass **all**:
 | G3 | PD context: §5.7 directional gate satisfied (or PD_SUSPENDED ⇒ only continuation archetypes eligible) |
 | G4 | Zone: ≥ 1 ACTIVE/FRESH zone object (OB/Breaker/FVG/OTE/BPR) of polarity D whose band contains or is adjacent (≤ 0.5 × ATR) to current price |
 | G5 | No live contrary fact: no unexpired opposing sweep-reclaim (§4.6), no `failed` stop-hunt/BOS against D within its window, no opposing displacement in last 3 candles |
-| G6 | Volume integrity: symbol not `wash_risk`-capped below the archetype's minimum volume requirement |
+| G6 | Volume integrity: symbol not `wash_risk`-capped below the archetype's minimum volume requirement. *v1.0.8: no per-archetype minimum is defined anywhere in v1, so this clause is vacuously satisfied and the implementation documents it as such; §6.7's hard cap and G1's RVOL readability carry the volume-integrity burden until a minimum is ratified here.* |
 
 Failing any gate ⇒ no setup exists; nothing is scored, nothing is logged as a signal (gate failures are counted in diagnostics only).
 
@@ -868,7 +868,7 @@ Every publishable setup must match exactly one archetype (classification is rule
 | **A2 Breaker Retest** | Breaker formed → first retest with Respect (§5.9) | BRK_A grade or entry-grade Confirmation | 72 |
 | **A3 Continuation Pullback** | Trend + displaced BOS → retrace into OTE/OB/FVG | HTF aligned; retracement leg (§7.5), not counter-displacement | 70 |
 | **A4 FVG Continuation** | Displacement FVG → first touch in trend direction | HTF aligned; FVG age ≤ 30 candles | 70 |
-| **A5 Range Liquidity Play** | RANGING state; sweep of range extreme → rejection | Target = opposing range extreme; range ≥ 2 × ATR | 74 |
+| **A5 Range Liquidity Play** | RANGING state; sweep of range extreme → rejection | Target = opposing range extreme; range ≥ 2 × ATR *(v1.0.8: unenforceable until §5.7's range width is persisted as evidence — A5 chains fail on their readable links, never on an invented width)* | 74 |
 
 Below-floor candidates are recorded internally (calibration data) but never published — the floor is the quality-over-quantity mechanism.
 
@@ -945,7 +945,7 @@ An alert requires a published signal (all §8 gates + archetype floor already pa
 
 ### 10.3 Duplicate Suppression & Cooldowns
 
-- **Duplicate key:** `(symbol, TF, direction, archetype, zone_band_rounded)`. A signal matching an ACTIVE signal's key is merged as a *refresh event* on the existing signal (evidence appended) — never a second alert.
+- **Duplicate key:** `(symbol, TF, direction, archetype, zone_band_rounded)`. `zone_band_rounded` = each band edge rounded to **4 significant figures** (v1.0.8) — significant figures, not fixed decimals, because the key must behave identically on a 5-figure BTC band and a sub-cent altcoin band; fixed decimals collapse one and never merge the other. A signal matching an ACTIVE signal's key is merged as a *refresh event* on the existing signal (evidence appended) — never a second alert.
 - **Cooldowns (per key):** High: 1 alert / 4 × TF duration; Medium: 1 / 2 × TF duration; Low: dashboard only (no cooldown needed). A **state-change exception** bypasses cooldown once: transition to `INVALIDATED` or `TARGET_REACHED` on an alerted signal always notifies (closing the loop is not noise).
 - **Per-user global ceiling:** `P.alert.user_daily_cap = 25` push alerts/day default (user-configurable downward only in v1); when the cap binds, lowest-priority pending alerts drop first, and the digest reports what was suppressed — honest suppression, never silent.
 
@@ -1014,7 +1014,7 @@ Per closed candle on the signal's TF: entry-zone touch check (→ ACTIVE); inval
 
 ### 12.4 Success / Failure Accounting
 
-`SUCCESS`: target touched before invalidation close. `FAILED`: invalidation close first. Both record: elapsed candles, max favorable excursion (MFE), max adverse excursion (MAE) in R units (R = |entry mid − invalidation|). Outcomes are immutable and feed §28-Constitution signal-quality metrics per algo version. Expired states are excluded from hit-rate but reported (a scanner that times out constantly has a target-selection problem — visible, not hidden).
+`SUCCESS`: target touched before invalidation close. `FAILED`: invalidation close first. **Same-candle collision (v1.0.8):** one candle whose range touches the target and whose close is beyond the invalidation satisfies both halves with no way to order them; it resolves to `FAILED`, recorded with a reason naming the indeterminate order — §15.4 puts the record above the numbers, and awarding the favourable reading of an unknowable order is the flattery that ruins one. Both record: elapsed candles, max favorable excursion (MFE), max adverse excursion (MAE) in R units (R = |entry mid − invalidation|). Outcomes are immutable and feed §28-Constitution signal-quality metrics per algo version. Expired states are excluded from hit-rate but reported (a scanner that times out constantly has a target-selection problem — visible, not hidden).
 
 ### 12.5 Expiration (TTL)
 
@@ -1158,6 +1158,29 @@ Every parameter change increments `param_set_version` and requires golden-datase
 ---
 
 ## Amendment History
+
+### v1.0.8 — 2026-08-30
+
+Five clarifications out of the 2026-08-29 full-domain review. **None changes
+behaviour**: each records the reading the tested implementation already
+follows, or marks a clause as unenforceable rather than silently unenforced.
+Delegated by the product owner ("jo zyada safe ho wo kar lo") with the
+instruction to take the safe path — the safe path is the document catching up
+with the code, alternatives recorded where one exists.
+
+| # | Section | Was | Now | Why |
+|---|---|---|---|---|
+| 1 | §5.2(3) / §5.4 | §5.2(3) named a `BRK_B` grade for the failure-swing precondition while §5.4 claims the same shape as `MIT` | the failure-swing-without-sweep case is §5.4's `MIT`; `BRK_B` retired | The two sections contradicted each other, and the evidence sides with §5.4: §8.3.1's grade table prices `MIT` (18) and has no `BRK_B` row at all, §8.6 A2 names only `BRK_A`, and the implementation has only ever built `BRK_A` breakers (sweep-origin required) and `MIT` blocks. **Alternative recorded:** if a distinct between-grade for failure-swing breakers is ever wanted, it needs a ratified point value here first — that door stays open for the product owner. |
+| 2 | §8.2 G6 | "the archetype's minimum volume requirement", defined nowhere | clause marked vacuously satisfied in v1 | No archetype minimum exists in §8.6 or Appendix A. The implementation documents the vacuous pass rather than inventing a threshold (Constitution: ambiguities are resolved by amending this document, not by guessing). §6.7's wash-risk hard cap and G1's RVOL readability are the operative volume-integrity checks. |
+| 3 | §10.3 | `zone_band_rounded`, precision unstated | 4 significant figures | Fixed decimals cannot serve both a 5-figure BTC band and a sub-cent altcoin band: one rounds to a single bucket (every signal collides), the other never merges. Significant figures scale with price. Implemented and tested since the review's dedup fix. |
+| 4 | §12.4 | success/failure defined by order, same-candle collision unaddressed | same-candle collision resolves `FAILED`, reason names the indeterminate order | One candle can satisfy both halves with no knowable order. §15.4 forbids awarding the favourable reading; the count stays auditable because the reason says why. Implemented and tested in the lifecycle state machine since S9. |
+| 5 | §8.6 A5 | "range ≥ 2 × ATR" as a checkable requirement | marked unenforceable until §5.7's range width is persisted | Nothing records the dealing range's width as evidence, so the clause cannot be evaluated honestly. A5 candidates fail on their genuinely readable links rather than on an invented width; the clause stays in the table as the requirement to wire once the width is recorded. |
+
+**Impact review.** No parameter changes, no detector changes, no golden
+dataset relabelling, no `algo_version` bump — the v1.0.3 precedent applies
+throughout: the document said less (or other) than it meant, and the
+implementation already follows the meaning now written down.
+
 
 ### v1.0.7 — 2026-08-28
 
@@ -1422,4 +1445,4 @@ belongs in its own amendment, not folded into an unrelated one.
 
 *This document is the complete detection doctrine of the Institutional AI Crypto Scanner. An engineering team implementing it makes zero trading-logic decisions: where a question is not answered here, the answer is an amendment to this document — never a guess in code.*
 
-**— End of Scanner Logic Specification v1.0.7 —**
+**— End of Scanner Logic Specification v1.0.8 —**
