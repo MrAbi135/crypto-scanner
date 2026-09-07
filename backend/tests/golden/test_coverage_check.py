@@ -87,3 +87,46 @@ def test_the_manifest_covers_every_detection_subsection() -> None:
         present = {i for i in ids if i.startswith(f"{major}.")}
 
         assert len(present) == count, f"section {major} should have {count} subsections"
+
+
+# The datasets whose labels the developer has not personally verified yet.
+#
+# **Gate G2 requires this set to be EMPTY** (Roadmap §8.2; Constitution §5 makes
+# the verification non-delegable). Until it is, the debt is named here rather
+# than counted by hand -- because counting it by hand is how it drifted: the
+# tally was taken with `grep "PENDING DEVELOPER VERIFICATION"`, which is
+# case-sensitive, and three datasets spell it in lower case. Two pending
+# datasets were reported to the developer on 2026-09-07; there were five.
+#
+# Asserted as equality, not containment, so the set can only ever shrink on
+# purpose: verifying a dataset without deleting its line here fails just as
+# loudly as adding a new unverified one.
+UNVERIFIED_LABELS = frozenset(
+    {
+        "a-spike-under-the-quote-floor-does-not-confirm.json",
+        "volume-spike-on-a-doji-is-absorption.json",
+        "a-quiet-market-fails-structure-and-zone.json",
+    }
+)
+
+
+def _pending_label_files() -> frozenset[str]:
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).parent / "datasets"
+
+    return frozenset(
+        path.name
+        for path in root.rglob("*.json")
+        if "pending" in json.loads(path.read_text(encoding="utf-8")).get("labelled_by", "").lower()
+    )
+
+
+def test_only_the_named_datasets_await_developer_verification() -> None:
+    """G2's "zero datasets left pending developer verification", made countable.
+
+    Nothing in CI asserted this before -- the criterion was checked by eye
+    against a case-sensitive grep, and undercounted by three.
+    """
+    assert _pending_label_files() == UNVERIFIED_LABELS
