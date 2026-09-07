@@ -39,10 +39,17 @@ run() {
   local ack="$1" violations="$2"
 
   ACK_FILE=$(mktemp)
-  printf '%s\n' "$ack" > "$ACK_FILE"
+  printf '%s
+' "$ack" > "$ACK_FILE"
   problems=0
 
+  # The suite's real sequence, not just its first half: triage records what
+  # matched, and the stale sweep runs once at the end over every check's
+  # hits. Exercising only triage would leave the "matched nothing" alarm --
+  # the one this file exists to protect -- untested from here on.
+  ACK_HITS=()
   triage_violations "$violations" > "$OUT"
+  report_stale_acknowledgements
 
   rm -f "$ACK_FILE"
 }

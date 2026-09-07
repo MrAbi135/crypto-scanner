@@ -34,6 +34,37 @@
 
 
 -- ===========================================================================
+-- Scope: live contexts only, never the golden fixtures
+-- ===========================================================================
+-- `scripts/golden-load.sh` loads 29 synthetic GOLDEN* symbols so the chart can
+-- render them for Constitution 5 label verification. They are not markets.
+-- Several are built to prove that the engine emits NOTHING -- GOLDENFLAT is
+-- "flat window emits nothing", GOLDENCONF is "a quiet market fails structure
+-- and zone" -- so check G reads five of them as detection falling behind, and
+-- every threshold below ("rows >= 20", "setups >= 10") is calibrated for live
+-- volume and miscounts against 29 tiny fixtures.
+--
+-- They are not unchecked: the golden harness asserts their exact output
+-- byte-for-byte in CI, which is a far stricter test than any heuristic here.
+-- This suite watches the live engine, so it reads through these views and the
+-- fixtures stay out of it.
+create temporary view soak_engine_events as
+  select * from detection.engine_events where symbol not like 'GOLDEN%';
+create temporary view soak_setups as
+  select * from detection.setups where symbol not like 'GOLDEN%';
+create temporary view soak_liquidity_pools as
+  select * from detection.liquidity_pools where symbol not like 'GOLDEN%';
+create temporary view soak_ict_zones as
+  select * from detection.ict_zones where symbol not like 'GOLDEN%';
+create temporary view soak_candles as
+  select * from market.candles where symbol not like 'GOLDEN%';
+create temporary view soak_symbols as
+  select * from market.symbols where symbol not like 'GOLDEN%';
+create temporary view soak_liquidity_history as
+  select * from market.liquidity_history where symbol not like 'GOLDEN%';
+
+
+-- ===========================================================================
 -- B. An event written more than once for the same fact
 -- ===========================================================================
 -- 163,446 rows for 16,597 events on 2026-08-26, one of them repeated 1,980
@@ -58,7 +89,7 @@ with keyed as (
                                 then coalesce(payload::json ->> 'pool_id',
                                               payload::json ->> 'sweep_pool_id')
                                 end)) as logical
-    from detection.engine_events
+    from soak_engine_events
     group by 1
 )
 select 'B. duplicated events' as check,
@@ -96,8 +127,8 @@ where rows >= 20                            -- a 2/1 split on three rows is nois
 
 select 'C. orphaned liquidity events' as check,
        e.symbol, e.timeframe, e.event_type, count(*) as rows
-from detection.engine_events e
-left join detection.liquidity_pools p
+from soak_engine_events e
+left join soak_liquidity_pools p
        on p.pool_id = coalesce(e.payload::json ->> 'pool_id',
                                e.payload::json ->> 'sweep_pool_id')
 where e.event_type like 'LIQUIDITY%'
@@ -119,7 +150,7 @@ group by 1, 2, 3, 4;
 select 'C2. liquidity payload names no pool' as check,
        e.event_type, count(*) as rows,
        (array_agg(distinct left(e.payload, 120)))[1] as sample
-from detection.engine_events e
+from soak_engine_events e
 where e.event_type like 'LIQUIDITY%'
   and e.created_at > now() - interval '6 hours'
   and e.payload::json ->> 'pool_id' is null
@@ -140,7 +171,7 @@ group by 1, 2;
 
 with scored as (
     select f.key as factor, max((f.value #>> '{}')::numeric) as best, count(*) as n
-    from detection.setups s,
+    from soak_setups s,
          lateral json_each(s.factor_scores::json) f
     group by 1
 )
@@ -185,12 +216,12 @@ where n >= 10 and best = 0;
 
 with unmet as (
     select a.key as archetype, term.value #>> '{}' as term, count(*) as times
-    from detection.setups s,
+    from soak_setups s,
          lateral json_each(s.evidence::json -> 'archetype_unmet') a,
          lateral json_array_elements(a.value) term
     group by 1, 2
 ),
-total as (select count(*) as n from detection.setups),
+total as (select count(*) as n from soak_setups),
 rare_by_doctrine(archetype, term) as (
     values ('A2', 'breaker_formed')
 )
@@ -220,7 +251,7 @@ where t.n >= 10
 
 select 'F. zone grade cannot score' as check,
        'grade' as dimension, grade as value, count(*) as live_zones
-from detection.ict_zones
+from soak_ict_zones
 where state not in ('INVALIDATED', 'EXPIRED', 'FILLED', 'INVERTED', 'DEAD')
   and grade not in ('BRK_A', 'OB_A', 'OB_B', 'FVG', 'MIT', 'IFVG')
   -- §8.3 grades locations; §5.8 makes OTE a stack overlay (its worked example
@@ -230,7 +261,7 @@ group by 1, 2, 3;
 
 select 'F. zone state cannot score' as check,
        'state' as dimension, state as value, count(*) as live_zones
-from detection.ict_zones
+from soak_ict_zones
 where state not in ('INVALIDATED', 'EXPIRED', 'FILLED', 'INVERTED', 'DEAD')
   -- Paid directly, or translated by `_FVG_STATE_EQUIVALENT`.
   and state not in ('FRESH', 'TESTED', 'CE_FILLED', 'OPEN', 'TOUCHED', 'MITIGATED')
@@ -253,9 +284,9 @@ with tf(name, step) as (
 newest as (
     select c.symbol, c.timeframe,
            max(c.open_time) as last_candle,
-           (select max(e.event_at) from detection.engine_events e
+           (select max(e.event_at) from soak_engine_events e
              where e.symbol = c.symbol and e.timeframe = c.timeframe) as last_event
-    from market.candles c
+    from soak_candles c
     group by 1, 2
 )
 select 'G. detection behind candles' as check,
@@ -284,7 +315,7 @@ where n.last_event is null
 -- a restart landing across it; two consecutive is the loop.
 
 with newest as (
-    select max(observed_at)::date as last_day from market.liquidity_history
+    select max(observed_at)::date as last_day from soak_liquidity_history
 )
 select 'H. daily universe loop has stopped' as check,
        coalesce(last_day::text, '(no observations at all)') as last_observation,
@@ -300,12 +331,12 @@ where last_day is null or current_date - last_day > 2;
 
 select 'H2. observable symbol with no history' as check,
        s.exchange_symbol, s.status
-from market.symbols s
-left join market.liquidity_history h on h.exchange_symbol = s.exchange_symbol
+from soak_symbols s
+left join soak_liquidity_history h on h.exchange_symbol = s.exchange_symbol
 where s.status = 'QUARANTINE'
   and h.exchange_symbol is null
   -- Only once the loop has had a night to reach them.
-  and exists (select 1 from market.liquidity_history)
+  and exists (select 1 from soak_liquidity_history)
 limit 10;
 
 
@@ -342,7 +373,7 @@ limit 10;
 with components as (
     select c.key as component,
            c.value #>> '{}' as value
-    from detection.liquidity_pools p,
+    from soak_liquidity_pools p,
          lateral json_each(p.evidence::json -> 'strength_components') c
     where c.key <> 'timeframe'
 ),

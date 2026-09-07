@@ -63,6 +63,13 @@ verify_check_labels() {
 # too. The second is the one that matters. A stale acknowledgement leaves the
 # check permanently blind to that defect's return, and the only way back to a
 # clean run is for somebody to delete the line.
+# Which acknowledgements matched something, across EVERY triage call in the
+# run. It has to be global: routing check H through triage (PR #213) made this
+# function run twice, and a per-call sweep then reported the leg
+# acknowledgement as "matched nothing" during the SQL pass and as `~~ known`
+# during the leg pass -- the same line, both praised and condemned, in one run.
+declare -A ACK_HITS=()
+
 triage_violations() {
   # `noun` because this is no longer only the SQL checks: check H routes
   # through here too, and calling a leg asymmetry a "database invariant
@@ -99,6 +106,8 @@ triage_violations() {
       untils+=("$(trim "$rest_until")")
       whys+=("$(trim "$rest_why")")
       hits+=(0)
+
+      ACK_HITS["$(trim "$pattern")"]=${ACK_HITS["$(trim "$pattern")"]:-0}
     done < "$ACK_FILE"
   fi
 
@@ -111,7 +120,7 @@ triage_violations() {
 
     for i in "${!patterns[@]}"; do
       case "$line" in
-        *"${patterns[$i]}"*) matched=$i; hits[$i]=1; break ;;
+        *"${patterns[$i]}"*) matched=$i; hits[$i]=1; ACK_HITS["${patterns[$i]}"]=1; break ;;
       esac
     done
 
@@ -131,17 +140,22 @@ triage_violations() {
 
   [ "$unacked" -gt 0 ] && flag "$unacked $noun violation(s)"
 
-  for j in "${!patterns[@]}"; do
-    if [ "${hits[$j]}" -eq 0 ]; then
-      # The defect is gone and the line is still here. Left alone, this check
-      # is now blind to that defect coming back.
-      flag "acknowledgement matched nothing -- delete it from $ACK_FILE: ${patterns[$j]}"
-    fi
-  done
-
   [ "$acked" -gt 0 ] && echo "  ($acked acknowledged; see $ACK_FILE)"
 
   return 0
+}
+
+report_stale_acknowledgements() {
+  # The defect is gone and the line is still here. Left alone, the suite is
+  # blind to that defect coming back. Run once per suite rather than once per
+  # triage call, because a line that belongs to one check has no business
+  # being judged by another.
+  local pattern
+  for pattern in "${!ACK_HITS[@]}"; do
+    if [ "${ACK_HITS[$pattern]}" -eq 0 ]; then
+      flag "acknowledgement matched nothing -- delete it from $ACK_FILE: $pattern"
+    fi
+  done
 }
 
 # Sourced by `test_check_invariants.sh` to reach the helpers above without
@@ -223,6 +237,13 @@ for key in $keys; do
   timeframe=${key##*:}
   symbol=${key%:*}
   symbol=${symbol##*:}
+
+  # golden-load.sh writes shift state for 29 synthetic GOLDEN* fixtures so the
+  # chart can render them. They end mid-scenario by construction -- that is
+  # what a fixture IS -- so asking whether their trend has gone too long
+  # without a break is asking a question about a market that does not exist.
+  # The golden harness asserts their exact output in CI instead.
+  case "$symbol" in GOLDEN*) continue ;; esac
   trend=$(echo "$raw" | grep -oE '"trend_state":"[A-Z_]+"' | cut -d'"' -f4)
 
   # Only the two states §3.4 draws the idle edge out of. RANGING opens no gate
@@ -416,6 +437,8 @@ else
   fi
 fi
 echo
+
+report_stale_acknowledgements
 
 if [ "$problems" -eq 0 ]; then
   echo "OK -- all invariants clean"
