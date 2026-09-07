@@ -58,10 +58,11 @@ create temporary view soak_ict_zones as
   select * from detection.ict_zones where symbol not like 'GOLDEN%';
 create temporary view soak_candles as
   select * from market.candles where symbol not like 'GOLDEN%';
-create temporary view soak_symbols as
-  select * from market.symbols where symbol not like 'GOLDEN%';
-create temporary view soak_liquidity_history as
-  select * from market.liquidity_history where symbol not like 'GOLDEN%';
+-- market.symbols and market.liquidity_history get no view: golden-load writes
+-- candles and detection rows only, never a registry entry, so no fixture can
+-- reach them. They also key on `exchange_symbol` rather than `symbol`, which
+-- is how the first draft of this block found out -- it failed to run, and the
+-- suite said so instead of reporting clean.
 
 
 -- ===========================================================================
@@ -315,7 +316,7 @@ where n.last_event is null
 -- a restart landing across it; two consecutive is the loop.
 
 with newest as (
-    select max(observed_at)::date as last_day from soak_liquidity_history
+    select max(observed_at)::date as last_day from market.liquidity_history
 )
 select 'H. daily universe loop has stopped' as check,
        coalesce(last_day::text, '(no observations at all)') as last_observation,
@@ -331,12 +332,12 @@ where last_day is null or current_date - last_day > 2;
 
 select 'H2. observable symbol with no history' as check,
        s.exchange_symbol, s.status
-from soak_symbols s
-left join soak_liquidity_history h on h.exchange_symbol = s.exchange_symbol
+from market.symbols s
+left join market.liquidity_history h on h.exchange_symbol = s.exchange_symbol
 where s.status = 'QUARANTINE'
   and h.exchange_symbol is null
   -- Only once the loop has had a night to reach them.
-  and exists (select 1 from soak_liquidity_history)
+  and exists (select 1 from market.liquidity_history)
 limit 10;
 
 
