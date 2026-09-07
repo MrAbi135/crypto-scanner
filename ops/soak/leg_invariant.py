@@ -60,7 +60,20 @@ def _dsn() -> str:
 
 
 async def _symbols(conn) -> tuple[str, ...]:
-    rows = await conn.execute(text("select distinct symbol from market.candles order by 1"))
+    """Live contexts only.
+
+    `golden-load.sh` puts 29 synthetic GOLDEN* symbols in the same database so
+    the chart can render them. Segmenting legs for each would triple this
+    check's runtime to ask a ratchet question about hand-built fixtures that
+    end mid-scenario on purpose -- and the golden harness already asserts
+    their exact output in CI.
+    """
+    rows = await conn.execute(
+        text(
+            "select distinct symbol from market.candles"
+            " where symbol not like 'GOLDEN%' order by 1"
+        )
+    )
 
     return tuple(r[0] for r in rows)
 
