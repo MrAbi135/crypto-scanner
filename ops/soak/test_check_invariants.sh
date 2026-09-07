@@ -113,15 +113,18 @@ triage_violations "E. archetype term never met|A1|foo|10|10" > "$OUT"
 check "a CRLF acknowledgement still matches" "0" "$problems"
 rm -f "$ACK_FILE"
 
-# 9. The file that ships is EMPTY of acknowledgements (comments only), which
-#    is the healthy steady state: a violation fed against it counts, and no
-#    stale-acknowledgement alarm fires on an empty file. When a real entry is
-#    added again, extend this to feed its violation too -- the paired test
-#    below is the template.
+# 9. The file that ships carries exactly the entries it claims to, and each
+#    one still matches something. Feeding an UNacknowledged violation beside
+#    the acknowledged one proves both halves at once: the new violation still
+#    counts, and the shipped entry does not fire "acknowledgement matched
+#    nothing". When an entry is added or deleted, the fed lines here move with
+#    it -- that coupling is the point, because a shipped acknowledgement whose
+#    violation nobody feeds here is one nobody has looked at.
 ACK_FILE=ops/soak/acknowledged.txt
 problems=0
-triage_violations "E. some new violation|X|9|9" > "$OUT"
-check "the shipped file acknowledges nothing" "1" "$problems"
+triage_violations "E. some new violation|X|9|9
+BTCUSDT  H1  IMPULSE up=4   down=0    ESCALATE up=6   down=7" > "$OUT"
+check "the shipped file acknowledges only what it names" "1" "$problems"
 echo
 echo "check labels vs the row pattern"
 
