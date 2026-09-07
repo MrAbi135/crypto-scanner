@@ -22,5 +22,4 @@
 #
 # Format: pattern | until (UTC date) | why
 # The pattern is matched against the whole violation line as a fixed substring.
-
-
+BTCUSDT  H1  IMPULSE | 2026-09-14 | measured 2026-09-07 against the running engine: this is NOT the anchor-ratchet defect the check was written for. That one put ESCALATE only on the starved side; here it is on both (up=6 down=7). All six displaced DOWN legs on this context landed while the anchor pointed UP, and SLS 7.5 classifies a counter-direction displaced leg as ESCALATE before IMPULSE deliberately, so 3.6 can see it. ETHUSDT H1 records DOWN impulses on the same code. Re-measure after the 192-208 deploy, which changes which swings exist (203) and how legs classify (205); if it survives that, the check's own threshold is what needs the work.
