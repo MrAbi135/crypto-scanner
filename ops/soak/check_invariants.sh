@@ -181,7 +181,19 @@ echo
 
 echo "-- A. gate open but not breaking --"
 
-SHIFT_ALGO="s6-structure-shift-v2"
+# The version the RUNNING engine writes, read off the running engine -- not a
+# literal here, and not the checked-out tree either. A literal goes stale the
+# moment the shift engine's version bumps, and a stale pattern matches no Redis
+# key at all: the loop below would scan nothing, find nothing, and report
+# clean. That is the exact failure this file exists to refuse, so the pattern
+# is taken from the artifact under test and its absence is itself a problem.
+SHIFT_ALGO=$($C exec -T engine grep -oE   'STRUCTURE_SHIFT_ALGO_VERSION = "[^"]+"'   /app/src/scanner/application/detection/structure_shift_replay.py 2>/dev/null   | cut -d'"' -f2 | tr -d '
+')
+
+if [ -z "$SHIFT_ALGO" ]; then
+  flag "cannot read STRUCTURE_SHIFT_ALGO_VERSION from the running engine -- check A did not run"
+  SHIFT_ALGO="__unreadable__"
+fi
 IDLE_CANDLES=100          # P.structure.idle_candles, SLS §3.4
 
 tf_seconds() {
@@ -195,6 +207,10 @@ tf_seconds() {
 }
 
 keys=$($C exec -T redis redis-cli --scan --pattern "scanner:engine-state:shift:${SHIFT_ALGO}:*" 2>/dev/null | tr -d '\r' | sort)
+
+if [ -z "$keys" ] && [ "$SHIFT_ALGO" != "__unreadable__" ]; then
+  flag "no shift-engine state matched ${SHIFT_ALGO} -- check A scanned nothing"
+fi
 
 for key in $keys; do
   raw=$($C exec -T redis redis-cli GET "$key" 2>/dev/null | tr -d '\r')
@@ -218,6 +234,24 @@ for key in $keys; do
   esac
 
   row=$($PSQL -At -F' ' -c "
+    with bracket as (
+      select
+        (select (payload::json->>'price')::numeric
+           from detection.engine_events
+          where symbol='${symbol}' and timeframe='${timeframe}'
+            and event_type='SWING_EXTERNAL_HIGH'
+          order by event_at desc limit 1) as hi,
+        (select (payload::json->>'price')::numeric
+           from detection.engine_events
+          where symbol='${symbol}' and timeframe='${timeframe}'
+            and event_type='SWING_EXTERNAL_LOW'
+          order by event_at desc limit 1) as lo
+    ),
+    recent as (
+      select close from market.candles
+       where symbol='${symbol}' and timeframe='${timeframe}'
+       order by open_time desc limit ${IDLE_CANDLES}
+    )
     select
       (select count(*) from detection.engine_events
         where symbol='${symbol}' and timeframe='${timeframe}'
@@ -228,9 +262,17 @@ for key in $keys; do
                    and event_type='${want}'), 0),
       coalesce((select extract(epoch from max(open_time))::bigint
                   from market.candles
-                 where symbol='${symbol}' and timeframe='${timeframe}'), 0)" 2>/dev/null | tr -d '\r')
+                 where symbol='${symbol}' and timeframe='${timeframe}'), 0),
+      (select case
+         when hi is null or lo is null then 'no-bracket'
+         when (select count(*) from recent where close > hi) > 0
+          and (select count(*) from recent where close < lo) > 0 then 'both'
+         when (select count(*) from recent where close > hi) > 0 then 'above'
+         when (select count(*) from recent where close < lo) > 0 then 'below'
+         else 'inside'
+       end from bracket)" 2>/dev/null | tr -d '\r')
 
-  read -r labels last_break newest <<<"$row"
+  read -r labels last_break newest bracket <<<"$row"
 
   # A series still warming up has nothing to say.
   [ "${labels:-0}" -lt 5 ] && continue
@@ -245,14 +287,44 @@ for key in $keys; do
     since=$(date -u -d "@${last_break}" +%Y-%m-%dT%H:%MZ)
   fi
 
-  printf '%-8s %-4s trend=%-8s last %-8s %-18s %s candles ago\n' \
-    "$symbol" "$timeframe" "$trend" "$want" "$since" "$candles"
+  printf '%-8s %-4s trend=%-8s last %-8s %-18s %s candles ago, closes %s
+'     "$symbol" "$timeframe" "$trend" "$want" "$since" "$candles" "${bracket:-?}"
 
+  # SLS 3.4's idle rule has TWO conditions -- no external break AND every
+  # close inside the current external bracket -- and only the first was asked
+  # here. A BULLISH context whose price has fallen out of its bracket meets
+  # the first and fails the second, so the doctrine keeps its trend and the
+  # engine is right to hold it. This check called that a defect on ETHUSDT H4
+  # for nine days: 114 candles with no BOS_UP, against a bracket floor of
+  # 2431.61 that the closes had dropped to 2381.88 below.
+  #
+  # Two things still deserve the flag, and they are opposite failures:
+  #
+  #   inside -- both idle conditions hold, so 3.4 says RANGING while the state
+  #             says otherwise: the idle rule did not fire.
+  #   above (BULLISH) / below (BEARISH) -- price closed clean through its own
+  #             bracket in the direction the gate is open for and no break was
+  #             recorded. That is the shut-gate defect this check was written
+  #             for, and the one that cost five days.
+  #
+  # Leaving the bracket on the counter-trend side is neither: 3.5 records
+  # breaks only *with* the trend, so there is no missing event to go find.
   if [ "$candles" -gt "$IDLE_CANDLES" ]; then
-    if [ "${last_break:-0}" -eq 0 ]; then
-      flag "$symbol $timeframe holds $trend and has never recorded a $want"
-    else
-      flag "$symbol $timeframe holds $trend with no $want in $candles candles (§3.4 idles at $IDLE_CANDLES)"
+    case "${trend}:${bracket}" in
+      *:inside)
+        why="every close sits inside its external bracket, so 3.4 should have idled it to RANGING" ;;
+      BULLISH:above|BULLISH:both|BEARISH:below|BEARISH:both)
+        why="price closed through its own bracket in the trend's direction and no break was recorded" ;;
+      *)
+        why="" ;;
+    esac
+
+    if [ -n "$why" ]; then
+      if [ "${last_break:-0}" -eq 0 ]; then
+        flag "$symbol $timeframe holds $trend and has never recorded a $want -- $why"
+      else
+        flag "$symbol $timeframe holds $trend with no $want in $candles candles -- $why"
+      fi
     fi
   fi
 done

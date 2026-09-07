@@ -42,13 +42,22 @@
 --
 -- Liquidity events are keyed per pool as well, so their logical key includes
 -- the pool. Everything else is one row per (symbol, tf, type, time).
+--
+-- The pool arrives under two names: sweeps and their maturation events write
+-- `pool_id`, while SLS 4.7's stop-hunt composite writes `sweep_pool_id`.
+-- Reading only the first collapsed every stop hunt to NULL, so two hunts of
+-- two DIFFERENT pools closing on one candle -- which SLS 4.6 edge case (1)
+-- explicitly permits -- read as one logical row and fired this check. It
+-- fired hourly for nine days on 22 rows of entirely correct data.
 
 with keyed as (
     select event_type,
            count(*) as rows,
            count(distinct (symbol, timeframe, event_at, algo_version,
                            case when event_type like 'LIQUIDITY%'
-                                then payload::json ->> 'pool_id' end)) as logical
+                                then coalesce(payload::json ->> 'pool_id',
+                                              payload::json ->> 'sweep_pool_id')
+                                end)) as logical
     from detection.engine_events
     group by 1
 )
