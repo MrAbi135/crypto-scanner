@@ -122,6 +122,27 @@ echo "   signals published                 : $pre_signals"
 [ "$pre_matured" = "0" ] || echo "   (note: maturation events already exist -- was the deploy already done?)"
 
 # ---------------------------------------------------------------------------
+step "2b. Stamp the release with the commit actually being built"
+# ---------------------------------------------------------------------------
+# SCANNER_RELEASE is hand-set in ops/env/dev.env and nothing ever updated it.
+# On 2026-09-07 every log line still said p1b-1842b4d -- the commit of the
+# deploy before last, nine days and twenty-four commits stale. The stamp is
+# already documented as a liar; this is why it lies. Set from the tree being
+# built, and asserted against the running container in step 5, it cannot
+# drift again on its own.
+release="p1b-$(git rev-parse --short HEAD)"
+
+if grep -q '^SCANNER_RELEASE=' ops/env/dev.env; then
+  sed -i "s|^SCANNER_RELEASE=.*|SCANNER_RELEASE=${release}|" ops/env/dev.env
+else
+  echo "SCANNER_RELEASE=${release}" >> ops/env/dev.env
+fi
+
+grep -q "^SCANNER_RELEASE=${release}$" ops/env/dev.env   || fail "could not stamp SCANNER_RELEASE=${release} into ops/env/dev.env"
+
+echo "   release stamp: $release"
+
+# ---------------------------------------------------------------------------
 step "3. Build ALL FOUR images (the 2026-08-26 lesson: never just one)"
 # ---------------------------------------------------------------------------
 
@@ -144,6 +165,9 @@ docker exec scanner-dev-engine-1 grep -qF '_mature_recent_sweeps' /app/src/scann
 docker exec scanner-dev-engine-1 grep -qF 'def apply_recovery' /app/src/scanner/domain/structure/trend.py   || fail "running engine has no trend recovery edge"
 docker exec scanner-dev-engine-1 grep -qF '_broken_premise' /app/src/scanner/application/detection/signal_monitor.py   || fail "running engine cannot reach INVALIDATED_EARLY"
 docker exec scanner-dev-engine-1 grep -qF 'abs(candles[cursor].high - candidate)' /app/src/scanner/domain/structure/swings.py   || fail "running engine still has the old swing walk-back"
+
+running_release=$(docker exec scanner-dev-engine-1 printenv SCANNER_RELEASE 2>/dev/null | tr -d '')
+[ "$running_release" = "$release" ]   || fail "running engine reports release '$running_release', expected '$release'"
 
 new_started=$(docker inspect --format '{{.State.StartedAt}}' scanner-dev-engine-1)
 [ "$new_started" != "$started" ] || fail "engine StartedAt did not change -- it was not restarted"
