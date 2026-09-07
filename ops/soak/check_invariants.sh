@@ -64,7 +64,11 @@ verify_check_labels() {
 # check permanently blind to that defect's return, and the only way back to a
 # clean run is for somebody to delete the line.
 triage_violations() {
-  local all="$1" line i j matched acked=0 unacked=0 today
+  # `noun` because this is no longer only the SQL checks: check H routes
+  # through here too, and calling a leg asymmetry a "database invariant
+  # violation" would send the next reader to the wrong file.
+  local all="$1" noun="${2:-database invariant}"
+  local line i j matched acked=0 unacked=0 today
   local -a patterns=() untils=() whys=() hits=()
 
   if [ -f "$ACK_FILE" ]; then
@@ -125,7 +129,7 @@ triage_violations() {
     fi
   done <<< "$all"
 
-  [ "$unacked" -gt 0 ] && flag "$unacked database invariant violation(s)"
+  [ "$unacked" -gt 0 ] && flag "$unacked $noun violation(s)"
 
   for j in "${!patterns[@]}"; do
     if [ "${hits[$j]}" -eq 0 ]; then
@@ -391,12 +395,24 @@ else
            -w /app scanner-dev-engine /tmp/leg.py 2>&1)
   lrc=$?
 
-  echo "$legs" | sed 's/^/  /'
+  # Everything except the VIOLATION rows: those go through triage below, and
+  # printing them twice would put an un-triaged copy above the `~~ known` one.
+  echo "$legs" | grep -v '^VIOLATION' | sed 's/^/  /'
+
+  leg_violations=$(echo "$legs" | grep '^VIOLATION' || true)
 
   if [ "$lrc" -ne 0 ]; then
     flag "leg_invariant.py failed (exit $lrc) -- the ratchet check did not run"
-  elif echo "$legs" | grep -q '^VIOLATION'; then
-    flag "impulse legs are one-directional on at least one context (see above)"
+  elif [ -n "$leg_violations" ]; then
+    # Triaged like every SQL check, rather than flagged straight.
+    #
+    # This check used to call `flag` on any VIOLATION line, which put a whole
+    # class of violation beyond the reach of acknowledged.txt: H could never
+    # be acknowledged, so a known and investigated leg asymmetry blocked every
+    # deploy until the engine itself changed. That is not a stricter policy,
+    # it is a gap -- the machinery exists precisely so a violation can be held
+    # visibly, with an expiry, instead of being bypassed with --force.
+    triage_violations "$leg_violations" "impulse-leg"
   fi
 fi
 echo

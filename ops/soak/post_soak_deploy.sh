@@ -78,7 +78,7 @@ grep -qF 'abs(candles[cursor].high - candidate)' backend/src/scanner/domain/stru
 echo "   all seven batch markers present in the tree at $(git rev-parse --short HEAD)"
 
 # ---------------------------------------------------------------------------
-step "1. Invariants before touching anything (expect: exit 0, 2 acknowledged)"
+step "1. Invariants before touching anything (expect: exit 0, 1 acknowledged)"
 # ---------------------------------------------------------------------------
 
 bash ops/soak/check_invariants.sh > /tmp/pre_deploy_invariants.log 2>&1
