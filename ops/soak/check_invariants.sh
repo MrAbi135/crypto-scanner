@@ -147,15 +147,31 @@ triage_violations() {
 
 report_stale_acknowledgements() {
   # The defect is gone and the line is still here. Left alone, the suite is
-  # blind to that defect coming back. Run once per suite rather than once per
-  # triage call, because a line that belongs to one check has no business
-  # being judged by another.
-  local pattern
-  for pattern in "${!ACK_HITS[@]}"; do
-    if [ "${ACK_HITS[$pattern]}" -eq 0 ]; then
+  # blind to that defect coming back.
+  #
+  # The patterns are re-read FROM THE FILE, not taken from whatever a triage
+  # call happened to register. `triage_violations` only runs when a check has
+  # violations, so a suite where everything is clean never populated the hit
+  # map at all -- and this sweep, the one guard whose entire purpose is the
+  # clean run with a stale line in it, iterated an empty map and said nothing.
+  # It was a check that could not fail, inside the alarm written to prevent
+  # exactly that. Caught on 2026-09-10, when BTCUSDT H1's impulse asymmetry
+  # resolved on its own and the acknowledgement for it sat unmatched through a
+  # clean run without a word.
+  [ -f "$ACK_FILE" ] || return 0
+
+  local raw head pattern
+  while IFS= read -r raw; do
+    case "$(trim "$raw")" in ''|'#'*) continue ;; esac
+    case "$raw" in *'|'*'|'*) ;; *) continue ;; esac
+
+    head=${raw%|*}
+    pattern=$(trim "${head%|*}")
+
+    if [ "${ACK_HITS[$pattern]:-0}" -eq 0 ]; then
       flag "acknowledgement matched nothing -- delete it from $ACK_FILE: $pattern"
     fi
-  done
+  done < "$ACK_FILE"
 }
 
 # Sourced by `test_check_invariants.sh` to reach the helpers above without
@@ -266,14 +282,22 @@ for key in $keys; do
           where symbol='${symbol}' and timeframe='${timeframe}'
             and event_type='SWING_EXTERNAL_HIGH'
           order by event_at desc limit 1) as hi,
+        (select max(event_at)
+           from detection.engine_events
+          where symbol='${symbol}' and timeframe='${timeframe}'
+            and event_type='SWING_EXTERNAL_HIGH') as hi_at,
         (select (payload::json->>'price')::numeric
            from detection.engine_events
           where symbol='${symbol}' and timeframe='${timeframe}'
             and event_type='SWING_EXTERNAL_LOW'
-          order by event_at desc limit 1) as lo
+          order by event_at desc limit 1) as lo,
+        (select max(event_at)
+           from detection.engine_events
+          where symbol='${symbol}' and timeframe='${timeframe}'
+            and event_type='SWING_EXTERNAL_LOW') as lo_at
     ),
     recent as (
-      select close from market.candles
+      select close, open_time from market.candles
        where symbol='${symbol}' and timeframe='${timeframe}'
        order by open_time desc limit ${IDLE_CANDLES}
     )
@@ -290,10 +314,11 @@ for key in $keys; do
                  where symbol='${symbol}' and timeframe='${timeframe}'), 0),
       (select case
          when hi is null or lo is null then 'no-bracket'
-         when (select count(*) from recent where close > hi) > 0
-          and (select count(*) from recent where close < lo) > 0 then 'both'
-         when (select count(*) from recent where close > hi) > 0 then 'above'
-         when (select count(*) from recent where close < lo) > 0 then 'below'
+         when (select count(*) from recent where close > hi and open_time > hi_at) > 0
+          and (select count(*) from recent where close < lo and open_time > lo_at) > 0 then 'both'
+         when (select count(*) from recent where close > hi and open_time > hi_at) > 0 then 'above'
+         when (select count(*) from recent where close < lo and open_time > lo_at) > 0 then 'below'
+         when (select count(*) from recent where close > hi or close < lo) > 0 then 'left-earlier'
          else 'inside'
        end from bracket)" 2>/dev/null | tr -d '\r')
 
@@ -315,6 +340,19 @@ for key in $keys; do
   printf '%-8s %-4s trend=%-8s last %-8s %-18s %s candles ago, closes %s
 '     "$symbol" "$timeframe" "$trend" "$want" "$since" "$candles" "${bracket:-?}"
 
+  # A break test must read only closes made AFTER the level it is compared
+  # against existed. The first draft compared the CURRENT bracket against ALL
+  # of the last 100 closes, and on 2026-09-10 that fired on BTCUSDT M15: the
+  # market had topped at 79,760 and walked its external highs down to 78,054,
+  # so day-old closes sat far above a bracket built an hour ago. No break was
+  # missing -- there was nothing left to break, which the seven CHOCH_DOWNs in
+  # the same window say plainly. Same shape as the window-local index trap:
+  # one side of the comparison was "now" and the other was "the last hundred
+  # candles", and nothing said so.
+  #
+  # `left-earlier` is that case, named rather than silently folded into
+  # `inside`: price did leave the bracket, but before the bracket existed.
+  #
   # SLS 3.4's idle rule has TWO conditions -- no external break AND every
   # close inside the current external bracket -- and only the first was asked
   # here. A BULLISH context whose price has fallen out of its bracket meets
@@ -338,6 +376,8 @@ for key in $keys; do
     case "${trend}:${bracket}" in
       *:inside)
         why="every close sits inside its external bracket, so 3.4 should have idled it to RANGING" ;;
+      *:left-earlier)
+        why="" ;;   # left the bracket before the bracket existed -- see above
       BULLISH:above|BULLISH:both|BEARISH:below|BEARISH:both)
         why="price closed through its own bracket in the trend's direction and no break was recorded" ;;
       *)
