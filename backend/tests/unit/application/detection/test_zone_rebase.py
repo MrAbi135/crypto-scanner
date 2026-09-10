@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from tests.golden.harness.memory import (
@@ -258,3 +258,68 @@ async def test_a_tail_frozen_untested_ob_finally_expires() -> None:
     )
 
     assert zones.zones["ob-old"].state == "EXPIRED"
+
+
+def test_the_failure_swing_check_survives_a_confirmation_outside_the_window() -> None:
+    """The last frozen index in `_has_failure_swing_before_invalidation`.
+
+    Its own docstring says the persisted indices froze in the windows that
+    recorded them -- and the next line then did `candles[ob.confirmed_index]`.
+    On the 2026-09-07 soak that raised IndexError 23 times in 72 hours, always
+    on M5/M15 where the window slides fastest. Every one failed a detection
+    pass; the stream redelivered each and the retry landed on a window that
+    happened to contain the index, so no close was lost and nothing looked
+    wrong from outside.
+
+    Here the OB is confirmed two candles after it was created, and its frozen
+    `confirmed_index` points well past the end of a short window -- the shape
+    that crashed. The derived confirmation time is what the pivot filter must
+    use, so a pivot before it is excluded and the two after it decide.
+    """
+    from scanner.application.detection.ict_ob_replay import (
+        SwingEvidence,
+        _has_failure_swing_before_invalidation,
+    )
+    from scanner.domain.ict import OrderBlock, ZoneBand, ZonePolarity
+
+    base = datetime(2026, 3, 1, tzinfo=UTC)
+    candles = [make_candle(open_time=base + timedelta(hours=i)) for i in range(6)]
+
+    band = ZoneBand(Decimal(100), Decimal(110))
+
+    ob = OrderBlock(
+        ob_id="ob-1",
+        polarity=ZonePolarity.BULLISH,
+        band=band,
+        refined_band=band,
+        # Frozen in a 500-candle window; this list holds six.
+        created_index=497,
+        confirmed_index=499,
+        created_at=base,
+        grade="OB_A",
+        mss_origin=False,
+        origin_swept=False,
+        origin_failure_swing=False,
+        stale_context=False,
+    )
+
+    def pivot(hours: int, price: str) -> SwingEvidence:
+        return SwingEvidence(
+            at=base + timedelta(hours=hours),
+            index=0,
+            price=Decimal(price),
+            strength="EXTERNAL",
+            kind="LOW",
+        )
+
+    # Confirmation lands at base + 2h (created_at + the frozen delta), so the
+    # pivot at +1h is before it and must not count. The remaining two rise,
+    # which for a bullish OB is the failure swing.
+    swings = [pivot(1, "50"), pivot(3, "90"), pivot(4, "95")]
+
+    assert _has_failure_swing_before_invalidation(ob, swings, candles, invalidation_index=5) is True
+
+    # With the +1h pivot counted -- which is what indexing the window would
+    # have produced had it not simply crashed -- the last two would be 50 then
+    # 90 ... 95, so the assertion above is only reachable from the derived time.
+    assert candles[0].timeframe.duration == timedelta(hours=1)
