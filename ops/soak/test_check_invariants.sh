@@ -120,6 +120,21 @@ triage_violations "E. archetype term never met|A1|foo|10|10" > "$OUT"
 check "a CRLF acknowledgement still matches" "0" "$problems"
 rm -f "$ACK_FILE"
 
+# 8b. **A clean run with a stale line in it.** This is the case the whole
+#     mechanism exists for, and it was untested -- so it did not work.
+#     `triage_violations` only runs when a check has violations, so on a suite
+#     where everything is clean the hit map was never populated and the sweep
+#     iterated nothing. The stale acknowledgement passed through a clean run
+#     in silence on 2026-09-10.
+ACK_FILE=$(mktemp)
+printf 'E. a defect that has been fixed|X|1 | %s | fixed in PR #999
+' "$FUTURE" > "$ACK_FILE"
+problems=0
+ACK_HITS=()
+report_stale_acknowledgements
+check "a stale acknowledgement fires on an otherwise clean run" "1" "$problems"
+rm -f "$ACK_FILE"
+
 # 9. The file that ships carries exactly the entries it claims to, and each
 #    one still matches something. Feeding an UNacknowledged violation beside
 #    the acknowledged one proves both halves at once: the new violation still
@@ -129,8 +144,7 @@ rm -f "$ACK_FILE"
 #    violation nobody feeds here is one nobody has looked at.
 ACK_FILE=ops/soak/acknowledged.txt
 problems=0
-triage_violations "E. some new violation|X|9|9
-BTCUSDT  H1  IMPULSE up=4   down=0    ESCALATE up=6   down=7" > "$OUT"
+triage_violations "E. some new violation|X|9|9" > "$OUT"
 check "the shipped file acknowledges only what it names" "1" "$problems"
 echo
 echo "check labels vs the row pattern"
