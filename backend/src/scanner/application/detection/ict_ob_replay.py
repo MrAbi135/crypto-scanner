@@ -59,7 +59,13 @@ from scanner.shared import Timeframe
 # was unreachable for tail-frozen OBs, and OB age is measured from
 # CONFIRMATION, so both indices rebase together -- a mixed-frame object is
 # the same defect one layer down.
-ICT_OB_ALGO_VERSION = "s6-ob-v5"
+# v6: the last two frozen-index lookups in this file are gone. `_origin_has_sweep`
+# and `_has_failure_swing_before_invalidation` derived their time bounds by
+# indexing today's candles with offsets frozen in the window that recorded the
+# OB -- which raised IndexError 23 times across the 2026-09-07 soak and, when it
+# did not raise, silently read the wrong candle. Both now derive from the OB's
+# own created_at, so origin_swept and origin_failure_swing can change.
+ICT_OB_ALGO_VERSION = "s6-ob-v6"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")
@@ -1106,8 +1112,17 @@ def _origin_has_sweep(
     """
     expected_side = "SSL" if ob.polarity is ZonePolarity.BULLISH else "BSL"
 
-    origin_opens = candles[ob.created_index].open_time
-    confirmation_closes = candles[ob.confirmed_index].open_time + timeframe.duration
+    # Both bounds come from the OB's own timestamp, not from indexing today's
+    # window with yesterday's offsets -- the trap this docstring describes,
+    # still present in the two lines that implemented it. `created_at` IS the
+    # origin candle's open time (detect_order_block sets it from exactly that
+    # candle), and the confirmation is that many candles later, because the
+    # delta between two indices frozen in one window survives what the indices
+    # themselves do not.
+    origin_opens = ob.created_at
+    confirmation_closes = ob.created_at + timeframe.duration * (
+        ob.confirmed_index - ob.created_index + 1
+    )
 
     for sweep in sweeps:
         if sweep.side != expected_side:
@@ -1149,7 +1164,20 @@ def _has_failure_swing_before_invalidation(
     """
     pivot_kind = "LOW" if ob.polarity is ZonePolarity.BULLISH else "HIGH"
 
-    confirmed_at = candles[ob.confirmed_index].open_time
+    # `confirmed_at` is derived, not looked up. `candles[ob.confirmed_index]`
+    # was the last frozen index left in this function -- the very trap the
+    # docstring above warns about -- and it raised IndexError 23 times across
+    # the 2026-09-07 soak, always on M5/M15 where the window slides fastest.
+    # Each one failed a detection pass; the stream redelivered and the retry
+    # happened to land on a window that contained the index, so no close was
+    # lost and nothing looked broken from the outside.
+    #
+    # The delta between two indices frozen in the SAME window is durable even
+    # though neither index is, so the confirmation time is the creation time
+    # plus that many candles. This holds whether or not the caller rebased the
+    # indices, because rebasing shifts both by the same amount.
+    duration = candles[0].timeframe.duration
+    confirmed_at = ob.created_at + duration * (ob.confirmed_index - ob.created_index)
     invalidated_at = candles[invalidation_index].open_time
 
     candidates = [

@@ -805,12 +805,20 @@ def test_failure_swing_and_origin_sweep_helpers() -> None:
         ),
     )
 
-    ob = ob_mod._record_to_ob(ob_record)
-
-    # The record's created_index=1, confirmed_index=3. Candles supply the
-    # time frame both helpers now compare in.
     base = datetime(2026, 8, 16, tzinfo=UTC)
     candles = [make_candle(open_time=base + timedelta(hours=offset)) for offset in range(8)]
+
+    # created_index=1, confirmed_index=3, and `created_at` is set to match the
+    # candle those offsets name. It has to: both helpers now take their time
+    # bounds from `created_at` plus the index delta, never from indexing this
+    # window with offsets frozen in another. The shared fixture leaves
+    # created_at unrelated to any candle list, which was invisible while the
+    # helpers read the times out of `candles` -- and describes an OB that
+    # cannot exist.
+    ob = replace(
+        ob_mod._record_to_ob(ob_record),
+        created_at=base + timedelta(hours=1),
+    )
 
     sweep = ob_mod.LiquiditySweepEvidence(
         pool_id="ssl",
