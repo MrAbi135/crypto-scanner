@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import shlex
 import subprocess
 import sys
 import time
@@ -149,8 +150,17 @@ async def _delivered_through(client: aioredis.Redis, target: str) -> bool | None
     return True if _entry_key(current) >= _entry_key(target) else None
 
 
+# Set by main() from --docker-cmd. The stack this proof runs against lives on
+# a remote VM now, and the kill has to reach it: a bare `docker` on the machine
+# driving the proof would SIGKILL nothing, restart nothing, and the drain in
+# step 6 would then "pass" because the engine was never interrupted at all.
+_DOCKER_CMD: list[str] = ["docker"]
+
+
 def _docker(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["docker", *args], capture_output=True, text=True, check=False)
+    return subprocess.run(
+        [*_DOCKER_CMD, *args], capture_output=True, text=True, check=False
+    )
 
 
 async def main() -> None:
@@ -161,8 +171,32 @@ async def main() -> None:
     parser.add_argument("--anchor", default=DEFAULT_ANCHOR)
     parser.add_argument("--pickup-timeout", type=float, default=DEFAULT_PICKUP_TIMEOUT)
     parser.add_argument("--drain-timeout", type=float, default=900.0)
+    parser.add_argument(
+        "--docker-cmd",
+        default="docker",
+        help=(
+            "how to reach the engine's docker daemon; split like a shell word "
+            "list. For a remote stack: "
+            "--docker-cmd 'ssh -i <key> ubuntu@<host> docker'"
+        ),
+    )
 
     args = parser.parse_args()
+
+    global _DOCKER_CMD
+    _DOCKER_CMD = shlex.split(args.docker_cmd)
+
+    # Prove the kill can land before publishing anything. Without this the run
+    # would inject work into a live stream and only then discover it cannot
+    # reach the daemon -- leaving the entries behind with nothing to answer
+    # for them.
+    probe = _docker("inspect", "--format", "{{.State.Running}}", args.container)
+
+    if probe.returncode != 0 or probe.stdout.strip() != "true":
+        _fail(
+            f"cannot reach {args.container} via {' '.join(_DOCKER_CMD)}: "
+            f"{(probe.stderr or probe.stdout).strip()}"
+        )
 
     client = aioredis.from_url(args.redis_url)
 
