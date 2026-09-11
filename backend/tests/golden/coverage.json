@@ -280,13 +280,23 @@
     {
       "id": "4.1",
       "title": "Buy-Side & Sell-Side Liquidity (BSL / SSL)",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "4.1",
-          "rule": "section not yet enumerated into rules",
+          "id": "4.1-side-from-swing-kind",
+          "rule": "a swing high registers BSL, which rests above price; a swing low registers SSL, which rests below it",
+          "status": "covered"
+        },
+        {
+          "id": "4.1-external-swings-register-levels",
+          "rule": "every confirmed external swing high registers a BSL level and every external swing low an SSL level",
+          "status": "covered"
+        },
+        {
+          "id": "4.1-internal-levels-lower-weight",
+          "rule": "internal swings register internal liquidity levels at lower weight than external ones",
           "status": "pending",
-          "blocked_on": "not yet enumerated; the liquidity runner is wired, so these are writable today"
+          "blocked_on": "score_pool_strength takes touches, timeframe rank, age and member count -- and no liquidity class. An internal and an external pool with the same four inputs score identically, so 4.1's 'lower weight' has no implementation in pool strength. 4.1 points at 4.7 for it; needs a ruling on where the weight belongs before a dataset can assert it"
         }
       ]
     },
@@ -369,26 +379,70 @@
     {
       "id": "4.4",
       "title": "Internal vs. External Liquidity",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "4.4",
-          "rule": "section not yet enumerated into rules",
+          "id": "4.4-external-at-or-beyond-range-extremes",
+          "rule": "a pool at or beyond the current external dealing-range extreme is external liquidity",
+          "status": "covered"
+        },
+        {
+          "id": "4.4-internal-inside-the-range",
+          "rule": "a pool inside the dealing range is internal liquidity",
+          "status": "covered"
+        },
+        {
+          "id": "4.4-fallback-until-both-extremes-exist",
+          "rule": "with one side of the range unconfirmed there is nothing to be inside of, and the pool keeps the class it was given",
           "status": "pending",
-          "blocked_on": "not yet enumerated; the liquidity runner is wired, so these are writable today"
+          "blocked_on": "needs a case that isolates a pool classified before both external extremes have confirmed; in the datasets that exist the range is already bracketed by the time any pool is scored"
+        },
+        {
+          "id": "4.4-external-consumption-is-range-resolving",
+          "rule": "consuming external liquidity is a range-resolving event, eligible to seed MSS (3.6) and Sweep-Reversal archetypes",
+          "status": "pending",
+          "blocked_on": "consumed by the confluence engine rather than emitted by the liquidity replay; needs an 8 dataset that scores a setup against the pool it is aiming at"
+        },
+        {
+          "id": "4.4-internal-never-reversal-evidence",
+          "rule": "internal liquidity is consumed during normal leg rotation and is never reversal evidence on its own",
+          "status": "pending",
+          "blocked_on": "consumed by the confluence engine rather than emitted by the liquidity replay; needs an 8 dataset that scores a setup against the pool it is aiming at"
+        },
+        {
+          "id": "4.4-reclassification-is-logged",
+          "rule": "classification is recomputed when the dealing range updates, and reclassification events are logged",
+          "status": "pending",
+          "blocked_on": "the recompute is implemented and counted as report.reclassified_pools, but nothing is logged -- the pool row is upserted in place and no event is emitted. The golden runner also drops that counter (along with clusters and clustered_swings) from the report it compares, so no dataset can pin it today"
         }
       ]
     },
     {
       "id": "4.5",
       "title": "Resting Liquidity",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "4.5",
-          "rule": "section not yet enumerated into rules",
+          "id": "4.5-resting-is-the-active-pool-map",
+          "rule": "resting liquidity is the current unconsumed pool map: every ACTIVE pool, both sides",
+          "status": "covered"
+        },
+        {
+          "id": "4.5-deterministic-snapshot-each-close",
+          "rule": "the snapshot is deterministic at every candle close",
+          "status": "covered"
+        },
+        {
+          "id": "4.5-ranked-by-strength-and-proximity",
+          "rule": "the map is ranked by strength x proximity",
           "status": "pending",
-          "blocked_on": "not yet enumerated; the liquidity runner is wired, so these are writable today"
+          "blocked_on": "the replay persists pools and their strengths but never orders them; the ranking lives downstream and is not in any replay output"
+        },
+        {
+          "id": "4.5-exposed-to-targets-and-narrative",
+          "rule": "the map is exposed to target selection (15.6), AI narrative and the dashboard liquidity map",
+          "status": "pending",
+          "blocked_on": "consumers outside the detection replays; no golden reaches them"
         }
       ]
     },
