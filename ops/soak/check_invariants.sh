@@ -221,6 +221,23 @@ echo "-- A. gate open but not breaking --"
 # key at all: the loop below would scan nothing, find nothing, and report
 # clean. That is the exact failure this file exists to refuse, so the pattern
 # is taken from the artifact under test and its absence is itself a problem.
+# The symbols the engine actually scans, read off the RUNNING engine for the
+# same reason the shift version is: a list written down here goes stale, and a
+# stale scope is a suite that checks the wrong contexts in silence. Everything
+# else in these tables has candles without having been scanned -- golden
+# fixtures, symbols backfilled ahead of a deploy -- and every check below
+# reads that absence as a defect.
+INGEST_SYMBOLS=$($C exec -T engine printenv SCANNER_INGEST_SYMBOLS 2>/dev/null | tr -d '' | tr -d '
+')
+
+if [ -z "$INGEST_SYMBOLS" ]; then
+  flag "cannot read SCANNER_INGEST_SYMBOLS from the running engine -- scope unknown"
+  INGEST_SYMBOLS="__none__"
+fi
+
+echo "-- scope: $INGEST_SYMBOLS"
+echo
+
 SHIFT_ALGO=$($C exec -T engine grep -oE   'STRUCTURE_SHIFT_ALGO_VERSION = "[^"]+"'   /app/src/scanner/application/detection/structure_shift_replay.py 2>/dev/null   | cut -d'"' -f2 | tr -d '
 ')
 
@@ -254,12 +271,10 @@ for key in $keys; do
   symbol=${key%:*}
   symbol=${symbol##*:}
 
-  # golden-load.sh writes shift state for 29 synthetic GOLDEN* fixtures so the
-  # chart can render them. They end mid-scenario by construction -- that is
-  # what a fixture IS -- so asking whether their trend has gone too long
-  # without a break is asking a question about a market that does not exist.
-  # The golden harness asserts their exact output in CI instead.
-  case "$symbol" in GOLDEN*) continue ;; esac
+  # Only the scanned universe. Shift state lingers for anything ever replayed
+  # -- golden fixtures among them -- and a context nobody scans cannot be
+  # behind on anything.
+  case ",$INGEST_SYMBOLS," in *",$symbol,"*) ;; *) continue ;; esac
   trend=$(echo "$raw" | grep -oE '"trend_state":"[A-Z_]+"' | cut -d'"' -f4)
 
   # Only the two states §3.4 draws the idle edge out of. RANGING opens no gate
@@ -410,7 +425,7 @@ echo "-- database invariants --"
 
 verify_check_labels
 
-out=$($PSQL -At -F'|' -v ON_ERROR_STOP=1 < ops/soak/invariants.sql 2>&1)
+out=$($PSQL -At -F'|' -v ON_ERROR_STOP=1 -v syms="$INGEST_SYMBOLS" < ops/soak/invariants.sql 2>&1)
 rc=$?
 
 if [ "$rc" -ne 0 ]; then

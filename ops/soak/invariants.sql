@@ -34,30 +34,38 @@
 
 
 -- ===========================================================================
--- Scope: live contexts only, never the golden fixtures
+-- Scope: the symbols the engine actually scans
 -- ===========================================================================
--- `scripts/golden-load.sh` loads 29 synthetic GOLDEN* symbols so the chart can
--- render them for Constitution 5 label verification. They are not markets.
--- Several are built to prove that the engine emits NOTHING -- GOLDENFLAT is
--- "flat window emits nothing", GOLDENCONF is "a quiet market fails structure
--- and zone" -- so check G reads five of them as detection falling behind, and
--- every threshold below ("rows >= 20", "setups >= 10") is calibrated for live
--- volume and miscounts against 29 tiny fixtures.
+-- `:syms` is SCANNER_INGEST_SYMBOLS, read off the RUNNING engine by
+-- check_invariants.sh. Anything else in these tables has candles without
+-- having been scanned, and every check below then reads that absence as a
+-- defect:
 --
--- They are not unchecked: the golden harness asserts their exact output
--- byte-for-byte in CI, which is a far stricter test than any heuristic here.
--- This suite watches the live engine, so it reads through these views and the
--- fixtures stay out of it.
+--   * golden-load puts 29 synthetic GOLDEN* fixtures here so the chart can
+--     render them. Several exist to prove the engine emits NOTHING.
+--   * g1b_unselected_symbol backfills its two symbols BEFORE they are
+--     ingested, so on 2026-09-11 the suite reported 15 "unrecorded HIGH
+--     pivot" violations against symbols detection had never run on, and
+--     refused a deploy over it.
+--
+-- Scanned-ness is the property every threshold here assumes, so it is the
+-- thing to filter on -- not a name pattern, which only knew about fixtures.
 create temporary view soak_engine_events as
-  select * from detection.engine_events where symbol not like 'GOLDEN%';
+  select * from detection.engine_events
+   where symbol = any(string_to_array(:'syms', ','));
 create temporary view soak_setups as
-  select * from detection.setups where symbol not like 'GOLDEN%';
+  select * from detection.setups
+   where symbol = any(string_to_array(:'syms', ','));
 create temporary view soak_liquidity_pools as
-  select * from detection.liquidity_pools where symbol not like 'GOLDEN%';
+  select * from detection.liquidity_pools
+   where symbol = any(string_to_array(:'syms', ','));
 create temporary view soak_ict_zones as
-  select * from detection.ict_zones where symbol not like 'GOLDEN%';
+  select * from detection.ict_zones
+   where symbol = any(string_to_array(:'syms', ','));
 create temporary view soak_candles as
-  select * from market.candles where symbol not like 'GOLDEN%';
+  select * from market.candles
+   where symbol = any(string_to_array(:'syms', ','));
+
 -- market.symbols and market.liquidity_history get no view: golden-load writes
 -- candles and detection rows only, never a registry entry, so no fixture can
 -- reach them. They also key on `exchange_symbol` rather than `symbol`, which
