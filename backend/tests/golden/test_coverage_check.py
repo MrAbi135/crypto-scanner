@@ -113,6 +113,7 @@ UNVERIFIED_LABELS = frozenset(
         "range-expansion-is-measured-against-a-moving-atr.json",
         "a-walking-coil-is-not-a-coil.json",
         "one-candle-that-saturates-three-components.json",
+        "a-spike-takes-its-direction-from-the-body.json",
     }
 )
 

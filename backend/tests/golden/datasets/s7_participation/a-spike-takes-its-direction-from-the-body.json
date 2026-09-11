@@ -1,0 +1,79 @@
+{
+  "dataset_id": "s7-a-spike-takes-its-direction-from-the-body",
+  "engine": "participation",
+  "sls_sections": [
+    "6.2"
+  ],
+  "sls_rules": [
+    "6.2-direction-from-body",
+    "6.2-conviction"
+  ],
+  "description": "A confirmed spike on a candle that actually went somewhere: three times the baseline volume, a full-bodied advance, and a taker split sitting exactly on the conviction boundary.",
+  "labelling_rationale": "The companion to s7-volume-spike-on-a-doji-is-absorption, which fixed the volume and took the body to zero. This one keeps the volume and gives the candle a body, so the two tags §6.2 hangs on that body can be read. **The spike itself.** Volume 300 against §2.11's rolling 20-candle H4 median of 100 is RVOL exactly 3.0, which §6.1 bands as SPIKE because its boundaries are inclusive-low. Quote volume is 300,000, over §6.2's absolute floor of 250,000, so the spike confirms rather than being refused as a micro-cap's small change. **Direction = UP, from the body and nothing else.** §6.2 states the tag as 'direction tag = candle body sign'. The candle opens at 100 and closes at 160, so the body is +60 and the tag is UP. Nothing else in the candle is consulted: not the range, not the wicks, not where it closed within its range. That matters because it is the same sentence that produces NEUTRAL on a doji -- a body of zero has no sign, and §6.2 refuses to invent one -- so absorption_candidate is false here for exactly the reason it is true there. **Conviction = true, at the boundary.** §6.2's conviction tag is |delta_pct| >= 0.25. Binance reports taker *buy* volume, so the signed delta is (2 x buy - volume) / volume. This candle carries 187.5 of taker buy against 300 of volume: (375 - 300) / 300 = 0.25, exactly on the threshold, which is inclusive and so passes. Placing it on the boundary rather than safely past it is deliberate -- a case at 0.6 would pass under any threshold between 0 and 0.6 and would not pin the one §6.2 names. **The other two events are collateral, and derived.** The price shape is deliberately the one already worked out in s7-one-candle-that-saturates-three-components, so the momentum arithmetic is not new: a 60-point advance lifts ATR to (3 x 13 + 60) / 14 = 7.0714, the ten-candle ROC is 60 / (7.0714 x 3.16228) = 2.6831 which saturates §7.1's 2.5 ceiling at 25, close consistency pays nothing on one directional close in ten, and body dominance and participation both saturate at 25 on a window with no counter candles. The score is 75, the differential against the flat window three closes back is 75, and §7.2 records MOMENTUM_ACCELERATING. The three-candle mean range of (3 + 3 + 60) / 3 = 22.00 clears §7.3's 1.4 x ATR = 9.9000 and records RANGE_EXPANSION. Raising the volume does not touch either: §7.1's participation component saturates on the absence of counter candles before any RVOL is compared. §6.3 has nothing to say -- three volumes of 100, 100, 300 do not rise strictly -- and §6.4 is not triggered, because RVOL 3.0 is SPIKE and cross-validation begins at ABNORMAL.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-11 from SLS §6.2; pending developer verification",
+  "labelled_at": "2026-09-11",
+  "algo_version": "s7-participation-v2",
+  "symbol": "GOLDENVOL",
+  "timeframe": "H4",
+  "filler": {
+    "count": 299,
+    "open": "100",
+    "high": "103",
+    "low": "100",
+    "close": "100"
+  },
+  "candles": [
+    {
+      "open_time": "2026-08-21T08:00:00+00:00",
+      "open": "100",
+      "high": "160",
+      "low": "100",
+      "close": "160",
+      "volume": "300",
+      "quote_volume": "300000",
+      "taker_buy_volume": "187.5"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "volume_spikes": 1,
+      "suspect_volume": 0,
+      "expansions": 0,
+      "contractions": 0,
+      "range_expansions": 1,
+      "compressions": 0,
+      "accelerations": 1,
+      "exhaustion_watches": 0,
+      "events_inserted": 3
+    },
+    "events": [
+      {
+        "event_type": "MOMENTUM_ACCELERATING",
+        "event_at": "2026-08-21T08:00:00+00:00",
+        "payload": {
+          "accel": "75",
+          "score": "75",
+          "direction": "UP"
+        }
+      },
+      {
+        "event_type": "RANGE_EXPANSION",
+        "event_at": "2026-08-21T08:00:00+00:00",
+        "payload": {}
+      },
+      {
+        "event_type": "VOLUME_SPIKE",
+        "event_at": "2026-08-21T08:00:00+00:00",
+        "payload": {
+          "rvol": "3",
+          "rvol_class": "SPIKE",
+          "quote_volume": "300000",
+          "direction": "UP",
+          "conviction": true,
+          "absorption_candidate": false
+        }
+      }
+    ]
+  }
+}

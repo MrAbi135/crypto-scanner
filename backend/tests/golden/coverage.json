@@ -745,14 +745,12 @@
         {
           "id": "6.2-direction-from-body",
           "rule": "the direction tag is the sign of the candle body",
-          "status": "pending",
-          "blocked_on": "a directional candle in a flat golden series also trips 7.2, whose momentum score is not hand-derivable"
+          "status": "covered"
         },
         {
           "id": "6.2-conviction",
           "rule": "conviction is tagged when |delta_pct| is at least 0.25",
-          "status": "pending",
-          "blocked_on": "no dataset sets a one-sided taker split"
+          "status": "covered"
         },
         {
           "id": "6.2-below-floor",
