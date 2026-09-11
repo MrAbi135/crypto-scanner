@@ -923,13 +923,33 @@
     {
       "id": "7.3",
       "title": "Expansion / Compression",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "7.3",
-          "rule": "section not yet enumerated into rules",
+          "id": "7.3-range-expansion",
+          "rule": "range expansion: 3-candle mean range >= 1.4 x ATR",
+          "status": "covered"
+        },
+        {
+          "id": "7.3-compression-per-candle",
+          "rule": "compression: each of 7 consecutive candles has range <= 0.7 x ATR",
+          "status": "covered"
+        },
+        {
+          "id": "7.3-compression-envelope",
+          "rule": "compression also needs the 7-candle high-low envelope <= 2 x ATR; seven small candles walking uphill are a trend, not a coil",
+          "status": "covered"
+        },
+        {
+          "id": "7.3-compression-carries-no-direction",
+          "rule": "coils are directionless until resolved, so the recorded compression carries no direction",
+          "status": "covered"
+        },
+        {
+          "id": "7.3-compression-feeds-8-as-context",
+          "rule": "compression state feeds 8 as opportunity context, never as a directional claim",
           "status": "pending",
-          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
+          "blocked_on": "consumed by the confluence engine rather than emitted by the participation replay; needs an 8 dataset pairing a coil with an adjacent liquidity pool"
         }
       ]
     },
