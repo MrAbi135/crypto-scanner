@@ -856,39 +856,183 @@
     {
       "id": "6.5",
       "title": "Detector: Institutional Volume Signature",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "6.5",
-          "rule": "section not yet enumerated into rules",
+          "id": "6.5-all-four-conditions",
+          "rule": "institutional_volume only when all four conditions hold",
           "status": "pending",
-          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
+          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
+        },
+        {
+          "id": "6.5-rvol-floor",
+          "rule": "condition 1: RVOL >= 1.5",
+          "status": "pending",
+          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
+        },
+        {
+          "id": "6.5-size-skew",
+          "rule": "condition 2: 90th-percentile trade size >= 2x its trailing 20-candle median of the same percentile",
+          "status": "pending",
+          "blocked_on": "needs per-minute aggTrade buckets (trade counts and p90 print sizes), and a golden dataset is a candle series -- SLS 2 discards the prints once the minute is folded"
+        },
+        {
+          "id": "6.5-delta-floor",
+          "rule": "condition 3: |delta_pct| >= 0.30",
+          "status": "pending",
+          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
+        },
+        {
+          "id": "6.5-structural-coincidence",
+          "rule": "condition 4: coincides with a structural event candle -- institutional volume at random locations is not evidence",
+          "status": "pending",
+          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
+        },
+        {
+          "id": "6.5-stealth-flow",
+          "rule": "iceberg execution passes 1, 3 and 4 but fails 2 and is tagged stealth_flow, scored midway between retail and institutional",
+          "status": "pending",
+          "blocked_on": "needs per-minute aggTrade buckets (trade counts and p90 print sizes), and a golden dataset is a candle series -- SLS 2 discards the prints once the minute is folded"
+        },
+        {
+          "id": "6.5-suspect-excluded",
+          "rule": "a candle tagged suspect_volume fails 6.5's validation outright",
+          "status": "pending",
+          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
+        },
+        {
+          "id": "6.5-unmeasurable-is-not-retail",
+          "rule": "a candle with no aggTrade coverage has not been found to be retail flow; the question was not asked",
+          "status": "pending",
+          "blocked_on": "needs per-minute aggTrade buckets (trade counts and p90 print sizes), and a golden dataset is a candle series -- SLS 2 discards the prints once the minute is folded"
         }
       ]
     },
     {
       "id": "6.6",
       "title": "Detector: Fake Volume Defense",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "6.6",
-          "rule": "section not yet enumerated into rules",
+          "id": "6.6-four-tests",
+          "rule": "fake-volume score 0-100 from four tests worth 25 points each",
           "status": "pending",
-          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
+          "blocked_on": "a symbol-level daily batch owned by FakeVolumeJob in the worker; the golden harness replays services over one candle series and has no path to a scheduled job"
+        },
+        {
+          "id": "6.6-volume-depth-ratio",
+          "rule": "test 1: volume/depth ratio above the universe's 97.5th percentile",
+          "status": "pending",
+          "blocked_on": "a symbol-level daily batch owned by FakeVolumeJob in the worker; the golden harness replays services over one candle series and has no path to a scheduled job"
+        },
+        {
+          "id": "6.6-round-trip-symmetry",
+          "rule": "test 2: daily |cum delta| / total volume < 0.02 with elevated RVOL",
+          "status": "pending",
+          "blocked_on": "a symbol-level daily batch owned by FakeVolumeJob in the worker; the golden harness replays services over one candle series and has no path to a scheduled job"
+        },
+        {
+          "id": "6.6-trade-size-uniformity",
+          "rule": "test 3: coefficient of variation of trade sizes < 0.2",
+          "status": "pending",
+          "blocked_on": "a symbol-level daily batch owned by FakeVolumeJob in the worker; the golden harness replays services over one candle series and has no path to a scheduled job"
+        },
+        {
+          "id": "6.6-suspect-candle-count",
+          "rule": "test 4: more than 5 suspect_volume candles (6.4) in 24h",
+          "status": "pending",
+          "blocked_on": "a symbol-level daily batch owned by FakeVolumeJob in the worker; the golden harness replays services over one candle series and has no path to a scheduled job"
+        },
+        {
+          "id": "6.6-wash-risk-at-50",
+          "rule": "a score of 50 or more tags the symbol wash_risk",
+          "status": "pending",
+          "blocked_on": "a symbol-level daily batch owned by FakeVolumeJob in the worker; the golden harness replays services over one candle series and has no path to a scheduled job"
+        },
+        {
+          "id": "6.6-no-single-test-may-tag",
+          "rule": "no single test may tag a symbol: the composite needs at least two",
+          "status": "pending",
+          "blocked_on": "a symbol-level daily batch owned by FakeVolumeJob in the worker; the golden harness replays services over one candle series and has no path to a scheduled job"
+        },
+        {
+          "id": "6.6-consequences",
+          "rule": "wash_risk caps the volume factor at 50, caps alert priority at Medium, must be disclosed in AI explanations, and tightens meme-category thresholds by 20%",
+          "status": "pending",
+          "blocked_on": "a symbol-level daily batch owned by FakeVolumeJob in the worker; the golden harness replays services over one candle series and has no path to a scheduled job"
+        },
+        {
+          "id": "6.6-hysteresis",
+          "rule": "recomputed daily; the tag lifts only after 3 consecutive clean days",
+          "status": "pending",
+          "blocked_on": "a symbol-level daily batch owned by FakeVolumeJob in the worker; the golden harness replays services over one candle series and has no path to a scheduled job"
         }
       ]
     },
     {
       "id": "6.7",
       "title": "Volume Ranking Output",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "6.7",
-          "rule": "section not yet enumerated into rules",
+          "id": "6.7-base-50",
+          "rule": "the volume factor starts at a base of 50",
           "status": "pending",
-          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
+          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
+        },
+        {
+          "id": "6.7-spike-aligned",
+          "rule": "+15 for a spike aligned with the setup direction",
+          "status": "pending",
+          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
+        },
+        {
+          "id": "6.7-institutional",
+          "rule": "+15 for institutional_volume",
+          "status": "pending",
+          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
+        },
+        {
+          "id": "6.7-expansion-aligned",
+          "rule": "+10 for an expansion regime aligned with the setup",
+          "status": "pending",
+          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
+        },
+        {
+          "id": "6.7-stealth-flow",
+          "rule": "+5 for stealth_flow",
+          "status": "pending",
+          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
+        },
+        {
+          "id": "6.7-contraction-against-claim",
+          "rule": "-15 for contraction against an active-move claim",
+          "status": "pending",
+          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
+        },
+        {
+          "id": "6.7-opposing-spike",
+          "rule": "-20 for an opposing-direction spike",
+          "status": "pending",
+          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
+        },
+        {
+          "id": "6.7-clamped",
+          "rule": "the score is capped to [0, 100]",
+          "status": "pending",
+          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
+        },
+        {
+          "id": "6.7-hard-cap-on-wash-or-suspect",
+          "rule": "a hard cap of 50 whenever wash_risk or suspect_volume is involved",
+          "status": "pending",
+          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
+        },
+        {
+          "id": "6.7-evidence-per-adjustment",
+          "rule": "every adjustment stores its evidence id -- the score is an auditable sum, not a number",
+          "status": "pending",
+          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
         }
       ]
     },
@@ -1050,26 +1194,68 @@
     {
       "id": "7.4",
       "title": "Trend Strength",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "7.4",
-          "rule": "section not yet enumerated into rules",
+          "id": "7.4-structural-quality",
+          "rule": "0-40 from the count of consecutive unbroken HH/HL or LL/LH pairs",
           "status": "pending",
-          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
+          "blocked_on": "trend_strength() has no caller: the only references outside its own module are the re-export in domain/momentum/__init__.py and its unit tests. 7.4 says the composite is published to the 9 ranking factor and to AI context, and nothing publishes it, so no golden can reach it"
+        },
+        {
+          "id": "7.4-momentum-alignment",
+          "rule": "0-30 for the momentum score's direction agreeing with the trend state",
+          "status": "pending",
+          "blocked_on": "trend_strength() has no caller: the only references outside its own module are the re-export in domain/momentum/__init__.py and its unit tests. 7.4 says the composite is published to the 9 ranking factor and to AI context, and nothing publishes it, so no golden can reach it"
+        },
+        {
+          "id": "7.4-pullback-shallowness",
+          "rule": "0-30 from the mean retracement depth of the last 3 legs against the OTE band",
+          "status": "pending",
+          "blocked_on": "trend_strength() has no caller: the only references outside its own module are the re-export in domain/momentum/__init__.py and its unit tests. 7.4 says the composite is published to the 9 ranking factor and to AI context, and nothing publishes it, so no golden can reach it"
+        },
+        {
+          "id": "7.4-published-to-ranking",
+          "rule": "the composite is published to the 9 ranking factor and to AI context",
+          "status": "pending",
+          "blocked_on": "trend_strength() has no caller: the only references outside its own module are the re-export in domain/momentum/__init__.py and its unit tests. 7.4 says the composite is published to the 9 ranking factor and to AI context, and nothing publishes it, so no golden can reach it"
         }
       ]
     },
     {
       "id": "7.5",
       "title": "Impulse / Retracement Legs",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "7.5",
-          "rule": "section not yet enumerated into rules",
+          "id": "7.5-impulse",
+          "rule": "an impulse leg contains at least one displacement candle and makes net progress >= 1.5 x ATR in the trend direction",
           "status": "pending",
-          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
+          "blocked_on": "legs are segmented inside the confluence engine and are never emitted as events, so a golden can only reach them through 8's scoring evidence"
+        },
+        {
+          "id": "7.5-retracement",
+          "rule": "a retracement leg is a counter-direction leg retracing <= 100% of the prior impulse with no counter-displacement",
+          "status": "pending",
+          "blocked_on": "legs are segmented inside the confluence engine and are never emitted as events, so a golden can only reach them through 8's scoring evidence"
+        },
+        {
+          "id": "7.5-escalate",
+          "rule": "a counter-leg with displacement, or retracing past 100%, is neither and escalates to structure evaluation (3.6)",
+          "status": "pending",
+          "blocked_on": "legs are segmented inside the confluence engine and are never emitted as events, so a golden can only reach them through 8's scoring evidence"
+        },
+        {
+          "id": "7.5-micro",
+          "rule": "legs below 0.75 x ATR net progress are micro and are excluded from trend strength and OTE anchoring",
+          "status": "pending",
+          "blocked_on": "legs are segmented inside the confluence engine and are never emitted as events, so a golden can only reach them through 8's scoring evidence"
+        },
+        {
+          "id": "7.5-finalize-on-confirmation",
+          "rule": "legs finalize only when their terminal swing confirms",
+          "status": "pending",
+          "blocked_on": "legs are segmented inside the confluence engine and are never emitted as events, so a golden can only reach them through 8's scoring evidence"
         }
       ]
     },
