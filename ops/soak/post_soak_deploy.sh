@@ -39,17 +39,46 @@ step() { echo; echo "== $*"; }
 step "0. Preconditions -- refuse to run rather than half-run"
 # ---------------------------------------------------------------------------
 
-started=$(docker inspect --format '{{.State.StartedAt}}' scanner-dev-engine-1 2>/dev/null) \
-  || fail "engine container not found"
+started=$(docker inspect --format '{{.State.StartedAt}}' scanner-dev-engine-1 2>/dev/null)   || fail "engine container not found"
 
+# The soak is a period of time, and it began when the last deploy recorded T0
+# -- not when this container happened to start. Measuring from StartedAt was
+# wrong in both directions: a container restarted an hour ago reads as a soak
+# that never ran, and a soak that finished reads as unfinished the moment
+# anything restarts the engine.
+soak_start=${SOAK_T0_FILE:-$HOME/soak-logs/T0}
+
+if [ -r "$soak_start" ]; then
+  t0=$(cat "$soak_start")
+else
+  t0=$started
+  echo "   (no recorded T0 at $soak_start -- measuring from the container)"
+fi
+
+t0_s=$(date -u -d "$t0" +%s)
 started_s=$(date -u -d "$started" +%s)
 now_s=$(date -u +%s)
-elapsed_h=$(( (now_s - started_s) / 3600 ))
+elapsed_h=$(( (now_s - t0_s) / 3600 ))
 
-echo "   engine up ${elapsed_h}h (since $started)"
+echo "   soak T0     : $t0  (${elapsed_h}h ago)"
+echo "   engine start: $started"
 
 if [ "$elapsed_h" -lt 72 ]; then
   fail "soak is at ${elapsed_h}h of 72 -- this script exists so nobody resets it early"
+fi
+
+# RestartCount cannot see this. `docker kill` followed by `docker start` --
+# exactly what the G1b resume proof does, and what a human debugging a wedged
+# engine does -- leaves the counter at 0 while the container plainly
+# restarted. Measured 2026-09-11: SIGKILL, start, RestartCount still 0. The
+# durable signal is a start time sitting after T0, so that is what is asked,
+# and a deliberate restart has to say so out loud.
+if [ "$started_s" -gt $(( t0_s + 120 )) ]; then
+  if [ -z "${RESTART_REASON:-}" ]; then
+    fail "engine started $(( (started_s - t0_s) / 60 )) minutes after T0 -- the soak was interrupted. Set RESTART_REASON='...' if that was deliberate."
+  fi
+
+  echo "   restart since T0, declared: $RESTART_REASON"
 fi
 
 restarts=$(docker inspect --format '{{.RestartCount}}' scanner-dev-engine-1)
@@ -74,8 +103,10 @@ grep -qF '_mature_recent_sweeps' backend/src/scanner/application/detection/liqui
 grep -qF 'def apply_recovery' backend/src/scanner/domain/structure/trend.py   || fail "#198 missing: the trend machine has no recovery edge"
 grep -qF '_broken_premise' backend/src/scanner/application/detection/signal_monitor.py   || fail "#200/#204 missing: INVALIDATED_EARLY is still unreachable"
 grep -qF 'abs(candles[cursor].high - candidate)' backend/src/scanner/domain/structure/swings.py   || fail "#203 missing: the swing walk-back still consumes higher candles"
+grep -qF 's6-ob-v6' backend/src/scanner/application/detection/ict_ob_replay.py   || fail "#222 missing: ICT_OB_ALGO_VERSION is not s6-ob-v6"
+grep -qF 'origin_opens = ob.created_at' backend/src/scanner/application/detection/ict_ob_replay.py   || fail "#222 missing: the OB helpers still index the window with frozen offsets"
 
-echo "   all seven batch markers present in the tree at $(git rev-parse --short HEAD)"
+echo "   all nine batch markers present in the tree at $(git rev-parse --short HEAD)"
 
 # ---------------------------------------------------------------------------
 step "1. Invariants before touching anything (expect: exit 0, 1 acknowledged)"
@@ -165,8 +196,10 @@ docker exec scanner-dev-engine-1 grep -qF '_mature_recent_sweeps' /app/src/scann
 docker exec scanner-dev-engine-1 grep -qF 'def apply_recovery' /app/src/scanner/domain/structure/trend.py   || fail "running engine has no trend recovery edge"
 docker exec scanner-dev-engine-1 grep -qF '_broken_premise' /app/src/scanner/application/detection/signal_monitor.py   || fail "running engine cannot reach INVALIDATED_EARLY"
 docker exec scanner-dev-engine-1 grep -qF 'abs(candles[cursor].high - candidate)' /app/src/scanner/domain/structure/swings.py   || fail "running engine still has the old swing walk-back"
+docker exec scanner-dev-engine-1 grep -qF 'origin_opens = ob.created_at' /app/src/scanner/application/detection/ict_ob_replay.py   || fail "running engine still indexes the window with the OB's frozen offsets"
 
-running_release=$(docker exec scanner-dev-engine-1 printenv SCANNER_RELEASE 2>/dev/null | tr -d '')
+running_release=$(docker exec scanner-dev-engine-1 printenv SCANNER_RELEASE 2>/dev/null | tr -d '
+')
 [ "$running_release" = "$release" ]   || fail "running engine reports release '$running_release', expected '$release'"
 
 new_started=$(docker inspect --format '{{.State.StartedAt}}' scanner-dev-engine-1)
