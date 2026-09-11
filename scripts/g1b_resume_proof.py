@@ -158,8 +158,17 @@ _DOCKER_CMD: list[str] = ["docker"]
 
 
 def _docker(*args: str) -> subprocess.CompletedProcess[str]:
+    # Anything but a bare local `docker` reaches the daemon through a second
+    # shell -- ssh, sudo, a wrapper -- and that shell re-parses these
+    # arguments before docker ever sees them. `--format {{.State.Running}}`
+    # then brace-expands to `.State.Running`, and the probe reads that literal
+    # back instead of `true`. Quoting is wrong for the local case, where
+    # subprocess passes argv straight through with no shell at all.
+    routed = len(_DOCKER_CMD) > 1
+    passed = [shlex.quote(arg) for arg in args] if routed else list(args)
+
     return subprocess.run(
-        [*_DOCKER_CMD, *args], capture_output=True, text=True, check=False
+        [*_DOCKER_CMD, *passed], capture_output=True, text=True, check=False
     )
 
 
