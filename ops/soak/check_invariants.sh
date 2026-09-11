@@ -227,7 +227,7 @@ echo "-- A. gate open but not breaking --"
 # else in these tables has candles without having been scanned -- golden
 # fixtures, symbols backfilled ahead of a deploy -- and every check below
 # reads that absence as a defect.
-INGEST_SYMBOLS=$($C exec -T engine printenv SCANNER_INGEST_SYMBOLS 2>/dev/null | tr -d '' | tr -d '
+INGEST_SYMBOLS=$($C exec -T engine printenv SCANNER_INGEST_SYMBOLS 2>/dev/null | tr -d '' | tr -d '
 ')
 
 if [ -z "$INGEST_SYMBOLS" ]; then
