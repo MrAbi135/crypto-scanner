@@ -466,7 +466,14 @@ if [ ! -f ops/soak/leg_invariant.py ]; then
 else
   net=$(docker inspect scanner-dev-engine-1 --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' 2>/dev/null)
 
+  # -e AFTER --env-file, and deliberately: the file is the NEXT deploy's
+  # intent, while this suite asks about the engine that is running now. On
+  # 2026-09-11 the two disagreed -- the file already listed fifteen symbols,
+  # the engine still scanned two -- and the leg check flagged fifteen
+  # "unrecorded pivot" violations against symbols detection had not reached.
+  # One scope, taken from the artifact under test.
   legs=$(docker run --rm --network "$net" --env-file ops/env/dev.env \
+           -e SCANNER_INGEST_SYMBOLS="$INGEST_SYMBOLS" \
            --entrypoint python -v "$PWD/ops/soak/leg_invariant.py:/tmp/leg.py:ro" \
            -w /app scanner-dev-engine /tmp/leg.py 2>&1)
   lrc=$?
