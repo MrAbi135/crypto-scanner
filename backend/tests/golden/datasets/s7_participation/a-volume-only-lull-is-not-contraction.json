@@ -1,0 +1,87 @@
+{
+  "dataset_id": "s7-a-volume-only-lull-is-not-contraction",
+  "engine": "participation",
+  "sls_sections": [
+    "6.3"
+  ],
+  "sls_rules": [
+    "6.3-contraction-mean-range",
+    "6.3-contraction-both-dimensions"
+  ],
+  "description": "Five closes at half the baseline volume while every candle still covers its full range. Participation has contracted; volatility has not, so nothing is recorded.",
+  "labelling_rationale": "§6.3's contraction is a conjunction and the clause says why in its own words: both dimensions must contract, because volume-only lulls during grinding trends are not contraction. This case is that sentence made executable. The last five candles carry volume 50 against a §2.11 H4 baseline that stays at exactly 100 -- the rolling 20-candle median never sees more than four of the reduced volumes, so sixteen samples of 100 hold the middle -- giving each of them RVOL 0.5. At the second-to-last close the five-candle mean RVOL is therefore (1.0 + 0.5 + 0.5 + 0.5 + 0.5) / 5 = 0.6, exactly §6.3's inclusive ceiling, and at the final close it is 0.5. The volume dimension has contracted on both of those closes and the detector must still record nothing, because the range dimension has not moved: every candle keeps the filler's high of 103 and low of 100, so the five-candle mean range is 3.00 against a limit of 0.6 x ATR = 1.80. ATR is exactly 3 throughout -- a true range of 3 fed into Wilder's (ATR_prev x 13 + TR) / 14 returns 3 unchanged -- which also means the threshold cannot drift toward the measurement and turn this into a near miss: 3.00 is 67% above the ceiling, not beside it. The expected output is empty, and that emptiness is the whole assertion. Delete the range half of §6.3's conjunction and this series starts recording contraction on two closes, which is precisely the reading §6.3 forbids -- a market still covering ground on thinner volume is a trend, and calling it a coil inverts it. Its companion s7-both-dimensions-contract holds the volume half to the same standard. **Why every candle is a doji.** §7.1 gives a candle no momentum direction unless its close differs from its open, and one directional candle in a series this flat is unopposed in its ten-candle window: §7.1's body and participation components both saturate at 25 with no counter candle to divide by, which puts the score at or above §7.2's floor of 50 and fires an acceleration event whose payload carries a raw §7.1 score no labeller can derive by hand. That is the obstacle already recorded against 6.2-direction-from-body. Holding every candle at open == close keeps §7.1 NEUTRAL, leaves its score equal to the ROC component alone (at most 25, never §7.2's 50), and holds the case to the one thing it claims to assert.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-11 from SLS §6.3; pending developer verification",
+  "labelled_at": "2026-09-11",
+  "algo_version": "s7-participation-v2",
+  "symbol": "GOLDENVOL",
+  "timeframe": "H4",
+  "filler": {
+    "count": 295,
+    "open": "100",
+    "high": "103",
+    "low": "100",
+    "close": "100"
+  },
+  "candles": [
+    {
+      "open_time": "2026-08-20T16:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100",
+      "volume": "50",
+      "quote_volume": "5000"
+    },
+    {
+      "open_time": "2026-08-20T20:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100",
+      "volume": "50",
+      "quote_volume": "5000"
+    },
+    {
+      "open_time": "2026-08-21T00:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100",
+      "volume": "50",
+      "quote_volume": "5000"
+    },
+    {
+      "open_time": "2026-08-21T04:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100",
+      "volume": "50",
+      "quote_volume": "5000"
+    },
+    {
+      "open_time": "2026-08-21T08:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100",
+      "volume": "50",
+      "quote_volume": "5000"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "volume_spikes": 0,
+      "suspect_volume": 0,
+      "expansions": 0,
+      "contractions": 0,
+      "range_expansions": 0,
+      "compressions": 0,
+      "accelerations": 0,
+      "exhaustion_watches": 0,
+      "events_inserted": 0
+    },
+    "events": []
+  }
+}

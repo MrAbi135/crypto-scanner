@@ -106,6 +106,9 @@ UNVERIFIED_LABELS = frozenset(
         "a-spike-under-the-quote-floor-does-not-confirm.json",
         "volume-spike-on-a-doji-is-absorption.json",
         "a-quiet-market-fails-structure-and-zone.json",
+        "expansion-needs-all-three-tests.json",
+        "a-volume-only-lull-is-not-contraction.json",
+        "both-dimensions-contract.json",
     }
 )
 

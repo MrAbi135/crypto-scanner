@@ -1,0 +1,110 @@
+{
+  "dataset_id": "s7-both-dimensions-contract",
+  "engine": "participation",
+  "sls_sections": [
+    "6.3"
+  ],
+  "sls_rules": [
+    "6.3-contraction-mean-rvol"
+  ],
+  "description": "Six coiling candles, the first at normal volume and the last five at half the baseline. Volatility contracts one close before participation does, and contraction is recorded only once both have.",
+  "labelling_rationale": "The companion to s7-a-volume-only-lull-is-not-contraction, holding the other half of §6.3's conjunction to the same standard: here volatility contracts first and the volume test is the one doing the refusing. All six hand-written candles span 100.25 to 99.75, a range of 0.50 against the filler's 3.00. Because they open and close at 100 -- the previous close -- no gap term can exceed that span, so their true range is also 0.50 and it drags ATR down through Wilder's (ATR_prev x 13 + TR) / 14: 2.8214, 2.6556, 2.5016, 2.3587, 2.2259 and 2.1026 across the six closes. The range test is satisfied from the third close onward and by a wide margin -- at the fourth close the five-candle mean range is (3.00 + 0.50 x 4) / 5 = 1.00 against 0.6 x 2.3587 = 1.4152, and at the last two it is 0.50 against 1.3355 and 1.2616. The volume test is what holds the detector back. Only the final five candles carry volume 50; the first coiling candle carries the filler's 100, and §2.11's rolling 20-candle median stays at exactly 100 throughout because at most five reduced volumes ever enter a twenty-sample window. So the five-candle mean RVOL is 0.8 at the third-to-last close and 0.7 at the second-to-last-but-one -- (1.0 + 1.0 + 0.5 + 0.5 + 0.5) / 5 -- both above §6.3's 0.6 ceiling even though the range half of the test is already comfortably satisfied there. It reaches exactly 0.6 at the second-to-last close, where one candle at 1.0 and four at 0.5 average to the inclusive ceiling, and 0.5 at the last. Contraction is therefore recorded on two closes, not six, and deleting the volume test would record it on four. §6.3 calls these per-candle context flags that recompute each close with no persistence, which is why two consecutive closes each produce their own event rather than one state being opened and later closed. The payload is the candle's own RVOL of 0.5, banded NORMAL under §6.1 because the bands classify loudness upward from 1.5 and have no name for quiet. Six coiling candles and not seven: §7.3's NR7 compression needs seven consecutive candles each inside 0.7 x ATR, and a seventh would add a COMPRESSION event to a case that asserts §6.3. **Why every candle is a doji.** §7.1 gives a candle no momentum direction unless its close differs from its open, and one directional candle in a series this flat is unopposed in its ten-candle window: §7.1's body and participation components both saturate at 25 with no counter candle to divide by, which puts the score at or above §7.2's floor of 50 and fires an acceleration event whose payload carries a raw §7.1 score no labeller can derive by hand. That is the obstacle already recorded against 6.2-direction-from-body. Holding every candle at open == close keeps §7.1 NEUTRAL, leaves its score equal to the ROC component alone (at most 25, never §7.2's 50), and holds the case to the one thing it claims to assert.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-11 from SLS §6.3; pending developer verification",
+  "labelled_at": "2026-09-11",
+  "algo_version": "s7-participation-v2",
+  "symbol": "GOLDENVOL",
+  "timeframe": "H4",
+  "filler": {
+    "count": 294,
+    "open": "100",
+    "high": "103",
+    "low": "100",
+    "close": "100"
+  },
+  "candles": [
+    {
+      "open_time": "2026-08-20T12:00:00+00:00",
+      "open": "100",
+      "high": "100.25",
+      "low": "99.75",
+      "close": "100"
+    },
+    {
+      "open_time": "2026-08-20T16:00:00+00:00",
+      "open": "100",
+      "high": "100.25",
+      "low": "99.75",
+      "close": "100",
+      "volume": "50",
+      "quote_volume": "5000"
+    },
+    {
+      "open_time": "2026-08-20T20:00:00+00:00",
+      "open": "100",
+      "high": "100.25",
+      "low": "99.75",
+      "close": "100",
+      "volume": "50",
+      "quote_volume": "5000"
+    },
+    {
+      "open_time": "2026-08-21T00:00:00+00:00",
+      "open": "100",
+      "high": "100.25",
+      "low": "99.75",
+      "close": "100",
+      "volume": "50",
+      "quote_volume": "5000"
+    },
+    {
+      "open_time": "2026-08-21T04:00:00+00:00",
+      "open": "100",
+      "high": "100.25",
+      "low": "99.75",
+      "close": "100",
+      "volume": "50",
+      "quote_volume": "5000"
+    },
+    {
+      "open_time": "2026-08-21T08:00:00+00:00",
+      "open": "100",
+      "high": "100.25",
+      "low": "99.75",
+      "close": "100",
+      "volume": "50",
+      "quote_volume": "5000"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "volume_spikes": 0,
+      "suspect_volume": 0,
+      "expansions": 0,
+      "contractions": 2,
+      "range_expansions": 0,
+      "compressions": 0,
+      "accelerations": 0,
+      "exhaustion_watches": 0,
+      "events_inserted": 2
+    },
+    "events": [
+      {
+        "event_type": "VOLUME_CONTRACTION",
+        "event_at": "2026-08-21T04:00:00+00:00",
+        "payload": {
+          "rvol": "0.5",
+          "rvol_class": "NORMAL"
+        }
+      },
+      {
+        "event_type": "VOLUME_CONTRACTION",
+        "event_at": "2026-08-21T08:00:00+00:00",
+        "payload": {
+          "rvol": "0.5",
+          "rvol_class": "NORMAL"
+        }
+      }
+    ]
+  }
+}

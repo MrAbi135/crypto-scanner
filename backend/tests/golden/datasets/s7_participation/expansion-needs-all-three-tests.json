@@ -1,0 +1,202 @@
+{
+  "dataset_id": "s7-volume-expansion-needs-all-three-tests",
+  "engine": "participation",
+  "sls_sections": [
+    "6.3"
+  ],
+  "sls_rules": [
+    "6.3-expansion-rising-volume",
+    "6.3-expansion-mean-rvol",
+    "6.3-expansion-progress"
+  ],
+  "description": "Four triples of raised volume. The first is not strictly rising, the second is too quiet, the third goes nowhere, and only the fourth satisfies all of §6.3 at once. One expansion is recorded.",
+  "labelling_rationale": "SLS §6.3 makes expansion a conjunction of three tests, so a case that satisfies all three at once proves only that the detector can say yes. This series instead writes four triples, each failing exactly one test, so that deleting any single clause from the detector changes the expected output. **Triple A (2026-08-19T00:00 - 08:00), volumes 130 / 130 / 130.** §2.11's H4 baseline is the plain rolling 20-candle median, and every window here leaves it at exactly 100 because at least half the twenty samples are the filler's 100, so the three RVOLs are 1.3 and their mean, 1.3, clears the 1.2 floor. The third candle opens 3 above the triple's first open, which is 1.00 x ATR and past the 0.75 x ATR progress bar. What it does not do is rise: §6.3 asks for V[i] > V[i+1] > V[i+2] and equal volumes fail a strict inequality, so nothing is recorded. **Triple B (2026-08-19T20:00 - 2026-08-20T04:00), volumes 40 / 50 / 60.** Strictly rising, and the third candle again carries price 3 higher, but the three RVOLs are 0.4, 0.5 and 0.6 and their mean of 0.5 is under the 1.2 floor. Rising volume that is still below the baseline is a recovery from quiet, not participation validating a move. **Triple C (2026-08-20T16:00 - 2026-08-21T00:00), volumes 110 / 120 / 130.** Strictly rising, and the RVOLs 1.1, 1.2 and 1.3 average to exactly 1.2 -- the floor is inclusive, so this passes. Every candle in the triple opens and closes at 106, so |Cl[i] - O[i+2]| is 0 against a required 2.25. §6.3 exists to reject exactly this: rising participation through a sideways grind is churn, and crediting it would validate a move that is not happening. **Triple D (2026-08-21T08:00 and the two closes before it), volumes 110 / 120 / 130.** The same volumes as C, so the same mean of exactly 1.2, but the last candle opens at 109 against the triple's opening 106 -- net progress 3.00 = 1.00 x ATR. All three tests hold and one VOLUME_EXPANSION is recorded, its direction UP because the sign inside §6.3's absolute value is positive; §6.3's edge case ('expansion in opposing direction to an active setup is contrary evidence') is what later reads that sign. ATR is exactly 3 at every index, which is what makes the 2.25 bar a fixed number rather than a moving one: the filler's true range is 3, and every hand-written candle is shaped to keep its own true range at 3 -- the flat ones by spanning 3 above their level, the stepping ones by opening 3 above the previous close and trading back down to it -- so Wilder's (ATR_prev x 13 + TR) / 14 returns 3 unchanged forever. The recorded payload is the final candle's own RVOL of 1.3, banded NORMAL by §6.1 because 1.3 is below the 1.5 ELEVATED boundary: expansion is a statement about three candles together, not a claim that any one of them was individually loud. **Why every candle is a doji.** §7.1 gives a candle no momentum direction unless its close differs from its open, and one directional candle in a series this flat is unopposed in its ten-candle window: §7.1's body and participation components both saturate at 25 with no counter candle to divide by, which puts the score at or above §7.2's floor of 50 and fires an acceleration event whose payload carries a raw §7.1 score no labeller can derive by hand. That is the obstacle already recorded against 6.2-direction-from-body. Holding every candle at open == close keeps §7.1 NEUTRAL, leaves its score equal to the ROC component alone (at most 25, never §7.2's 50), and holds the case to the one thing it claims to assert. The price displacement therefore arrives as an opening gap, which is legitimate input: §6.3 reads O[i+2] and Cl[i], not the path between them.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-11 from SLS §6.3; pending developer verification",
+  "labelled_at": "2026-09-11",
+  "algo_version": "s7-participation-v2",
+  "symbol": "GOLDENVOL",
+  "timeframe": "H4",
+  "filler": {
+    "count": 282,
+    "open": "100",
+    "high": "103",
+    "low": "100",
+    "close": "100"
+  },
+  "candles": [
+    {
+      "open_time": "2026-08-18T12:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100",
+      "volume": "130",
+      "quote_volume": "13000"
+    },
+    {
+      "open_time": "2026-08-18T16:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100",
+      "volume": "130",
+      "quote_volume": "13000"
+    },
+    {
+      "open_time": "2026-08-18T20:00:00+00:00",
+      "open": "103",
+      "high": "103",
+      "low": "100",
+      "close": "103",
+      "volume": "130",
+      "quote_volume": "13000"
+    },
+    {
+      "open_time": "2026-08-19T00:00:00+00:00",
+      "open": "103",
+      "high": "106",
+      "low": "103",
+      "close": "103"
+    },
+    {
+      "open_time": "2026-08-19T04:00:00+00:00",
+      "open": "103",
+      "high": "106",
+      "low": "103",
+      "close": "103"
+    },
+    {
+      "open_time": "2026-08-19T08:00:00+00:00",
+      "open": "103",
+      "high": "106",
+      "low": "103",
+      "close": "103",
+      "volume": "40",
+      "quote_volume": "4000"
+    },
+    {
+      "open_time": "2026-08-19T12:00:00+00:00",
+      "open": "103",
+      "high": "106",
+      "low": "103",
+      "close": "103",
+      "volume": "50",
+      "quote_volume": "5000"
+    },
+    {
+      "open_time": "2026-08-19T16:00:00+00:00",
+      "open": "106",
+      "high": "106",
+      "low": "103",
+      "close": "106",
+      "volume": "60",
+      "quote_volume": "6000"
+    },
+    {
+      "open_time": "2026-08-19T20:00:00+00:00",
+      "open": "106",
+      "high": "109",
+      "low": "106",
+      "close": "106"
+    },
+    {
+      "open_time": "2026-08-20T00:00:00+00:00",
+      "open": "106",
+      "high": "109",
+      "low": "106",
+      "close": "106"
+    },
+    {
+      "open_time": "2026-08-20T04:00:00+00:00",
+      "open": "106",
+      "high": "109",
+      "low": "106",
+      "close": "106",
+      "volume": "110",
+      "quote_volume": "11000"
+    },
+    {
+      "open_time": "2026-08-20T08:00:00+00:00",
+      "open": "106",
+      "high": "109",
+      "low": "106",
+      "close": "106",
+      "volume": "120",
+      "quote_volume": "12000"
+    },
+    {
+      "open_time": "2026-08-20T12:00:00+00:00",
+      "open": "106",
+      "high": "109",
+      "low": "106",
+      "close": "106",
+      "volume": "130",
+      "quote_volume": "13000"
+    },
+    {
+      "open_time": "2026-08-20T16:00:00+00:00",
+      "open": "106",
+      "high": "109",
+      "low": "106",
+      "close": "106"
+    },
+    {
+      "open_time": "2026-08-20T20:00:00+00:00",
+      "open": "106",
+      "high": "109",
+      "low": "106",
+      "close": "106"
+    },
+    {
+      "open_time": "2026-08-21T00:00:00+00:00",
+      "open": "106",
+      "high": "109",
+      "low": "106",
+      "close": "106",
+      "volume": "110",
+      "quote_volume": "11000"
+    },
+    {
+      "open_time": "2026-08-21T04:00:00+00:00",
+      "open": "106",
+      "high": "109",
+      "low": "106",
+      "close": "106",
+      "volume": "120",
+      "quote_volume": "12000"
+    },
+    {
+      "open_time": "2026-08-21T08:00:00+00:00",
+      "open": "109",
+      "high": "109",
+      "low": "106",
+      "close": "109",
+      "volume": "130",
+      "quote_volume": "13000"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "volume_spikes": 0,
+      "suspect_volume": 0,
+      "expansions": 1,
+      "contractions": 0,
+      "range_expansions": 0,
+      "compressions": 0,
+      "accelerations": 0,
+      "exhaustion_watches": 0,
+      "events_inserted": 1
+    },
+    "events": [
+      {
+        "event_type": "VOLUME_EXPANSION",
+        "event_at": "2026-08-21T08:00:00+00:00",
+        "payload": {
+          "rvol": "1.3",
+          "rvol_class": "NORMAL"
+        }
+      }
+    ]
+  }
+}
