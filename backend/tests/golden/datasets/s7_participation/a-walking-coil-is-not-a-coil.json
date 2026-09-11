@@ -1,0 +1,189 @@
+{
+  "dataset_id": "s7-a-walking-coil-is-not-a-coil",
+  "engine": "participation",
+  "sls_sections": [
+    "7.3"
+  ],
+  "sls_rules": [
+    "7.3-compression-per-candle",
+    "7.3-compression-envelope",
+    "7.3-compression-carries-no-direction"
+  ],
+  "description": "Seven narrow candles that walk 9 points uphill, and later seven of the same width that stay put. Only the second set is a coil; the first is a trend made of small bars.",
+  "labelling_rationale": "§7.3's compression is two tests joined by 'and', and this case exists because the second one carries the meaning. **2026-08-18T16:00 through 2026-08-19T16:00 -- seven narrow candles, no coil.** Each spans 1.00, and the ATR they are measured against has decayed to 2.5495 by the seventh, so every one of them clears the per-candle test of 0.7 x ATR = 1.7846 with room to spare. Taken one at a time they look exactly like a coil. They are not: each sits 1.50 above the last, so the seven-candle high-low envelope is 109.50 - 99.50 = 10.00 against a ceiling of 2 x ATR = 5.0989. Seven small candles walking steadily uphill have covered enormous ground, and calling that a pre-breakout coil inverts the reading -- it is a trend, and the envelope test is the only thing that tells the two apart. **2026-08-20T16:00 through 2026-08-21T08:00 -- seven of the same width that stay put.** Identical candles spanning 1.00, but all at 109, so the envelope is 1.00 against a ceiling of 2 x 2.0186 = 4.0371 and the per-candle bar is 0.7 x 2.0186 = 1.4130. Both tests pass and COMPRESSION is recorded once, on the seventh -- the first close at which seven consecutive candles have satisfied it. The six closes before it fail the per-candle test rather than the envelope one, because their windows still reach back into the full-width candles between the two groups, which span 3.00 against that same 1.4130 bar. Those six separating candles are there for exactly that reason: they keep the two groups from sharing a window, and they let ATR recover to 2.7112 before the real coil starts, so the coil is measured against the volatility it is coiling out of rather than against its own. The payload is empty, and deliberately so: §7.3 says compression 'feeds §8 as opportunity context, never as a directional claim (coils are directionless until resolved)', and an event carrying no direction is that sentence in the record. Every candle is a doji. §7.1 gives a candle no momentum direction unless its close differs from its open, so an all-doji series is NEUTRAL at every index and its momentum score is the ROC component alone -- at most 25 against §7.2's acceleration floor of 50, and here never above 12. A directional candle would fire a §7.2 acceleration event carrying a raw §7.1 score no labeller can derive by hand, which is the obstacle recorded against 6.2-direction-from-body.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-11 from SLS §7.3; pending developer verification",
+  "labelled_at": "2026-09-11",
+  "algo_version": "s7-participation-v2",
+  "symbol": "GOLDENVOL",
+  "timeframe": "H4",
+  "filler": {
+    "count": 280,
+    "open": "100",
+    "high": "103",
+    "low": "100",
+    "close": "100"
+  },
+  "candles": [
+    {
+      "open_time": "2026-08-18T04:00:00+00:00",
+      "open": "100",
+      "high": "100.5",
+      "low": "99.5",
+      "close": "100"
+    },
+    {
+      "open_time": "2026-08-18T08:00:00+00:00",
+      "open": "101.5",
+      "high": "102",
+      "low": "101",
+      "close": "101.5"
+    },
+    {
+      "open_time": "2026-08-18T12:00:00+00:00",
+      "open": "103",
+      "high": "103.5",
+      "low": "102.5",
+      "close": "103"
+    },
+    {
+      "open_time": "2026-08-18T16:00:00+00:00",
+      "open": "104.5",
+      "high": "105",
+      "low": "104",
+      "close": "104.5"
+    },
+    {
+      "open_time": "2026-08-18T20:00:00+00:00",
+      "open": "106",
+      "high": "106.5",
+      "low": "105.5",
+      "close": "106"
+    },
+    {
+      "open_time": "2026-08-19T00:00:00+00:00",
+      "open": "107.5",
+      "high": "108",
+      "low": "107",
+      "close": "107.5"
+    },
+    {
+      "open_time": "2026-08-19T04:00:00+00:00",
+      "open": "109",
+      "high": "109.5",
+      "low": "108.5",
+      "close": "109"
+    },
+    {
+      "open_time": "2026-08-19T08:00:00+00:00",
+      "open": "109",
+      "high": "112",
+      "low": "109",
+      "close": "109"
+    },
+    {
+      "open_time": "2026-08-19T12:00:00+00:00",
+      "open": "109",
+      "high": "112",
+      "low": "109",
+      "close": "109"
+    },
+    {
+      "open_time": "2026-08-19T16:00:00+00:00",
+      "open": "109",
+      "high": "112",
+      "low": "109",
+      "close": "109"
+    },
+    {
+      "open_time": "2026-08-19T20:00:00+00:00",
+      "open": "109",
+      "high": "112",
+      "low": "109",
+      "close": "109"
+    },
+    {
+      "open_time": "2026-08-20T00:00:00+00:00",
+      "open": "109",
+      "high": "112",
+      "low": "109",
+      "close": "109"
+    },
+    {
+      "open_time": "2026-08-20T04:00:00+00:00",
+      "open": "109",
+      "high": "112",
+      "low": "109",
+      "close": "109"
+    },
+    {
+      "open_time": "2026-08-20T08:00:00+00:00",
+      "open": "109",
+      "high": "109.5",
+      "low": "108.5",
+      "close": "109"
+    },
+    {
+      "open_time": "2026-08-20T12:00:00+00:00",
+      "open": "109",
+      "high": "109.5",
+      "low": "108.5",
+      "close": "109"
+    },
+    {
+      "open_time": "2026-08-20T16:00:00+00:00",
+      "open": "109",
+      "high": "109.5",
+      "low": "108.5",
+      "close": "109"
+    },
+    {
+      "open_time": "2026-08-20T20:00:00+00:00",
+      "open": "109",
+      "high": "109.5",
+      "low": "108.5",
+      "close": "109"
+    },
+    {
+      "open_time": "2026-08-21T00:00:00+00:00",
+      "open": "109",
+      "high": "109.5",
+      "low": "108.5",
+      "close": "109"
+    },
+    {
+      "open_time": "2026-08-21T04:00:00+00:00",
+      "open": "109",
+      "high": "109.5",
+      "low": "108.5",
+      "close": "109"
+    },
+    {
+      "open_time": "2026-08-21T08:00:00+00:00",
+      "open": "109",
+      "high": "109.5",
+      "low": "108.5",
+      "close": "109"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "volume_spikes": 0,
+      "suspect_volume": 0,
+      "expansions": 0,
+      "contractions": 0,
+      "range_expansions": 0,
+      "compressions": 1,
+      "accelerations": 0,
+      "exhaustion_watches": 0,
+      "events_inserted": 1
+    },
+    "events": [
+      {
+        "event_type": "COMPRESSION",
+        "event_at": "2026-08-21T08:00:00+00:00",
+        "payload": {}
+      }
+    ]
+  }
+}

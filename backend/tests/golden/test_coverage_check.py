@@ -110,6 +110,8 @@ UNVERIFIED_LABELS = frozenset(
         "a-volume-only-lull-is-not-contraction.json",
         "both-dimensions-contract.json",
         "abnormal-volume-cross-validation.json",
+        "range-expansion-is-measured-against-a-moving-atr.json",
+        "a-walking-coil-is-not-a-coil.json",
     }
 )
 

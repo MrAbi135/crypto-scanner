@@ -1,0 +1,96 @@
+{
+  "dataset_id": "s7-range-expansion-is-measured-against-a-moving-atr",
+  "engine": "participation",
+  "sls_sections": [
+    "7.3"
+  ],
+  "sls_rules": [
+    "7.3-range-expansion"
+  ],
+  "description": "Two wide candles in a quiet series. The first doubles the prevailing range and is not expansion; the second is five times it and is. §7.3's bar is a multiple of ATR, not a price.",
+  "labelling_rationale": "§7.3's range expansion is '3-candle mean range >= 1.4 x ATR', and the point of this case is that both halves of that comparison move. The series runs on filler candles spanning 3, whose true range against a previous close at the same level is also 3, so Wilder's (ATR_prev x 13 + TR) / 14 holds ATR at exactly 3 until something changes. **2026-08-20T08:00 -- twice the prevailing range, and not expansion.** This candle spans 97 to 103, a range of 6, which is also its true range. The three-candle mean is therefore (3 + 3 + 6) / 3 = 4.00. But the wide candle has already moved the denominator: ATR steps to (3 x 13 + 6) / 14 = 3.2143, so the bar is 1.4 x 3.2143 = 4.5000, and 4.00 does not reach it. A candle twice the size of its neighbours is not automatically a phase change -- §7.3 asks whether the recent mean has outrun the smoothed volatility, and one wide bar among two quiet ones has not. The two closes after it do not reach the bar either, for the same reason in reverse: the mean holds at 4.00 for two more closes and then falls to 3.00, while ATR is still elevated. **2026-08-21T08:00 -- five times the prevailing range, and expansion.** This candle spans 92.5 to 107.5, a range of 15. The three-candle mean is (3 + 3 + 15) / 3 = 7.00 against a bar of 1.4 x ATR, where ATR is 3.9945 after the wide bar is folded in -- 5.5923. Seven clears it by a quarter, which is the margin that makes this a label rather than a coin flip: the answer does not turn on the fourth decimal place of a Wilder recurrence. RANGE_EXPANSION is recorded once, with an empty payload -- §7.3 states it as a phase, and the phase is the whole fact. Volume is the filler's 100 throughout, so §2.11's rolling median holds RVOL at exactly 1 and none of §6's detectors have anything to say: no spike, no expansion (volume never rises), no contraction (RVOL never falls to 0.6). Every candle is a doji. §7.1 gives a candle no momentum direction unless its close differs from its open, so an all-doji series is NEUTRAL at every index and its momentum score is the ROC component alone -- at most 25 against §7.2's acceleration floor of 50, and here never above 12. A directional candle would fire a §7.2 acceleration event carrying a raw §7.1 score no labeller can derive by hand, which is the obstacle recorded against 6.2-direction-from-body.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-11 from SLS §7.3; pending developer verification",
+  "labelled_at": "2026-09-11",
+  "algo_version": "s7-participation-v2",
+  "symbol": "GOLDENVOL",
+  "timeframe": "H4",
+  "filler": {
+    "count": 293,
+    "open": "100",
+    "high": "103",
+    "low": "100",
+    "close": "100"
+  },
+  "candles": [
+    {
+      "open_time": "2026-08-20T08:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "97",
+      "close": "100"
+    },
+    {
+      "open_time": "2026-08-20T12:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100"
+    },
+    {
+      "open_time": "2026-08-20T16:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100"
+    },
+    {
+      "open_time": "2026-08-20T20:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100"
+    },
+    {
+      "open_time": "2026-08-21T00:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100"
+    },
+    {
+      "open_time": "2026-08-21T04:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100"
+    },
+    {
+      "open_time": "2026-08-21T08:00:00+00:00",
+      "open": "100",
+      "high": "107.5",
+      "low": "92.5",
+      "close": "100"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "volume_spikes": 0,
+      "suspect_volume": 0,
+      "expansions": 0,
+      "contractions": 0,
+      "range_expansions": 1,
+      "compressions": 0,
+      "accelerations": 0,
+      "exhaustion_watches": 0,
+      "events_inserted": 1
+    },
+    "events": [
+      {
+        "event_type": "RANGE_EXPANSION",
+        "event_at": "2026-08-21T08:00:00+00:00",
+        "payload": {}
+      }
+    ]
+  }
+}
