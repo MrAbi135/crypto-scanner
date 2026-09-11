@@ -1,0 +1,69 @@
+{
+  "dataset_id": "s7-one-candle-that-saturates-three-components",
+  "engine": "participation",
+  "sls_sections": [
+    "7.1",
+    "7.2"
+  ],
+  "sls_rules": [
+    "7.1-roc-saturates-at-2.5",
+    "7.1-consistency-floor",
+    "7.1-body-dominance-unopposed",
+    "7.1-participation-unopposed",
+    "7.1-four-components-summed",
+    "7.2-accelerating"
+  ],
+  "description": "Three hundred flat candles and then one that travels twenty times their range. §7.1 scores it 75 out of 100 -- and the twenty-five it does not get is the interesting part.",
+  "labelling_rationale": "§7.1's score is a sum of four named 0-25 parts, and the point of this case is that a score is only auditable if each part can be read off the series by hand. The final candle opens at 100 and closes at 160, a full-bodied advance with no wicks, on a series of 299 identical flat candles. **ROC = 25.** §7.1 gives roc = (Cl[i] - Cl[i-10]) / (ATR x sqrt(10)). The close ten candles back is 100, so the numerator is 60. The true range of the new candle is also 60, which lifts ATR from 3 through Wilder's (ATR_prev x 13 + TR) / 14 to (3 x 13 + 60) / 14 = 99/14 = 7.0714, and the denominator is 7.0714 x 3.16228 = 22.3618. That is roc = 2.6831, past §7.1's |roc| >= 2.5 ceiling, so the component takes its full 25 rather than the 26.83 a straight-line mapping would hand out. The margin is deliberate but not large -- 7% -- because a candle far past the ceiling would let a wrong denominator saturate too. **Close consistency = 0.** §7.1 counts 'the last 10 closed candles closing in the dominant direction; 8+ -> 25, linear from 5'. Exactly one of the last ten closes above its open; the other nine are flat, closing neither up nor down. One is below the floor of five, where §7.1's linear ramp has not started, so this component pays nothing. That is the twenty-five the candle does not get, and it is the right answer: a single candle is not a trend, however large it is. **Body dominance = 25 and participation = 25, both on an undefined denominator.** Both components are stated as ratios of the dominant-direction candles against the counter candles -- and this window has no counter candles at all, because a flat candle is neither. §7.1 does not say what the ratio is when nothing opposes. The engine reads an unopposed dominant side as the strongest form of the evidence and saturates both components rather than dividing by zero, and that reading is what this label pins: it is the engine's interpretation of a gap in the spec, recorded here so a reviewer can disagree with it in one place instead of discovering it in production. **Score = 25 + 0 + 25 + 25 = 75, direction UP.** The direction is unambiguous here on either reading of §7.1 -- the ROC's sign is positive and the only directional close in the window is an up close. The two readings do not always agree, which is why 7.1-roc-sign-sets-direction is recorded as pending rather than covered. **§7.2 records the acceleration.** accel[i] = MomentumScore[i] - MomentumScore[i-3]; three candles back is still flat filler, whose window is a 0/0 split, so its direction is NEUTRAL, its dominant and counter sets are both empty, and its score is 0. The differential is 75 - 0 = 75 -- which is also why this case does not claim 7.2-accel-differential: subtracting a zero leaves nothing to tell a differential from a raw score, and deleting the subtraction from the engine does not move this label. past the +10 threshold, and the score of 75 is past the level floor of 50 -- §7.2 requires both, 'a jump from 5 to 20 is a bigger differential than 60 to 70 and means far less'. MOMENTUM_ACCELERATING is recorded once, carrying accel 75, score 75 and direction UP. Nothing fires on the 299 candles before it: their windows are all flat, so every score is 0 and every differential is 0. **The second event is §7.3's.** A candle spanning 60 puts the three-candle mean range at (3 + 3 + 60) / 3 = 22.00 against 1.4 x ATR = 9.9000, so RANGE_EXPANSION is recorded at the same close. It is collateral rather than the subject -- §7.3 has its own datasets -- but it is real output and a golden records what the engine produced, not what it was aimed at. Volume is the filler's 100 throughout, so §2.11's rolling median holds RVOL at exactly 1 and no §6 detector has anything to say.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-11 from SLS §7.1/§7.2; pending developer verification",
+  "labelled_at": "2026-09-11",
+  "algo_version": "s7-participation-v2",
+  "symbol": "GOLDENVOL",
+  "timeframe": "H4",
+  "filler": {
+    "count": 299,
+    "open": "100",
+    "high": "103",
+    "low": "100",
+    "close": "100"
+  },
+  "candles": [
+    {
+      "open_time": "2026-08-21T08:00:00+00:00",
+      "open": "100",
+      "high": "160",
+      "low": "100",
+      "close": "160"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "volume_spikes": 0,
+      "suspect_volume": 0,
+      "expansions": 0,
+      "contractions": 0,
+      "range_expansions": 1,
+      "compressions": 0,
+      "accelerations": 1,
+      "exhaustion_watches": 0,
+      "events_inserted": 2
+    },
+    "events": [
+      {
+        "event_type": "MOMENTUM_ACCELERATING",
+        "event_at": "2026-08-21T08:00:00+00:00",
+        "payload": {
+          "accel": "75",
+          "score": "75",
+          "direction": "UP"
+        }
+      },
+      {
+        "event_type": "RANGE_EXPANSION",
+        "event_at": "2026-08-21T08:00:00+00:00",
+        "payload": {}
+      }
+    ]
+  }
+}

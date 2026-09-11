@@ -112,6 +112,7 @@ UNVERIFIED_LABELS = frozenset(
         "abnormal-volume-cross-validation.json",
         "range-expansion-is-measured-against-a-moving-atr.json",
         "a-walking-coil-is-not-a-coil.json",
+        "one-candle-that-saturates-three-components.json",
     }
 )
 
