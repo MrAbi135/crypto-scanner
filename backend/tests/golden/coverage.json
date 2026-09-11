@@ -897,26 +897,122 @@
     {
       "id": "7.1",
       "title": "Detector: Momentum Score",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "7.1",
-          "rule": "section not yet enumerated into rules",
+          "id": "7.1-four-components-summed",
+          "rule": "the score is the sum of four named 0-25 sub-components",
+          "status": "covered"
+        },
+        {
+          "id": "7.1-roc-saturates-at-2.5",
+          "rule": "|roc| >= 2.5 takes the ROC component to its full 25 rather than extrapolating",
+          "status": "covered"
+        },
+        {
+          "id": "7.1-roc-formula",
+          "rule": "roc = (Cl[i] - Cl[i-10]) / (ATR x sqrt(10))",
           "status": "pending",
-          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
+          "blocked_on": "the 2.5 saturation swallows the exact value, and any unsaturated roc is a 28-digit Decimal no labeller can derive; a near-miss cannot be written either, because the first directional candle in a flat series already scores 50 on body and participation alone and so always fires 7.2"
+        },
+        {
+          "id": "7.1-consistency-floor",
+          "rule": "below 5 of the last 10 closing in the dominant direction the component pays nothing",
+          "status": "covered"
+        },
+        {
+          "id": "7.1-consistency-full-at-8",
+          "rule": "8 or more of the last 10 in the dominant direction takes the component to 25, linear from 5",
+          "status": "pending",
+          "blocked_on": "needs eight directional candles in one window; each of the earlier ones fires its own 7.2 acceleration event carrying a score that is not hand-derivable"
+        },
+        {
+          "id": "7.1-body-dominance-unopposed",
+          "rule": "with no counter candles the dominant side is unopposed and the body component saturates rather than dividing by zero",
+          "status": "covered"
+        },
+        {
+          "id": "7.1-body-dominance-ratio",
+          "rule": "mean(body/range) of dominant-direction candles over counter candles; ratio >= 2 -> 25",
+          "status": "pending",
+          "blocked_on": "needs counter candles in the window, so at least two directional candles, and the first of them fires a 7.2 event of its own"
+        },
+        {
+          "id": "7.1-participation-unopposed",
+          "rule": "with no counter candles the participation component saturates on the same reading",
+          "status": "covered"
+        },
+        {
+          "id": "7.1-participation-ratio",
+          "rule": "mean RVOL of dominant-direction candles over counter candles; >= 1.5 -> 25",
+          "status": "pending",
+          "blocked_on": "same as 7.1-body-dominance-ratio: needs counter candles in the window"
+        },
+        {
+          "id": "7.1-roc-sign-sets-direction",
+          "rule": "the sign of the ROC sets momentum direction",
+          "status": "pending",
+          "blocked_on": "the engine sets direction from the count of up versus down closes in the window, not from the sign of the ROC. The two agree wherever a golden has been written so far, but they can disagree -- a window of six up closes whose net move is down reads UP in the engine and DOWN in 7.1. Needs a doctrine ruling before a dataset can encode either answer"
+        },
+        {
+          "id": "7.1-neutral-cap",
+          "rule": "a 5/5 split with |roc| < 0.5 forces the score to at most 35 and the direction to NEUTRAL",
+          "status": "pending",
+          "blocked_on": "the cap cannot bind as implemented and so cannot be asserted: a NEUTRAL direction leaves the dominant and counter sets empty, which zeroes consistency, body and participation, so the score is the ROC component alone -- at most 25, and under |roc| < 0.5 under 5. Needs a ruling on whether the cap is redundant protection to be removed or the direction rule above is wrong"
+        },
+        {
+          "id": "7.1-warmup-30-candles",
+          "rule": "the score is undefined until 30 closed candles are available",
+          "status": "pending",
+          "blocked_on": "every golden carries 300-candle filler to clear 1.9's detection gate, so no dataset can reach the unwarmed region"
+        },
+        {
+          "id": "7.1-undefined-during-degraded",
+          "rule": "the score is undefined across a DEGRADED span",
+          "status": "pending",
+          "blocked_on": "needs a dataset with a declared data gap; the loader rejects non-contiguous series"
         }
       ]
     },
     {
       "id": "7.2",
       "title": "Acceleration / Deceleration",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "7.2",
-          "rule": "section not yet enumerated into rules",
+          "id": "7.2-accel-differential",
+          "rule": "accel[i] = MomentumScore[i] - MomentumScore[i-3]",
           "status": "pending",
-          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
+          "blocked_on": "measured, not assumed: with the score three candles back at 0, subtracting it is indistinguishable from not subtracting it, and deleting the subtraction from the engine breaks no golden. Needs a case whose score is already non-zero three closes earlier, which means an earlier directional candle firing its own 7.2 event"
+        },
+        {
+          "id": "7.2-accelerating",
+          "rule": "accelerating is recorded at a differential of +10 or more with a score of 50 or more",
+          "status": "covered"
+        },
+        {
+          "id": "7.2-accelerating-needs-a-real-level",
+          "rule": "a large differential from a low base is not acceleration: the score must also reach 50",
+          "status": "pending",
+          "blocked_on": "needs a candle whose differential clears +10 while its score stays under 50, and in a flat series the first directional candle already scores 50 on body and participation alone"
+        },
+        {
+          "id": "7.2-decelerating",
+          "rule": "decelerating at a differential of -10 or less",
+          "status": "pending",
+          "blocked_on": "the score only falls once the directional candles leave the ten-candle window, which is ten closes after they arrive; every case so far ends while the score is still elevated"
+        },
+        {
+          "id": "7.2-exhaustion-watch",
+          "rule": "deceleration while price makes marginal new extremes (< 0.5 x ATR per candle) tags exhaustion_watch",
+          "status": "pending",
+          "blocked_on": "needs 7.2-decelerating first, plus a direction the window still agrees on"
+        },
+        {
+          "id": "7.2-exhaustion-feeds-8.5",
+          "rule": "exhaustion_watch is a warning input to 8.5 penalties and context for Sweep-Reversal archetypes",
+          "status": "pending",
+          "blocked_on": "consumed by the confluence engine, not emitted by the participation replay"
         }
       ]
     },
