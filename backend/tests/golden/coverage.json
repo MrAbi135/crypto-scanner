@@ -764,13 +764,49 @@
     {
       "id": "6.3",
       "title": "Detectors: Volume Expansion / Contraction",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "6.3",
-          "rule": "section not yet enumerated into rules",
+          "id": "6.3-expansion-rising-volume",
+          "rule": "expansion needs 3 consecutive closed candles with strictly rising volume",
+          "status": "covered"
+        },
+        {
+          "id": "6.3-expansion-mean-rvol",
+          "rule": "mean RVOL of the three rising candles must be >= 1.2",
+          "status": "covered"
+        },
+        {
+          "id": "6.3-expansion-progress",
+          "rule": "|Cl[i] - O[i+2]| >= 0.75 x ATR; rising volume without progress is churn, not expansion",
+          "status": "covered"
+        },
+        {
+          "id": "6.3-contraction-mean-rvol",
+          "rule": "contraction needs a 5-candle mean RVOL <= 0.6",
+          "status": "covered"
+        },
+        {
+          "id": "6.3-contraction-mean-range",
+          "rule": "contraction needs a 5-candle mean range <= 0.6 x ATR",
+          "status": "covered"
+        },
+        {
+          "id": "6.3-contraction-both-dimensions",
+          "rule": "both dimensions must contract; a volume-only lull during a grinding trend is not contraction",
+          "status": "covered"
+        },
+        {
+          "id": "6.3-per-candle-flags",
+          "rule": "states are per-candle context flags, recomputed each close with no persistence",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+          "blocked_on": "no dataset shows a flag going false again on a later close -- every case ends while the state still holds; needs a series that contracts and then re-expands"
+        },
+        {
+          "id": "6.3-opposing-expansion-penalty",
+          "rule": "expansion opposing an active setup is contrary evidence, consumed as a penalty in 8.5",
+          "status": "pending",
+          "blocked_on": "the penalty is scored in the confluence engine, not the participation one; needs a confluence dataset carrying an active setup plus an opposing expansion"
         }
       ]
     },
@@ -783,7 +819,7 @@
           "id": "6.4",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
         }
       ]
     },
@@ -796,7 +832,7 @@
           "id": "6.5",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
         }
       ]
     },
@@ -809,7 +845,7 @@
           "id": "6.6",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
         }
       ]
     },
@@ -822,7 +858,7 @@
           "id": "6.7",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
         }
       ]
     },
@@ -835,7 +871,7 @@
           "id": "7.1",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
         }
       ]
     },
@@ -848,7 +884,7 @@
           "id": "7.2",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
         }
       ]
     },
@@ -861,7 +897,7 @@
           "id": "7.3",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
         }
       ]
     },
@@ -874,7 +910,7 @@
           "id": "7.4",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
         }
       ]
     },
@@ -887,7 +923,7 @@
           "id": "7.5",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- participation_replay is not wired"
+          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
         }
       ]
     },
@@ -900,7 +936,7 @@
           "id": "8.1",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- confluence_replay is not wired"
+          "blocked_on": "writable today: the confluence runner builds the whole DetectionPipeline and s8_confluence datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
         }
       ]
     },
@@ -982,7 +1018,7 @@
           "id": "8.4",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- confluence_replay is not wired"
+          "blocked_on": "writable today: the confluence runner builds the whole DetectionPipeline and s8_confluence datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
         }
       ]
     },
@@ -1031,7 +1067,7 @@
           "id": "8.7",
           "rule": "section not yet enumerated into rules",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass -- confluence_replay is not wired"
+          "blocked_on": "writable today: the confluence runner builds the whole DetectionPipeline and s8_confluence datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
         }
       ]
     }
