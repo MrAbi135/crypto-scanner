@@ -60,19 +60,30 @@ def _dsn() -> str:
 
 
 async def _symbols(conn) -> tuple[str, ...]:
-    """Live contexts only.
+    """The symbols the engine actually scans, and only those.
 
-    `golden-load.sh` puts 29 synthetic GOLDEN* symbols in the same database so
-    the chart can render them. Segmenting legs for each would triple this
-    check's runtime to ask a ratchet question about hand-built fixtures that
-    end mid-scenario on purpose -- and the golden harness already asserts
-    their exact output in CI.
+    Everything else in `market.candles` has data without having been scanned:
+    golden fixtures loaded for the chart, and symbols backfilled ahead of a
+    deploy. Their swings were never recorded, so the SLS 3.1 comparison below
+    reads every pivot it computes as "unrecorded" -- 15 such violations on
+    2026-09-11, against two symbols detection had never run on, which refused
+    a deploy.
+
+    Read from the environment the engine image is given, so the scope follows
+    the configuration rather than a copy of it kept here.
     """
+    configured = os.environ.get("SCANNER_INGEST_SYMBOLS", "")
+    wanted = tuple(s.strip() for s in configured.split(",") if s.strip())
+
+    if not wanted:
+        return ()
+
     rows = await conn.execute(
         text(
             "select distinct symbol from market.candles"
-            " where symbol not like 'GOLDEN%' order by 1"
-        )
+            " where symbol = any(:wanted) order by 1"
+        ),
+        {"wanted": list(wanted)},
     )
 
     return tuple(r[0] for r in rows)
