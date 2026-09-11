@@ -221,17 +221,23 @@ echo "-- A. gate open but not breaking --"
 # key at all: the loop below would scan nothing, find nothing, and report
 # clean. That is the exact failure this file exists to refuse, so the pattern
 # is taken from the artifact under test and its absence is itself a problem.
-# The symbols the engine actually scans, read off the RUNNING engine for the
+# The symbols the engine actually scans, asked of the RUNNING engine's own
+# settings rather than of one input to them. `printenv SCANNER_INGEST_SYMBOLS`
+# reads empty whenever the operator has not overridden the default, which is
+# the ordinary case and is not the same thing as "unknown" -- on 2026-09-11 it
+# made the suite flag a scope it could have read, and refuse a deploy over it.
+#
+# Read off the RUNNING engine for the
 # same reason the shift version is: a list written down here goes stale, and a
 # stale scope is a suite that checks the wrong contexts in silence. Everything
 # else in these tables has candles without having been scanned -- golden
 # fixtures, symbols backfilled ahead of a deploy -- and every check below
 # reads that absence as a defect.
-INGEST_SYMBOLS=$($C exec -T engine printenv SCANNER_INGEST_SYMBOLS 2>/dev/null | tr -d '' | tr -d '
+INGEST_SYMBOLS=$($C exec -T engine python -c   'from scanner.config import get_settings; print(get_settings("ingest").ingest_symbols)'   2>/dev/null | tr -d '
 ')
 
 if [ -z "$INGEST_SYMBOLS" ]; then
-  flag "cannot read SCANNER_INGEST_SYMBOLS from the running engine -- scope unknown"
+  flag "cannot read the ingest symbols from the running engine -- scope unknown"
   INGEST_SYMBOLS="__none__"
 fi
 
