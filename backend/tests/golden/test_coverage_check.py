@@ -109,6 +109,7 @@ UNVERIFIED_LABELS = frozenset(
         "expansion-needs-all-three-tests.json",
         "a-volume-only-lull-is-not-contraction.json",
         "both-dimensions-contract.json",
+        "abnormal-volume-cross-validation.json",
     }
 )
 

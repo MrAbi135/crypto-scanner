@@ -1,0 +1,97 @@
+{
+  "dataset_id": "s7-abnormal-volume-cross-validation",
+  "engine": "participation",
+  "sls_sections": [
+    "6.4"
+  ],
+  "sls_rules": [
+    "6.4-abnormal-class-only",
+    "6.4-trade-count-test",
+    "6.4-failing-either-tags-suspect",
+    "6.4-incomplete-check-is-not-a-failure"
+  ],
+  "description": "Three loud candles: one at 3x baseline that §6.4 never examines, one at 5x whose trade count rose with it, and one at 5x that printed on the same ten trades as a quiet candle. Only the last is tagged suspect.",
+  "labelling_rationale": "§6.4 is a gate on a gate: the ABNORMAL class triggers mandatory cross-validation 'before it may contribute positive score', and failing either half tags suspect_volume. This series writes one candle for each way through it. **2026-08-20T12:00 -- the class gate.** Volume 300 against §2.11's rolling 20-candle H4 median of 100 is RVOL 3.0, which §6.1 bands as SPIKE, not ABNORMAL: the bands are inclusive-low and ABNORMAL begins at 5.0. Its trade count is the filler's 10 against a 20-candle median of 10, so it would fail the participants test outright -- and §6.4 never asks, because §6.4 is not triggered by a spike. Nothing is recorded. **2026-08-21T00:00 -- the participants test passes, the check still does not complete.** Volume 500 is RVOL 5.0, the inclusive floor of ABNORMAL, so cross-validation runs. §6.4's first test is 'trade-count on candle >= 3x its 20-candle median (many participants, not one wash loop)', and this candle carries 30 trades against a median of 10 -- exactly 3x, which passes. Its second test is the order book, and there is no order book to ask: `market.liquidity_history` is empty until the daily universe job has run, so depth reports neither pass nor fail. §6.4 tags on *failing* a test, and a test that could not be run has not been failed, so this candle is not tagged. It has also not been validated -- §6.4 makes the cross-validation mandatory before a positive contribution, and a half-run check cannot pay -- but that distinction is carried in the payload rather than in an event, so nothing is recorded here either. **2026-08-21T08:00 -- the participants test fails.** The same RVOL 5.0 on the same 500 units of volume, but printed across the filler's 10 trades against the same median of 10, which is a third of the 30 §6.4 demands. That is §6.4's wash-loop signature: the volume rose and the count of participants did not. VOLUME_SUSPECT is recorded, carrying rvol 5, participants_ok false, depth_ok null and validated false -- three distinct states, because collapsing the unknown into either verdict is the error §6.4's own wording guards against: reading it as a pass awards integrity nobody measured, reading it as a failure accuses a symbol on no evidence. **Why no spike fires alongside.** All three candles are held under §6.2's absolute quote floor of 250,000 -- 30,000, 50,000 and 50,000 -- which is the micro-cap case §6.2's floor exists for and keeps this dataset asserting §6.4 alone. The baseline is unmoved by any of it: at most two raised volumes ever enter a twenty-sample window, so eighteen samples of 100 hold the median. Every candle is a doji, for the reason set out in s7-volume-expansion-needs-all-three-tests: a directional candle in a series this flat is unopposed in §7.1's ten-candle window and drags a §7.2 acceleration event, carrying a raw momentum score, into a case that asserts §6.4.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-11 from SLS §6.4; pending developer verification",
+  "labelled_at": "2026-09-11",
+  "algo_version": "s7-participation-v2",
+  "symbol": "GOLDENVOL",
+  "timeframe": "H4",
+  "filler": {
+    "count": 295,
+    "open": "100",
+    "high": "103",
+    "low": "100",
+    "close": "100"
+  },
+  "candles": [
+    {
+      "open_time": "2026-08-20T16:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100",
+      "volume": "300",
+      "quote_volume": "30000"
+    },
+    {
+      "open_time": "2026-08-20T20:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100"
+    },
+    {
+      "open_time": "2026-08-21T00:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100",
+      "volume": "500",
+      "quote_volume": "50000",
+      "trade_count": 30
+    },
+    {
+      "open_time": "2026-08-21T04:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100"
+    },
+    {
+      "open_time": "2026-08-21T08:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100",
+      "volume": "500",
+      "quote_volume": "50000"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "volume_spikes": 0,
+      "suspect_volume": 1,
+      "expansions": 0,
+      "contractions": 0,
+      "range_expansions": 0,
+      "compressions": 0,
+      "accelerations": 0,
+      "exhaustion_watches": 0,
+      "events_inserted": 1
+    },
+    "events": [
+      {
+        "event_type": "VOLUME_SUSPECT",
+        "event_at": "2026-08-21T08:00:00+00:00",
+        "payload": {
+          "rvol": "5",
+          "participants_ok": false,
+          "depth_ok": null,
+          "validated": false
+        }
+      }
+    ]
+  }
+}

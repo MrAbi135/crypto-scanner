@@ -813,13 +813,45 @@
     {
       "id": "6.4",
       "title": "Abnormal Volume",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "6.4",
-          "rule": "section not yet enumerated into rules",
+          "id": "6.4-abnormal-class-only",
+          "rule": "cross-validation is triggered by the ABNORMAL class (>= 5x baseline), not by a spike",
+          "status": "covered"
+        },
+        {
+          "id": "6.4-trade-count-test",
+          "rule": "trade-count on the candle >= 3x its 20-candle median",
+          "status": "covered"
+        },
+        {
+          "id": "6.4-failing-either-tags-suspect",
+          "rule": "failing either half of the cross-validation tags suspect_volume",
+          "status": "covered"
+        },
+        {
+          "id": "6.4-incomplete-check-is-not-a-failure",
+          "rule": "a test that could not be run is neither a pass nor a failure: no tag, and no validation either",
+          "status": "covered"
+        },
+        {
+          "id": "6.4-depth-test",
+          "rule": "order-book depth (nearest snapshot) >= 50% of its 7-day median",
           "status": "pending",
-          "blocked_on": "writable today: the participation runner is wired and reports expansions, contractions, range_expansions, compressions, accelerations and exhaustion_watches -- s7_participation datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
+          "blocked_on": "the replay passes depth=None because market.liquidity_history is empty until the daily universe job runs, and a golden dataset is candles -- it has no way to supply an order-book snapshot"
+        },
+        {
+          "id": "6.4-capped-at-neutral",
+          "rule": "a suspect candle's volume factor contribution is capped at neutral (50)",
+          "status": "pending",
+          "blocked_on": "scored in the 6.7 volume factor, not in the participation replay's event output; needs a ranking-path dataset"
+        },
+        {
+          "id": "6.4-fake-volume-counter",
+          "rule": "a suspect candle increments the symbol's fake-volume counter (6.6)",
+          "status": "pending",
+          "blocked_on": "owned by FakeVolumeJob, which is a scheduled job rather than a replay service and does not run in the golden harness"
         }
       ]
     },
