@@ -81,13 +81,25 @@
     {
       "id": "3.2",
       "title": "Internal vs. External Structure",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "3.2",
-          "rule": "section not yet enumerated into rules",
+          "id": "3.2-external-defines-trend-and-levels",
+          "rule": "external structure is the confirmed external-swing sequence, and it defines trend, dealing ranges and BOS/MSS levels",
           "status": "pending",
-          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+          "blocked_on": "the trend rules 3.4 covers assert how many pairs are needed, not which swing set supplies them; separating the two needs a case where internal and external structure disagree"
+        },
+        {
+          "id": "3.2-internal-defines-warnings-and-refinement",
+          "rule": "internal structure is the confirmed internal swings between two external ones, and it defines CHoCH warnings, internal liquidity and entry refinement",
+          "status": "pending",
+          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+        },
+        {
+          "id": "3.2-internal-may-never-override-external",
+          "rule": "an internal event may only warn (CAUTION) or refine; it may never override external state",
+          "status": "pending",
+          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
         }
       ]
     },
@@ -241,39 +253,135 @@
     {
       "id": "3.6",
       "title": "Detectors: Change of Character (CHoCH) & Market Structure Shift (MSS)",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "3.6",
-          "rule": "section not yet enumerated into rules",
+          "id": "3.6-choch-close-beyond-the-initiating-swing",
+          "rule": "CHoCH is the first close beyond the most recent confirmed swing that initiated the current leg, by more than epsilon",
           "status": "pending",
-          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+        },
+        {
+          "id": "3.6-choch-prefers-external-then-internal",
+          "rule": "an internal HL qualifies only when no external HL exists in the current leg",
+          "status": "pending",
+          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+        },
+        {
+          "id": "3.6-choch-sets-caution",
+          "rule": "a CHoCH moves the trend state to CAUTION",
+          "status": "pending",
+          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+        },
+        {
+          "id": "3.6-choch-consumes-its-swing",
+          "rule": "a CHoCH marks its trigger swing consumed_by",
+          "status": "pending",
+          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+        },
+        {
+          "id": "3.6-choch-references-the-most-recent-hl",
+          "rule": "with nested legs the CHoCH always references the most recent confirmed HL at evaluation time",
+          "status": "pending",
+          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+        },
+        {
+          "id": "3.6-mss-needs-displacement",
+          "rule": "the CHoCH break leg must displace on the break candle or either adjacent closed candle",
+          "status": "pending",
+          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+        },
+        {
+          "id": "3.6-mss-needs-sweep-or-failure-swing",
+          "rule": "the broken structure must follow an external liquidity sweep within 10 closes, or a failure swing",
+          "status": "pending",
+          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+        },
+        {
+          "id": "3.6-mss-needs-follow-through",
+          "rule": "a later candle must close beyond the CHoCH break candle's extreme within 5 closes",
+          "status": "pending",
+          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+        },
+        {
+          "id": "3.6-mss-flips-the-trend",
+          "rule": "MSS confirmation flips the trend state",
+          "status": "pending",
+          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+        },
+        {
+          "id": "3.6-failed-follow-through-returns-the-state",
+          "rule": "if follow-through fails the CHoCH stays a recorded warning, the trend returns from CAUTION, and the candidate is recorded failed",
+          "status": "pending",
+          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+        },
+        {
+          "id": "3.6-evidence-chain-required",
+          "rule": "an MSS without its full evidence chain -- sweep or failure-swing id, displacement measurements, follow-through candle -- is unpublishable",
+          "status": "pending",
+          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+        },
+        {
+          "id": "3.6-low-quality-demotion",
+          "rule": "a close back beyond the pre-MSS extreme within 10 candles demotes the new trend to RANGING and marks the MSS low_quality",
+          "status": "pending",
+          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+        },
+        {
+          "id": "3.6-same-candle-event-order",
+          "rule": "CHoCH evaluates against the pre-candle trend state, and transitions apply in the order swing then BOS then CHoCH within one close",
+          "status": "pending",
+          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+        },
+        {
+          "id": "3.6-no-mss-across-a-gap",
+          "rule": "an MSS evidence chain may not span DEGRADED data",
+          "status": "pending",
+          "blocked_on": "needs a dataset with a declared data gap; the loader rejects non-contiguous series"
         }
       ]
     },
     {
       "id": "3.7",
       "title": "Multi-Timeframe Structure Rules",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "3.7",
-          "rule": "section not yet enumerated into rules",
+          "id": "3.7-each-tf-independent",
+          "rule": "each timeframe computes structure independently and borrows no swings",
           "status": "pending",
-          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+          "blocked_on": "a golden dataset is one symbol on one timeframe, so no case can hold two timeframes at once; both confluence cases report htf_state unreachable"
+        },
+        {
+          "id": "3.7-htf-bias-is-the-next-tf-up",
+          "rule": "HTF bias for a timeframe is the trend state of the next timeframe above it",
+          "status": "pending",
+          "blocked_on": "a golden dataset is one symbol on one timeframe, so no case can hold two timeframes at once; both confluence cases report htf_state unreachable"
+        },
+        {
+          "id": "3.7-counter-htf-only-as-sweep-reversal",
+          "rule": "counter-HTF signals publish only as Liquidity Sweep Reversal archetypes at HTF extremes",
+          "status": "pending",
+          "blocked_on": "a golden dataset is one symbol on one timeframe, so no case can hold two timeframes at once; both confluence cases report htf_state unreachable"
+        },
+        {
+          "id": "3.7-highest-tf-evaluated-first",
+          "rule": "on simultaneous closes the highest timeframe is evaluated first, so lower ones read updated HTF state in the same cycle",
+          "status": "pending",
+          "blocked_on": "a golden dataset is one symbol on one timeframe, so no case can hold two timeframes at once; both confluence cases report htf_state unreachable"
         }
       ]
     },
     {
       "id": "3.8",
       "title": "Structure Confirmation & Invalidation Summary",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "3.8",
-          "rule": "section not yet enumerated into rules",
+          "id": "3.8-summary-table-is-a-cross-reference",
+          "rule": "the confirmation and invalidation summary restates, row by row, the rules enumerated under 3.1, 3.3, 3.4, 3.5 and 3.6",
           "status": "pending",
-          "blocked_on": "needs a hand-built series long enough to confirm external swings (k_ext = 5) on both sides"
+          "blocked_on": "every row of this table is a clause already enumerated in its own subsection. Giving each row a second id would count the same rule twice in the coverage total and let a section read as covered because its summary was"
         }
       ]
     },
@@ -366,13 +474,61 @@
     {
       "id": "4.3",
       "title": "Detectors: Equal Highs (EQH) / Equal Lows (EQL)",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "4.3",
-          "rule": "section not yet enumerated into rules",
+          "id": "4.3-members-within-epsilon",
+          "rule": "each adjacent pair of members differs by at most 0.05 x ATR",
           "status": "pending",
-          "blocked_on": "not yet enumerated; the liquidity runner is wired, so these are writable today"
+          "blocked_on": "no dataset produces an EQH/EQL cluster. One needs two swing highs within 0.05 x ATR of each other, 3 to 100 candles apart, with an intervening swing low at least 0.5 x ATR below them -- and the golden runner drops report.clusters and report.clustered_swings from the liquidity report it compares, so the count could not be pinned even once the series exists"
+        },
+        {
+          "id": "4.3-gap-bounds",
+          "rule": "members are separated by at least 3 and at most 100 candles",
+          "status": "pending",
+          "blocked_on": "no dataset produces an EQH/EQL cluster. One needs two swing highs within 0.05 x ATR of each other, 3 to 100 candles apart, with an intervening swing low at least 0.5 x ATR below them -- and the golden runner drops report.clusters and report.clustered_swings from the liquidity report it compares, so the count could not be pinned even once the series exists"
+        },
+        {
+          "id": "4.3-intervening-depth",
+          "rule": "an intervening opposite swing must sit at least 0.5 x ATR beyond the cluster band -- a true retest, not a shelf",
+          "status": "pending",
+          "blocked_on": "no dataset produces an EQH/EQL cluster. One needs two swing highs within 0.05 x ATR of each other, 3 to 100 candles apart, with an intervening swing low at least 0.5 x ATR below them -- and the golden runner drops report.clusters and report.clustered_swings from the liquidity report it compares, so the count could not be pinned even once the series exists"
+        },
+        {
+          "id": "4.3-confirmed-at-second-member",
+          "rule": "the cluster confirms when its second member swing confirms, and that stamp does not move as the chain grows",
+          "status": "pending",
+          "blocked_on": "no dataset produces an EQH/EQL cluster. One needs two swing highs within 0.05 x ATR of each other, 3 to 100 candles apart, with an intervening swing low at least 0.5 x ATR below them -- and the golden runner drops report.clusters and report.clustered_swings from the liquidity report it compares, so the count could not be pinned even once the series exists"
+        },
+        {
+          "id": "4.3-later-members-append",
+          "rule": "later qualifying members join incrementally; joins are appends, never rewrites",
+          "status": "pending",
+          "blocked_on": "no dataset produces an EQH/EQL cluster. One needs two swing highs within 0.05 x ATR of each other, 3 to 100 candles apart, with an intervening swing low at least 0.5 x ATR below them -- and the golden runner drops report.clusters and report.clustered_swings from the liquidity report it compares, so the count could not be pinned even once the series exists"
+        },
+        {
+          "id": "4.3-members-must-be-confirmed",
+          "rule": "every member is an individually confirmed swing",
+          "status": "pending",
+          "blocked_on": "no dataset produces an EQH/EQL cluster. One needs two swing highs within 0.05 x ATR of each other, 3 to 100 candles apart, with an intervening swing low at least 0.5 x ATR below them -- and the golden runner drops report.clusters and report.clustered_swings from the liquidity report it compares, so the count could not be pinned even once the series exists"
+        },
+        {
+          "id": "4.3-chain-rule",
+          "rule": "membership is pairwise-adjacent, so the band may exceed epsilon across a chain; sweep tolerance uses the band edges",
+          "status": "pending",
+          "blocked_on": "no dataset produces an EQH/EQL cluster. One needs two swing highs within 0.05 x ATR of each other, 3 to 100 candles apart, with an intervening swing low at least 0.5 x ATR below them -- and the golden runner drops report.clusters and report.clustered_swings from the liquidity report it compares, so the count could not be pinned even once the series exists"
+        },
+        {
+          "id": "4.3-a-swept-member-sweeps-the-cluster",
+          "rule": "one member being swept transitions the whole cluster pool to SWEPT",
+          "status": "pending",
+          "blocked_on": "no dataset produces an EQH/EQL cluster. One needs two swing highs within 0.05 x ATR of each other, 3 to 100 candles apart, with an intervening swing low at least 0.5 x ATR below them -- and the golden runner drops report.clusters and report.clustered_swings from the liquidity report it compares, so the count could not be pinned even once the series exists"
+        },
+        {
+          "id": "4.3-flat-shelves-excluded",
+          "rule": "the min-depth rule pre-excludes stablecoin-like flat shelves",
+          "status": "pending",
+          "blocked_on": "no dataset produces an EQH/EQL cluster. One needs two swing highs within 0.05 x ATR of each other, 3 to 100 candles apart, with an intervening swing low at least 0.5 x ATR below them -- and the golden runner drops report.clusters and report.clustered_swings from the liquidity report it compares, so the count could not be pinned even once the series exists"
         }
       ]
     },
@@ -488,65 +644,251 @@
     {
       "id": "4.7",
       "title": "Detector: Stop Hunt",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "4.7",
-          "rule": "section not yet enumerated into rules",
+          "id": "4.7-external-sweeps-only",
+          "rule": "only a confirmed external sweep can produce a stop hunt; internal liquidity consumption is rotation, not reversal evidence",
           "status": "pending",
-          "blocked_on": "not yet enumerated; the liquidity runner is wired, so these are writable today"
+          "blocked_on": "no dataset produces a stop hunt, and the golden runner's liquidity report has no counter for one; a case needs an external sweep followed by a displacement candle within three closes"
+        },
+        {
+          "id": "4.7-displacement-within-3-closes",
+          "rule": "a displacement candle in the reversal direction must close within 3 closes of sweep confirmation",
+          "status": "pending",
+          "blocked_on": "no dataset produces a stop hunt, and the golden runner's liquidity report has no counter for one; a case needs an external sweep followed by a displacement candle within three closes"
+        },
+        {
+          "id": "4.7-fifty-percent-reclaim",
+          "rule": "the displacement leg must close back through at least 50% of the penetration candle's total range",
+          "status": "pending",
+          "blocked_on": "no dataset produces a stop hunt, and the golden runner's liquidity report has no counter for one; a case needs an external sweep followed by a displacement candle within three closes"
+        },
+        {
+          "id": "4.7-measured-against-the-penetration-candle",
+          "rule": "the reference is the candle that penetrated the pool, not the one that confirmed the rejection",
+          "status": "pending",
+          "blocked_on": "no dataset produces a stop hunt, and the golden runner's liquidity report has no counter for one; a case needs an external sweep followed by a displacement candle within three closes"
+        },
+        {
+          "id": "4.7-sweep-must-not-be-reclaimed",
+          "rule": "the underlying sweep must not be reclaimed",
+          "status": "pending",
+          "blocked_on": "no dataset produces a stop hunt, and the golden runner's liquidity report has no counter for one; a case needs an external sweep followed by a displacement candle within three closes"
+        },
+        {
+          "id": "4.7-failed-after-5-candles",
+          "rule": "a close beyond the sweep extreme within 5 closes marks the stop hunt failed, preserved as a fact",
+          "status": "pending",
+          "blocked_on": "no dataset produces a stop hunt, and the golden runner's liquidity report has no counter for one; a case needs an external sweep followed by a displacement candle within three closes"
+        },
+        {
+          "id": "4.7-binds-to-the-deepest-sweep",
+          "rule": "with several sweeps in the window the stop hunt binds to the deepest external one",
+          "status": "pending",
+          "blocked_on": "no dataset produces a stop hunt, and the golden runner's liquidity report has no counter for one; a case needs an external sweep followed by a displacement candle within three closes"
         }
       ]
     },
     {
       "id": "4.8",
       "title": "Liquidity Validation & Invalidation Summary",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "4.8",
-          "rule": "section not yet enumerated into rules",
+          "id": "4.8-summary-table-is-a-cross-reference",
+          "rule": "the liquidity validation and invalidation summary restates the creation and terminal states enumerated under 4.2, 4.3, 4.6 and 4.7",
           "status": "pending",
-          "blocked_on": "not yet enumerated; the liquidity runner is wired, so these are writable today"
+          "blocked_on": "every row of this table is a clause already enumerated in its own subsection; a second id would count the same rule twice"
         }
       ]
     },
     {
       "id": "5.1",
       "title": "Detector: Order Blocks (OB)",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "5.1",
-          "rule": "section not yet enumerated into rules",
+          "id": "5.1-candidate-is-the-last-opposing-candle",
+          "rule": "the candidate is the last opposing-bodied candle immediately preceding the move",
           "status": "pending",
-          "blocked_on": "wired, but its qualification reads S4/S5 evidence that a zone-only dataset does not generate; the harness supplies an empty evidence repository rather than a hand-fed one"
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-candidate-run-max-3",
+          "rule": "a contiguous run of up to 3 opposing candles may form the candidate, zoned by their combined extremes",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-qualifying-window-5",
+          "rule": "the qualifying move must occur within 5 closed candles after the candidate",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-qualifying-needs-displacement",
+          "rule": "the qualifying move must contain a displacement candle (5.10)",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-qualifying-needs-structural-consequence",
+          "rule": "the move must also close beyond a confirmed swing or create a confirmed FVG",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-zone-is-full-range",
+          "rule": "zone edges are the candidate's high and low, not its body",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-refined-body-subzone",
+          "rule": "the body-only edges are recorded separately as refined_zone",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-grade-ob-a",
+          "rule": "OB_A when the qualifying move broke external structure or sits at an MSS origin",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-grade-ob-b",
+          "rule": "OB_B when the qualification was an internal break or an FVG alone",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-height-floor",
+          "rule": "zone height must be at least 0.15 x ATR",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-height-ceiling",
+          "rule": "zone height must be at most 3 x ATR",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-state-machine",
+          "rule": "FRESH -> TESTED -> MITIGATED -> INVALIDATED -> EXPIRED, every transition close-confirmed and logged",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-invalidated-becomes-breaker-candidate",
+          "rule": "an INVALIDATED order block becomes a breaker candidate",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-doji-candidate-permitted",
+          "rule": "a doji candidate is permitted if the height floor passes, but the run rule counts bodied candles",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-v-continuation-has-no-ob",
+          "rule": "displacement with no prior opposing candle produces no order block: the doctrine requires an origin footprint",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-overlapping-obs-are-independent",
+          "rule": "nested displacements produce independent order blocks; the confluence engine deduplicates by price band",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+        },
+        {
+          "id": "5.1-max-zones-60",
+          "rule": "the zone set is bounded at 60 per symbol-TF, evicting the oldest EXPIRED first",
+          "status": "pending",
+          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
         }
       ]
     },
     {
       "id": "5.2",
       "title": "Detector: Breaker Blocks",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "5.2",
-          "rule": "section not yet enumerated into rules",
+          "id": "5.2-invalidating-close-through",
+          "rule": "the order block must be INVALIDATED by a close through its distal edge",
           "status": "pending",
-          "blocked_on": "wired, but its qualification reads S4/S5 evidence that a zone-only dataset does not generate; the harness supplies an empty evidence repository rather than a hand-fed one"
+          "blocked_on": "breakers are promoted from INVALIDATED order blocks, and no dataset produces an order block"
+        },
+        {
+          "id": "5.2-invalidating-move-displaces-and-breaks",
+          "rule": "the invalidating move must satisfy displacement and break structure, internal BOS at minimum",
+          "status": "pending",
+          "blocked_on": "breakers are promoted from INVALIDATED order blocks, and no dataset produces an order block"
+        },
+        {
+          "id": "5.2-sweep-origin-is-brk-a",
+          "rule": "the origin move must have swept a liquidity pool; that is grade BRK_A",
+          "status": "pending",
+          "blocked_on": "breakers are promoted from INVALIDATED order blocks, and no dataset produces an order block"
+        },
+        {
+          "id": "5.2-no-simultaneous-promotion",
+          "rule": "the invalidating break must confirm before the breaker is registered",
+          "status": "pending",
+          "blocked_on": "breakers are promoted from INVALIDATED order blocks, and no dataset produces an order block"
+        },
+        {
+          "id": "5.2-geometry-inherited-polarity-flipped",
+          "rule": "the breaker inherits the order block's geometry with polarity flipped and state restarted at FRESH",
+          "status": "pending",
+          "blocked_on": "breakers are promoted from INVALIDATED order blocks, and no dataset produces an order block"
+        },
+        {
+          "id": "5.2-second-flip-is-terminal",
+          "rule": "a breaker invalidated in turn is terminal: no second polarity flip",
+          "status": "pending",
+          "blocked_on": "breakers are promoted from INVALIDATED order blocks, and no dataset produces an order block"
+        },
+        {
+          "id": "5.2-gap-break-still-valid",
+          "rule": "an order block invalidated by a gap-through still forms a breaker, with the displacement test applied to the gap candle",
+          "status": "pending",
+          "blocked_on": "breakers are promoted from INVALIDATED order blocks, and no dataset produces an order block"
         }
       ]
     },
     {
       "id": "5.3",
       "title": "Detector: Mitigation Blocks",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "5.3",
-          "rule": "section not yet enumerated into rules",
+          "id": "5.3-no-sweep-at-origin",
+          "rule": "a mitigation block is the same shape with no liquidity sweep at the origin move",
           "status": "pending",
-          "blocked_on": "wired, but its qualification reads S4/S5 evidence that a zone-only dataset does not generate; the harness supplies an empty evidence repository rather than a hand-fed one"
+          "blocked_on": "mitigation blocks share the breaker path, which no dataset reaches"
+        },
+        {
+          "id": "5.3-failure-swing-precondition",
+          "rule": "the pre-invalidation structure must show a failure swing: LH before an upward invalidation, HL before a downward one",
+          "status": "pending",
+          "blocked_on": "mitigation blocks share the breaker path, which no dataset reaches"
+        },
+        {
+          "id": "5.3-grade-fixed-mit",
+          "rule": "the grade is fixed at MIT and everything else matches the breaker rules",
+          "status": "pending",
+          "blocked_on": "mitigation blocks share the breaker path, which no dataset reaches"
+        },
+        {
+          "id": "5.3-one-deterministic-bit",
+          "rule": "breaker and mitigation are distinguished only by origin-sweep evidence, stored on the order block at creation",
+          "status": "pending",
+          "blocked_on": "mitigation blocks share the breaker path, which no dataset reaches"
         }
       ]
     },
@@ -671,26 +1013,110 @@
     {
       "id": "5.7",
       "title": "Premium / Discount / Equilibrium (PD Arrays Context)",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "5.7",
-          "rule": "section not yet enumerated into rules",
+          "id": "5.7-dealing-range-anchors",
+          "rule": "the range is the most recent confirmed external swing low and high that bracket current price",
           "status": "pending",
-          "blocked_on": "wired, but produces nothing on the current datasets: 5.7 needs confirmed external swings that these short zone scenarios never form"
+          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
+        },
+        {
+          "id": "5.7-re-anchoring",
+          "rule": "the range re-anchors whenever a new external swing confirms or an extreme is consumed by BOS or sweep-with-MSS",
+          "status": "pending",
+          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
+        },
+        {
+          "id": "5.7-equilibrium-and-bands",
+          "rule": "EQ is 50% of the range; premium is above EQ + epsilon, discount below EQ - epsilon, at-EQ otherwise",
+          "status": "pending",
+          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
+        },
+        {
+          "id": "5.7-range-position",
+          "rule": "range_position = (Cl - range_low) / (range_high - range_low), stored to 4 decimals",
+          "status": "pending",
+          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
+        },
+        {
+          "id": "5.7-directional-gate",
+          "rule": "long setups require range_position <= 0.5 and short setups >= 0.5",
+          "status": "pending",
+          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
+        },
+        {
+          "id": "5.7-extreme-third-for-reversals",
+          "rule": "Sweep-Reversal archetypes additionally require <= 0.33 or >= 0.67",
+          "status": "pending",
+          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
+        },
+        {
+          "id": "5.7-range-height-floor",
+          "rule": "a range under 1.5 x ATR suspends PD context as PD_SUSPENDED and withdraws the PD-gated archetypes",
+          "status": "pending",
+          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
+        },
+        {
+          "id": "5.7-history-never-recomputed",
+          "rule": "re-anchoring applies prospectively; historical range_position values are facts and are never recomputed",
+          "status": "pending",
+          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
         }
       ]
     },
     {
       "id": "5.8",
       "title": "Detector: Optimal Trade Entry (OTE)",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "5.8",
-          "rule": "section not yet enumerated into rules",
+          "id": "5.8-leg-from-bos-to-post-break-extreme",
+          "rule": "the impulse leg runs from the origin swing to the post-break extreme after a confirmed BOS/MSS with displacement",
           "status": "pending",
-          "blocked_on": "wired, but produces nothing on the current datasets: 5.7 needs confirmed external swings that these short zone scenarios never form"
+          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
+        },
+        {
+          "id": "5.8-leg-finalises-on-confirmation",
+          "rule": "the leg finalises when a confirmed internal swing forms at the extreme",
+          "status": "pending",
+          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
+        },
+        {
+          "id": "5.8-band-62-to-79",
+          "rule": "the OTE band is the 0.62 to 0.79 retracement of the leg",
+          "status": "pending",
+          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
+        },
+        {
+          "id": "5.8-leg-length-floor",
+          "rule": "the leg must be at least 2 x ATR",
+          "status": "pending",
+          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
+        },
+        {
+          "id": "5.8-validity-conditions",
+          "rule": "the zone is valid only while the trend is unchanged, the leg-end swing is unconsumed and the PD gate passes at touch",
+          "status": "pending",
+          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
+        },
+        {
+          "id": "5.8-invalidation",
+          "rule": "a close beyond 100% retracement or a trend flip kills the zone; age past 100 candles expires it",
+          "status": "pending",
+          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
+        },
+        {
+          "id": "5.8-overlap-is-zone-stack",
+          "rule": "overlap with an OB or FVG inside the band is recorded as zone-stack evidence",
+          "status": "pending",
+          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
+        },
+        {
+          "id": "5.8-one-live-ote-per-direction",
+          "rule": "one live OTE per direction per timeframe; a newer leg replaces it prospectively",
+          "status": "pending",
+          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
         }
       ]
     },
@@ -741,13 +1167,60 @@
     {
       "id": "5.10",
       "title": "Primitive: Displacement",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "5.10",
-          "rule": "section not yet enumerated into rules",
+          "id": "5.10-body-multiple",
+          "rule": "the body must be at least 2.0 x the mean body of the last 20 candles",
           "status": "pending",
-          "blocked_on": "the golden harness wires only structure, liquidity and the FVG/IFVG/BPR ICT pass"
+          "blocked_on": "displacements is 0 in every dataset, and this condition is not what holds the count at zero -- removing it from the engine changes no golden"
+        },
+        {
+          "id": "5.10-range-multiple",
+          "rule": "the range must be at least 1.5 x ATR",
+          "status": "covered"
+        },
+        {
+          "id": "5.10-close-position",
+          "rule": "the close must land within the extreme 25% of the candle's range in the move direction",
+          "status": "pending",
+          "blocked_on": "displacements is 0 in every dataset, and this condition is not what holds the count at zero -- removing it from the engine changes no golden"
+        },
+        {
+          "id": "5.10-direction-from-body-sign",
+          "rule": "the displacement's direction is the sign of the body",
+          "status": "pending",
+          "blocked_on": "displacements is 0 in every dataset, and this condition is not what holds the count at zero -- removing it from the engine changes no golden"
+        },
+        {
+          "id": "5.10-records-measured-multiples",
+          "rule": "the measured multiples are recorded as evidence, not just a boolean",
+          "status": "pending",
+          "blocked_on": "displacements is 0 in every dataset, and this condition is not what holds the count at zero -- removing it from the engine changes no golden"
+        },
+        {
+          "id": "5.10-doji-cannot-displace",
+          "rule": "a doji has a body of zero and cannot displace",
+          "status": "pending",
+          "blocked_on": "displacements is 0 in every dataset, and this condition is not what holds the count at zero -- removing it from the engine changes no golden"
+        },
+        {
+          "id": "5.10-mean-body-20-warmup",
+          "rule": "displacement is undefined until 20 closed candles exist",
+          "status": "pending",
+          "blocked_on": "every golden carries 300-candle filler, so the unwarmed region is unreachable"
+        },
+        {
+          "id": "5.10-post-gap-undefined",
+          "rule": "mean_body_20 must not span a gap; displacement is unevaluable until 20 post-gap candles exist",
+          "status": "pending",
+          "blocked_on": "needs a dataset with a declared data gap; the loader rejects non-contiguous series"
+        },
+        {
+          "id": "5.10-permanent-measurement",
+          "rule": "a displacement candle is a permanent measurement and is never invalidated",
+          "status": "pending",
+          "blocked_on": "needs a case that re-reads an older displacement after later candles arrive; the harness compares one final snapshot"
         }
       ]
     },
