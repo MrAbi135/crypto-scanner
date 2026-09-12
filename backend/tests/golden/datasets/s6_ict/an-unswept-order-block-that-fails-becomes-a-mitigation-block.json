@@ -1,0 +1,475 @@
+{
+  "dataset_id": "s6-an-unswept-order-block-that-fails-becomes-a-mitigation-block",
+  "engine": "ict_evidence",
+  "sls_sections": [
+    "5.3"
+  ],
+  "sls_rules": [
+    "5.3-no-sweep-at-origin",
+    "5.3-failure-swing-precondition",
+    "5.3-grade-fixed-mit",
+    "5.3-one-deterministic-bit"
+  ],
+  "description": "The breaker case with its origin sweep removed and a failure swing put in its place. The same block fails the same way and comes back graded MIT instead of BRK_A.",
+  "labelling_rationale": "The companion to `s6-a-swept-order-block-that-fails-becomes-a-breaker`, and deliberately the same shape: the same swing low at 87, the same swing high at 94, an origin run in the same place, the same displacement over the high, and the same close-through at the end. §5.3 says a mitigation block is \"identical to §5.2 with precondition inverted\", so the two cases differ in exactly the two things §5.3 names and in nothing else. **Inversion one: the origin move sweeps nothing.** In the breaker case the origin run wicks to 86, through the SSL pool resting at 87, and closes back above it -- §4.6's sweep. Here the run's three candles bottom at 88, 87.5 and 87. The last of them comes back to the level exactly and does not take it: §4.6 needs penetration, and a low equal to the pool price is not through it. No sweep is recorded, so the order block carries `origin_swept` false and §5.2's qualifying precondition fails. **Inversion two: a failure swing instead.** §5.3 asks for \"a failure swing (LH before upward invalidation / HL before downward)\", read from the structure standing between the block's confirmation and its invalidation. Two external swing lows print in that window, at 111.6 and then at 111.7, and the second is the higher of the pair -- a higher low, which is the HL §5.3 wants before a downward invalidation. Both are confirmed swings, five closes after their pivots, and both sit inside the window: the block confirms on the displacement candle and is invalidated on the last candle of the series. **What the two inversions produce.** The close at 84 is beneath the band's distal edge of 87, so the block is INVALIDATED exactly as it is in the breaker case, and the same candle displaces and closes below a confirmed swing. The promotion then takes the other branch: no sweep means no breaker, and a failure swing means a mitigation block instead. Its grade is the fixed **MIT** §5.3 assigns, its geometry is the block's own band of 87 to 92, its polarity is flipped to BEARISH, its state restarts at FRESH, and it records the block it came from as its parent. `breakers_created` reads 0 and `mitigations_created` reads 1. **The one deterministic bit.** §5.3's doctrine note is that breaker and mitigation \"are distinguished *only* by origin-sweep evidence -- one deterministic bit, stored on the OB at creation. No judgment calls.\" These two datasets are that sentence: hold everything else fixed, move the origin run four points lower so it takes the pool, and BRK_A comes out instead of MIT. **The rest of the output, and why it is small.** The block grades OB_A because the displacement closes at 112, above the confirmed swing high of 94 -- a structure break, not a gap. The gap it does open, 91 to 111 between the run's last high and the following candle's low, is closed through by the crash, so §5.4 inverts it and §5.5 registers an UNPROVEN IFVG. Nothing else forms, and each absence is engineered rather than lucky. Every candle in the plateau carries the same high of 114, and §3.1 needs a strict inequality, so no swing high can print there and the dealing range never re-anchors above 94. `dealing_ranges` and `impulse_legs` therefore read 4 -- the four candles between the high confirming and the displacement closing at 112, which puts price outside the 87-to-94 bracket for the rest of the series -- and `otes_detected` is 0 because that leg spans 7.0 against §5.8's floor of 2 x ATR = 8.0. The plateau candles are also all bearish-bodied, which is what stops the crash from finding a bullish origin run of its own and building a second, opposing order block. The displacement opens at 92.5, clear of the band's 92, so the block is born FRESH rather than walked through by its own confirming candle. **One limit, stated rather than glossed.** Removing the failure-swing requirement from the engine breaks this expectation, so the requirement is asserted. Its *direction* test is not: the two lows here are already rising, so making the higher-low comparison always true moves nothing. A case whose pair falls, and which therefore produces no mitigation block, is what would pin that half.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-12 from SLS §5.3; pending developer verification",
+  "labelled_at": "2026-09-12",
+  "algo_version": "s6-ob-v6",
+  "symbol": "GOLDENMIT",
+  "timeframe": "H4",
+  "filler": {
+    "count": 255,
+    "open": "95.25",
+    "high": "97",
+    "low": "93",
+    "close": "94.75"
+  },
+  "candles": [
+    {
+      "open_time": "2026-07-13T12:00:00+00:00",
+      "open": "94.25",
+      "high": "96",
+      "low": "92",
+      "close": "93.75"
+    },
+    {
+      "open_time": "2026-07-13T16:00:00+00:00",
+      "open": "93.25",
+      "high": "95",
+      "low": "91",
+      "close": "92.75"
+    },
+    {
+      "open_time": "2026-07-13T20:00:00+00:00",
+      "open": "92.25",
+      "high": "94",
+      "low": "90",
+      "close": "91.75"
+    },
+    {
+      "open_time": "2026-07-14T00:00:00+00:00",
+      "open": "91.25",
+      "high": "93",
+      "low": "89",
+      "close": "90.75"
+    },
+    {
+      "open_time": "2026-07-14T04:00:00+00:00",
+      "open": "90.25",
+      "high": "92",
+      "low": "88",
+      "close": "89.75"
+    },
+    {
+      "open_time": "2026-07-14T08:00:00+00:00",
+      "open": "89.25",
+      "high": "91",
+      "low": "87",
+      "close": "88.75"
+    },
+    {
+      "open_time": "2026-07-14T12:00:00+00:00",
+      "open": "89.25",
+      "high": "91.5",
+      "low": "87.5",
+      "close": "89.75"
+    },
+    {
+      "open_time": "2026-07-14T16:00:00+00:00",
+      "open": "89.75",
+      "high": "92",
+      "low": "88",
+      "close": "90.25"
+    },
+    {
+      "open_time": "2026-07-14T20:00:00+00:00",
+      "open": "90.25",
+      "high": "92.5",
+      "low": "88.5",
+      "close": "90.75"
+    },
+    {
+      "open_time": "2026-07-15T00:00:00+00:00",
+      "open": "90.75",
+      "high": "93",
+      "low": "89",
+      "close": "91.25"
+    },
+    {
+      "open_time": "2026-07-15T04:00:00+00:00",
+      "open": "91.25",
+      "high": "93.5",
+      "low": "89.5",
+      "close": "91.75"
+    },
+    {
+      "open_time": "2026-07-15T08:00:00+00:00",
+      "open": "91.75",
+      "high": "94",
+      "low": "90",
+      "close": "92.25"
+    },
+    {
+      "open_time": "2026-07-15T12:00:00+00:00",
+      "open": "91.75",
+      "high": "93.5",
+      "low": "89.5",
+      "close": "91.25"
+    },
+    {
+      "open_time": "2026-07-15T16:00:00+00:00",
+      "open": "91.25",
+      "high": "93",
+      "low": "89",
+      "close": "90.75"
+    },
+    {
+      "open_time": "2026-07-15T20:00:00+00:00",
+      "open": "90.75",
+      "high": "92.5",
+      "low": "88.5",
+      "close": "90.25"
+    },
+    {
+      "open_time": "2026-07-16T00:00:00+00:00",
+      "open": "90.25",
+      "high": "92",
+      "low": "88",
+      "close": "89.75"
+    },
+    {
+      "open_time": "2026-07-16T04:00:00+00:00",
+      "open": "89.75",
+      "high": "91.5",
+      "low": "87.5",
+      "close": "89.25"
+    },
+    {
+      "open_time": "2026-07-16T08:00:00+00:00",
+      "open": "90.25",
+      "high": "92",
+      "low": "88",
+      "close": "89.75"
+    },
+    {
+      "open_time": "2026-07-16T12:00:00+00:00",
+      "open": "89.75",
+      "high": "91.5",
+      "low": "87.5",
+      "close": "89.25"
+    },
+    {
+      "open_time": "2026-07-16T16:00:00+00:00",
+      "open": "89.25",
+      "high": "91",
+      "low": "87",
+      "close": "88.75"
+    },
+    {
+      "open_time": "2026-07-16T20:00:00+00:00",
+      "open": "92.5",
+      "high": "112.5",
+      "low": "92.5",
+      "close": "112"
+    },
+    {
+      "open_time": "2026-07-17T00:00:00+00:00",
+      "open": "111.5",
+      "high": "114",
+      "low": "111",
+      "close": "111.2"
+    },
+    {
+      "open_time": "2026-07-17T04:00:00+00:00",
+      "open": "113.15",
+      "high": "114",
+      "low": "112.4",
+      "close": "112.65"
+    },
+    {
+      "open_time": "2026-07-17T08:00:00+00:00",
+      "open": "112.95",
+      "high": "114",
+      "low": "112.2",
+      "close": "112.45"
+    },
+    {
+      "open_time": "2026-07-17T12:00:00+00:00",
+      "open": "112.75",
+      "high": "114",
+      "low": "112",
+      "close": "112.25"
+    },
+    {
+      "open_time": "2026-07-17T16:00:00+00:00",
+      "open": "112.55",
+      "high": "114",
+      "low": "111.8",
+      "close": "112.05"
+    },
+    {
+      "open_time": "2026-07-17T20:00:00+00:00",
+      "open": "112.45",
+      "high": "114",
+      "low": "111.7",
+      "close": "111.95"
+    },
+    {
+      "open_time": "2026-07-18T00:00:00+00:00",
+      "open": "112.35",
+      "high": "114",
+      "low": "111.6",
+      "close": "111.85"
+    },
+    {
+      "open_time": "2026-07-18T04:00:00+00:00",
+      "open": "112.45",
+      "high": "114",
+      "low": "111.7",
+      "close": "111.95"
+    },
+    {
+      "open_time": "2026-07-18T08:00:00+00:00",
+      "open": "112.55",
+      "high": "114",
+      "low": "111.8",
+      "close": "112.05"
+    },
+    {
+      "open_time": "2026-07-18T12:00:00+00:00",
+      "open": "112.75",
+      "high": "114",
+      "low": "112",
+      "close": "112.25"
+    },
+    {
+      "open_time": "2026-07-18T16:00:00+00:00",
+      "open": "112.95",
+      "high": "114",
+      "low": "112.2",
+      "close": "112.45"
+    },
+    {
+      "open_time": "2026-07-18T20:00:00+00:00",
+      "open": "113.15",
+      "high": "114",
+      "low": "112.4",
+      "close": "112.65"
+    },
+    {
+      "open_time": "2026-07-19T00:00:00+00:00",
+      "open": "112.95",
+      "high": "114",
+      "low": "112.2",
+      "close": "112.45"
+    },
+    {
+      "open_time": "2026-07-19T04:00:00+00:00",
+      "open": "112.75",
+      "high": "114",
+      "low": "112",
+      "close": "112.25"
+    },
+    {
+      "open_time": "2026-07-19T08:00:00+00:00",
+      "open": "112.65",
+      "high": "114",
+      "low": "111.9",
+      "close": "112.15"
+    },
+    {
+      "open_time": "2026-07-19T12:00:00+00:00",
+      "open": "112.60",
+      "high": "114",
+      "low": "111.85",
+      "close": "112.10"
+    },
+    {
+      "open_time": "2026-07-19T16:00:00+00:00",
+      "open": "112.55",
+      "high": "114",
+      "low": "111.8",
+      "close": "112.05"
+    },
+    {
+      "open_time": "2026-07-19T20:00:00+00:00",
+      "open": "112.45",
+      "high": "114",
+      "low": "111.7",
+      "close": "111.95"
+    },
+    {
+      "open_time": "2026-07-20T00:00:00+00:00",
+      "open": "112.55",
+      "high": "114",
+      "low": "111.8",
+      "close": "112.05"
+    },
+    {
+      "open_time": "2026-07-20T04:00:00+00:00",
+      "open": "112.65",
+      "high": "114",
+      "low": "111.9",
+      "close": "112.15"
+    },
+    {
+      "open_time": "2026-07-20T08:00:00+00:00",
+      "open": "112.75",
+      "high": "114",
+      "low": "112",
+      "close": "112.25"
+    },
+    {
+      "open_time": "2026-07-20T12:00:00+00:00",
+      "open": "112.85",
+      "high": "114",
+      "low": "112.1",
+      "close": "112.35"
+    },
+    {
+      "open_time": "2026-07-20T16:00:00+00:00",
+      "open": "112.95",
+      "high": "114",
+      "low": "112.2",
+      "close": "112.45"
+    },
+    {
+      "open_time": "2026-07-20T20:00:00+00:00",
+      "open": "111",
+      "high": "113",
+      "low": "83.5",
+      "close": "84"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "displacements": 2,
+      "fvgs_detected": 1,
+      "ifvgs_created": 1,
+      "bprs_created": 0,
+      "live_zones": 1,
+      "dealing_ranges": 4,
+      "impulse_legs": 4,
+      "otes_detected": 0,
+      "order_blocks_detected": 1,
+      "breakers_created": 0,
+      "mitigations_created": 1,
+      "zones_evaluated": 4,
+      "touches": 2,
+      "rejections": 0,
+      "mitigations": 0,
+      "respects": 0,
+      "violations": 2,
+      "confirmations": 0
+    },
+    "zones": [
+      {
+        "zone": "zone:OB:BULLISH:272",
+        "zone_type": "OB",
+        "polarity": "BULLISH",
+        "state": "INVALIDATED",
+        "grade": "OB_A",
+        "band_low": "87",
+        "band_high": "92",
+        "created_index": 272,
+        "created_at": "2026-07-16T08:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": null
+      },
+      {
+        "zone": "zone:FVG:BULLISH:276",
+        "zone_type": "FVG",
+        "polarity": "BULLISH",
+        "state": "INVERTED",
+        "grade": "FVG",
+        "band_low": "91",
+        "band_high": "111",
+        "created_index": 276,
+        "created_at": "2026-07-17T04:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": null
+      },
+      {
+        "zone": "zone:IFVG:BEARISH:299",
+        "zone_type": "IFVG",
+        "polarity": "BEARISH",
+        "state": "UNPROVEN",
+        "grade": "IFVG",
+        "band_low": "91",
+        "band_high": "111",
+        "created_index": 299,
+        "created_at": "2026-07-21T00:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": "zone:FVG:BULLISH:276"
+      },
+      {
+        "zone": "zone:MITIGATION:BEARISH:299",
+        "zone_type": "MITIGATION",
+        "polarity": "BEARISH",
+        "state": "FRESH",
+        "grade": "MIT",
+        "band_low": "87",
+        "band_high": "92",
+        "created_index": 299,
+        "created_at": "2026-07-21T00:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": "zone:OB:BULLISH:272"
+      }
+    ],
+    "transitions": [
+      {
+        "zone": "zone:OB:BULLISH:272",
+        "zone_type": "OB",
+        "from_state": "FRESH",
+        "to_state": "INVALIDATED",
+        "reason": "close_through",
+        "candle_index": 299,
+        "transitioned_at": "2026-07-21T00:00:00+00:00"
+      },
+      {
+        "zone": "zone:FVG:BULLISH:276",
+        "zone_type": "FVG",
+        "from_state": "OPEN",
+        "to_state": "INVERTED",
+        "reason": "close_through",
+        "candle_index": 299,
+        "transitioned_at": "2026-07-21T00:00:00+00:00"
+      }
+    ],
+    "interactions": [
+      {
+        "zone": "zone:FVG:BULLISH:276",
+        "zone_type": "FVG",
+        "kind": "TOUCH",
+        "candle_index": 299,
+        "observed_at": "2026-07-21T00:00:00+00:00",
+        "close_through": true
+      },
+      {
+        "zone": "zone:OB:BULLISH:272",
+        "zone_type": "OB",
+        "kind": "TOUCH",
+        "candle_index": 299,
+        "observed_at": "2026-07-21T00:00:00+00:00",
+        "close_through": true
+      },
+      {
+        "zone": "zone:FVG:BULLISH:276",
+        "zone_type": "FVG",
+        "kind": "VIOLATION",
+        "candle_index": 299,
+        "observed_at": "2026-07-21T00:00:00+00:00",
+        "close_through": true
+      },
+      {
+        "zone": "zone:OB:BULLISH:272",
+        "zone_type": "OB",
+        "kind": "VIOLATION",
+        "candle_index": 299,
+        "observed_at": "2026-07-21T00:00:00+00:00",
+        "close_through": true
+      }
+    ]
+  }
+}
