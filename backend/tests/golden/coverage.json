@@ -1031,8 +1031,7 @@
         {
           "id": "6.7-base-50",
           "rule": "the volume factor starts at a base of 50",
-          "status": "pending",
-          "blocked_on": "scored inside the confluence engine rather than emitted by the participation replay; needs a confluence dataset carrying an active setup direction"
+          "status": "covered"
         },
         {
           "id": "6.7-spike-aligned",
@@ -1316,13 +1315,23 @@
     {
       "id": "8.1",
       "title": "Combination Model - Compared and Chosen",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "8.1",
-          "rule": "section not yet enumerated into rules",
+          "id": "8.1-four-stage-model",
+          "rule": "the chosen model is gates -> weighted evidence -> bounded adjustments -> archetype floor",
+          "status": "covered"
+        },
+        {
+          "id": "8.1-every-point-traceable",
+          "rule": "every point is traceable: each factor stores the enumerated contributions that produced it",
+          "status": "covered"
+        },
+        {
+          "id": "8.1-rejected-alternatives",
+          "rule": "hard checklist, pure weighted sum and ML-learned combination are all rejected",
           "status": "pending",
-          "blocked_on": "writable today: the confluence runner builds the whole DetectionPipeline and s8_confluence datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
+          "blocked_on": "a design record rather than detection logic: a rejected alternative has no output to assert"
         }
       ]
     },
@@ -1380,17 +1389,126 @@
     {
       "id": "8.3",
       "title": "Stage 2 - Evidence Factors (Each 0-100, Fully Attributed)",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "8.3",
-          "rule": "section not yet enumerated into rules",
-          "status": "pending",
-          "blocked_on": "partially enumerated: the rules this section's datasets actually pin are listed beside this entry; the rest of the section is not broken out yet"
+          "id": "8.3-every-factor-scored",
+          "rule": "all six factors are scored for a candidate whose gates clear",
+          "status": "covered"
         },
         {
-          "id": "8.3-every-factor-scored",
-          "rule": "each of F1-F6 is a sum of enumerated evidence contributions; a missing factor is not a zero and base confidence refuses to be computed without it",
+          "id": "8.3-attribution-is-enumerated",
+          "rule": "every factor score is a sum of enumerated evidence contributions, reproducible from the evidence alone",
+          "status": "covered"
+        },
+        {
+          "id": "8.3-f4-is-the-published-volume-factor",
+          "rule": "F4 is the Volume Factor Score as 6.7 publishes it, not a second calculation",
+          "status": "covered"
+        },
+        {
+          "id": "8.3-f6-ranging-scores-50",
+          "rule": "F6 scores 50 when the HTF trend state is RANGING",
+          "status": "covered"
+        },
+        {
+          "id": "8.3-f6-aligned-scores-100",
+          "rule": "F6 scores 100 when the HTF trend state matches D",
+          "status": "pending",
+          "blocked_on": "no dataset resolves an HTF state at all -- both confluence cases report htf_state unreachable, so only the fallback branch is exercised"
+        },
+        {
+          "id": "8.3-f6-caution-toward-scores-70",
+          "rule": "F6 scores 70 when the HTF is at CAUTION toward D",
+          "status": "pending",
+          "blocked_on": "no dataset resolves an HTF state at all"
+        },
+        {
+          "id": "8.3-f6-opposed-scores-0",
+          "rule": "F6 scores 0 when the HTF opposes D, and an opposed candidate passes only inside the Sweep-Reversal archetype",
+          "status": "pending",
+          "blocked_on": "no dataset resolves an HTF state at all"
+        },
+        {
+          "id": "8.3.1-f1-break-quality",
+          "rule": "F1 break quality 0-45: 15 for a confirmed break, +18 displaced, +12 external",
+          "status": "pending",
+          "blocked_on": "the one scored candidate has no confirmed break; its whole F1 is the clean-record component"
+        },
+        {
+          "id": "8.3.1-f1-mss-present",
+          "rule": "F1 pays 10 when the break is an MSS rather than a plain BOS",
+          "status": "pending",
+          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+        },
+        {
+          "id": "8.3.1-f1-trend-maturity",
+          "rule": "F1 trend maturity 0-30: min(pairs, 4) / 4 x 30 over consecutive unbroken pairs",
+          "status": "pending",
+          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+        },
+        {
+          "id": "8.3.1-f1-clean-break-record",
+          "rule": "F1 pays 15 with no failed break against D in 20 candles, 7 with one, 0 with two or more",
+          "status": "covered"
+        },
+        {
+          "id": "8.3.1-f2-sweep-quality",
+          "rule": "F2 sweep quality 0-60: 20 confirmed, +16 external, +12 depth, +6 unclaimed, +6 fresh",
+          "status": "pending",
+          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+        },
+        {
+          "id": "8.3.1-f2-stop-hunt",
+          "rule": "F2 pays 15 when 4.7's composite confirms",
+          "status": "pending",
+          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+        },
+        {
+          "id": "8.3.1-f2-target-pool-strength",
+          "rule": "F2 target-side pool strength 0-25: pool_strength / 100 x 25",
+          "status": "covered"
+        },
+        {
+          "id": "8.3.1-f3-zone-grade",
+          "rule": "F3 zone grade 0-50: BRK_A 50, OB_A 40, OB_B 32, FVG 25, MIT 18, IFVG 10",
+          "status": "covered"
+        },
+        {
+          "id": "8.3.1-f3-state-freshness",
+          "rule": "F3 state freshness 0-25: FRESH 25, TESTED 15, CE_FILLED 6, anything further 0",
+          "status": "covered"
+        },
+        {
+          "id": "8.3.1-f3-stack-depth",
+          "rule": "F3 stack depth pays 15 at two overlapping zones and no more beyond that",
+          "status": "covered"
+        },
+        {
+          "id": "8.3.1-f3-entry-confirmation",
+          "rule": "F3 pays 10 when 5.9 records an entry-grade Confirmation",
+          "status": "pending",
+          "blocked_on": "the scored candidate's zone has no Confirmation, so the component is absent rather than valued"
+        },
+        {
+          "id": "8.3.1-f5-aligned-momentum",
+          "rule": "F5 aligned momentum 0-55: momentum_score x 0.55 when direction matches D",
+          "status": "pending",
+          "blocked_on": "the scored candidate's momentum is NEUTRAL, so the multiplier is never applied; changing it moves no golden"
+        },
+        {
+          "id": "8.3.1-f5-opposed-or-neutral-scores-zero",
+          "rule": "F5 pays nothing on its largest component when momentum is opposed or NEUTRAL, rather than scaling down",
+          "status": "covered"
+        },
+        {
+          "id": "8.3.1-f5-acceleration",
+          "rule": "F5 acceleration 0-25: accelerating 25, neither 12, decelerating 0",
+          "status": "covered"
+        },
+        {
+          "id": "8.3.1-f5-no-exhaustion",
+          "rule": "F5 pays 20 when exhaustion_watch is absent and 0 when present",
           "status": "covered"
         }
       ]
@@ -1398,62 +1516,158 @@
     {
       "id": "8.4",
       "title": "Stage 3 - Weighted Base Confidence",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "8.4",
-          "rule": "section not yet enumerated into rules",
+          "id": "8.4-weighted-sum",
+          "rule": "BaseConfidence = sum(F_k x W_k) with the weights 9 fixes",
+          "status": "covered"
+        },
+        {
+          "id": "8.4-result-in-range",
+          "rule": "the result lies in [0, 100]",
           "status": "pending",
-          "blocked_on": "writable today: the confluence runner builds the whole DetectionPipeline and s8_confluence datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
+          "blocked_on": "the weights sum to 1 and every factor is already clamped to [0, 100], so the bound cannot be violated by any input a dataset can supply -- it is a guard, not a behaviour a golden can show"
         }
       ]
     },
     {
       "id": "8.5",
       "title": "Stage 4 - Bounded Adjustments",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "8.5",
-          "rule": "section not yet enumerated into rules",
-          "status": "pending",
-          "blocked_on": "partially enumerated: the rules this section's datasets actually pin are listed beside this entry; the rest of the section is not broken out yet"
+          "id": "8.5-base-plus-adjustments-floored",
+          "rule": "FinalConfidence is the base plus bonuses minus penalties",
+          "status": "covered"
         },
         {
-          "id": "8.5-base-plus-adjustments-floored",
-          "rule": "final = clamp(base + bonuses - penalties, 0, 100), floored to an integer; 8.7 carries 95.25 to a published 95",
+          "id": "8.5-final-is-floored",
+          "rule": "the final confidence is floored to an integer, never rounded up",
           "status": "covered"
+        },
+        {
+          "id": "8.5-adjustments-itemised",
+          "rule": "every applied adjustment is itemised in the evidence record",
+          "status": "covered"
+        },
+        {
+          "id": "8.5-synergy-zone-stack",
+          "rule": "zone-stack (OTE intersecting OB/FVG overlap) is worth +5",
+          "status": "covered"
+        },
+        {
+          "id": "8.5-synergy-is-capped",
+          "rule": "the synergy total is capped rather than unbounded",
+          "status": "covered"
+        },
+        {
+          "id": "8.5-synergy-cap-is-15",
+          "rule": "synergy bonuses total at most +15",
+          "status": "pending",
+          "blocked_on": "the only dataset with synergy applies +5. Lowering the cap below 5 changes the output and raising it does not, so the value 15 itself is unasserted; needs a case earning more than 15"
+        },
+        {
+          "id": "8.5-synergy-sweep-chain",
+          "rule": "an intact sweep -> MSS -> zone-retest chain is worth +8",
+          "status": "pending",
+          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+        },
+        {
+          "id": "8.5-synergy-displacement-double-duty",
+          "rule": "displacement creating both the qualifying BOS and the entry FVG is worth +5",
+          "status": "pending",
+          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+        },
+        {
+          "id": "8.5-synergy-compression-resolved",
+          "rule": "compression resolved by the setup's displacement is worth +4",
+          "status": "pending",
+          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+        },
+        {
+          "id": "8.5-penalty-exhaustion",
+          "rule": "exhaustion_watch against D costs -8",
+          "status": "pending",
+          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+        },
+        {
+          "id": "8.5-penalty-opposing-internal-liquidity",
+          "rule": "opposing internal liquidity within 1 x ATR before target costs -5",
+          "status": "pending",
+          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+        },
+        {
+          "id": "8.5-penalty-caution-state",
+          "rule": "a setup timeframe at CAUTION costs -5",
+          "status": "pending",
+          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+        },
+        {
+          "id": "8.5-penalty-stealth-only",
+          "rule": "stealth_flow-only volume support costs -3",
+          "status": "pending",
+          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+        },
+        {
+          "id": "8.5-penalty-is-capped",
+          "rule": "conflict penalties total at most -20",
+          "status": "pending",
+          "blocked_on": "no dataset applies a penalty at all, so neither the cap nor any of its terms is exercised"
+        },
+        {
+          "id": "8.5-final-clamped-0-100",
+          "rule": "the final confidence is clamped into [0, 100]",
+          "status": "pending",
+          "blocked_on": "needs a candidate whose base plus adjustments leaves the range; the one scored candidate lands at 41.6875"
         }
       ]
     },
     {
       "id": "8.6",
       "title": "Stage 5 - Setup Archetypes",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "8.6",
-          "rule": "section not yet enumerated into rules",
-          "status": "pending",
-          "blocked_on": "partially enumerated: the rules this section's datasets actually pin are listed beside this entry; the rest of the section is not broken out yet"
+          "id": "8.6-no-archetype-no-publication",
+          "rule": "a candidate matching no archetype is never published",
+          "status": "covered"
         },
         {
-          "id": "8.6-no-archetype-no-publication",
-          "rule": "every publishable setup must match exactly one archetype, so a candidate matching none is recorded and withheld whatever its confidence",
+          "id": "8.6-archetype-required-chains",
+          "rule": "each archetype's core chain and extra requirements are the links a candidate must show",
           "status": "covered"
+        },
+        {
+          "id": "8.6-first-match-wins",
+          "rule": "classification is rule-ordered and the first match wins",
+          "status": "pending",
+          "blocked_on": "no dataset matches an archetype, let alone two"
+        },
+        {
+          "id": "8.6-confidence-floors",
+          "rule": "A1 75, A2 72, A3 70, A4 70, A5 74",
+          "status": "pending",
+          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+        },
+        {
+          "id": "8.6-below-floor-recorded-not-published",
+          "rule": "a below-floor candidate is recorded for calibration and never published",
+          "status": "pending",
+          "blocked_on": "the one scored candidate is withheld for having no archetype, not for missing a floor, so the floor branch is never taken"
         }
       ]
     },
     {
       "id": "8.7",
       "title": "Worked Example (Normative Illustration)",
-      "enumerated": false,
+      "enumerated": true,
       "rules": [
         {
-          "id": "8.7",
-          "rule": "section not yet enumerated into rules",
+          "id": "8.7-worked-example",
+          "rule": "the normative illustration's arithmetic: F1..F6 of 85/80/90/70/65/100 weight to a base of 82.25, +13 of synergy gives a final of 95, archetype A3 publishes at Grade S",
           "status": "pending",
-          "blocked_on": "writable today: the confluence runner builds the whole DetectionPipeline and s8_confluence datasets already run against it. This blocker was stale; the rules need enumerating and cases writing."
+          "blocked_on": "asserted in tests/unit/domain/confluence/test_factor_points.py rather than by a golden. A dataset would need a candle series that actually produces a displaced external BOS, an external sweep at 0.8 ATR, and an OTE intersecting OB_A stack at range position 0.38"
         }
       ]
     }
