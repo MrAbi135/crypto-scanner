@@ -847,26 +847,22 @@
         {
           "id": "5.3-no-sweep-at-origin",
           "rule": "a mitigation block is the same shape with no liquidity sweep at the origin move",
-          "status": "pending",
-          "blocked_on": "the mitigation path is now reachable -- engine `ict_evidence` runs the structure and liquidity passes in front of the zone passes -- but it needs an order block whose origin move swept NOTHING and whose pre-invalidation structure shows a failure swing. The breaker case supplies the opposite of both, so this needs its own series"
+          "status": "covered"
         },
         {
           "id": "5.3-failure-swing-precondition",
           "rule": "the pre-invalidation structure must show a failure swing: LH before an upward invalidation, HL before a downward one",
-          "status": "pending",
-          "blocked_on": "the mitigation path is now reachable -- engine `ict_evidence` runs the structure and liquidity passes in front of the zone passes -- but it needs an order block whose origin move swept NOTHING and whose pre-invalidation structure shows a failure swing. The breaker case supplies the opposite of both, so this needs its own series"
+          "status": "covered"
         },
         {
           "id": "5.3-grade-fixed-mit",
           "rule": "the grade is fixed at MIT and everything else matches the breaker rules",
-          "status": "pending",
-          "blocked_on": "the mitigation path is now reachable -- engine `ict_evidence` runs the structure and liquidity passes in front of the zone passes -- but it needs an order block whose origin move swept NOTHING and whose pre-invalidation structure shows a failure swing. The breaker case supplies the opposite of both, so this needs its own series"
+          "status": "covered"
         },
         {
           "id": "5.3-one-deterministic-bit",
           "rule": "breaker and mitigation are distinguished only by origin-sweep evidence, stored on the order block at creation",
-          "status": "pending",
-          "blocked_on": "the mitigation path is now reachable -- engine `ict_evidence` runs the structure and liquidity passes in front of the zone passes -- but it needs an order block whose origin move swept NOTHING and whose pre-invalidation structure shows a failure swing. The breaker case supplies the opposite of both, so this needs its own series"
+          "status": "covered"
         }
       ]
     },
