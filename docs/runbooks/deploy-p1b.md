@@ -339,12 +339,23 @@ the test fails if any application table is left without ordinary access.
 ### Order of operations
 
 1. **Create the role and its secret**, as the owner, generating the password on
-   the host and never echoing it:
+   the host, keeping it outside the repository, and never echoing it:
 
    ```bash
-   APP_PW=$(openssl rand -hex 24)
-   $PSQL -v pw="$APP_PW" -c "CREATE ROLE scanner_app LOGIN PASSWORD :'pw'"
+   umask 077 && mkdir -p ~/secrets
+   openssl rand -hex 24 > ~/secrets/scanner_app.pw
+   { printf "\set pw '%s'\n" "$(cat ~/secrets/scanner_app.pw)"; \
+     printf "CREATE ROLE scanner_app LOGIN PASSWORD :'pw';\n"; } \
+     | docker exec -i scanner-dev-db-1 psql -U scanner -d scanner -v ON_ERROR_STOP=1
    ```
+
+   **Do not use `psql -v pw=... -c "... :'pw'"`.** An earlier version of this
+   step did, and it cannot work: psql does not interpolate variables in a `-c`
+   string, so the server receives a literal `:'pw'` and rejects it with
+   `syntax error at or near ":"` -- measured on staging. Variables are only
+   interpolated in input psql reads itself, which is why the statement goes in
+   over stdin. `printf` is a shell builtin, so the password never appears in a
+   process argument list either.
 
 2. **Apply the grants**, as the owner, after migrations:
 
