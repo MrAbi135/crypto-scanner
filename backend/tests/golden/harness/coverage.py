@@ -30,12 +30,18 @@ the repository it was written against, not the one in front of you.
 So coverage can only move by editing the manifest, in the same commit as the
 dataset. Both directions fail loudly.
 
-## Enumeration is itself incomplete, and says so
+## Enumeration is complete; coverage is not
 
-Eight of the forty-five detection subsections have had their rules written out.
-The rest carry a single stub entry. `enumerated` marks the difference, because
-"0 of 1 rules covered" for a stubbed section is not the same claim as "0 of 11"
-for an enumerated one, and reporting them alike would understate the gap.
+All forty-five detection subsections have had their rules written out. That is
+the half of Roadmap §8.1 an assistant can finish: the map now says what every
+rule is and, for each uncovered one, what stands in the way. The other half --
+a dataset behind every rule -- is two thirds unbuilt, and the manifest is where
+that shows.
+
+`enumerated` is kept even though every section now sets it. It marks a real
+distinction rather than a phase: an SLS amendment adds subsections, and a new
+one arriving as a stub must report as "not enumerated" rather than as "0 of 1
+rules covered", which would understate the gap it opens.
 """
 
 from __future__ import annotations
