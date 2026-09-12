@@ -98,6 +98,40 @@ def wilder_atr(
     return atr
 
 
+def atr_at(
+    candles: Sequence[Candle],
+    index: int,
+    atrs: Sequence[Decimal | None] | None,
+) -> Decimal | None:
+    """ATR at `index`, taken from a precomputed series when one is supplied.
+
+    `wilder_atr` re-seeds from candle zero on every call, so a detector that
+    asks per candle is quadratic in the window. Six replay services already
+    avoid that by computing `wilder_atr_series` once per run; the volume and
+    momentum detectors never adopted it. A cProfile of one live pass measured
+    2,710 scalar calls driving 719,483 `true_range` evaluations -- 1.12 s of a
+    6.0 s pass, all of it recomputing the same numbers.
+
+    `atrs` is optional, and `None` keeps the old behaviour exactly, so no
+    caller is obliged to change. The two paths are the same arithmetic:
+    `wilder_atr_series` documents that it returns "identical results to calling
+    `wilder_atr` per index, including the `None` seeding region", which is what
+    lets this be a speed change with no algo_version bump.
+
+    Lives here rather than beside either caller because §6 and §7 are siblings
+    under the engine-acyclicity contract and may not import one another -- the
+    same reason `rvol` sits in `common`.
+    """
+
+    if atrs is None:
+        return wilder_atr(candles, index)
+
+    if index < 0 or index >= len(atrs):
+        return None
+
+    return atrs[index]
+
+
 def quantise_derived(value: Decimal) -> Decimal:
     """Round a derived quantity for recording (SLS §0.4).
 

@@ -14,7 +14,7 @@ from decimal import Decimal
 from enum import Enum
 
 from scanner.domain.common import Candle, TradeAggregate
-from scanner.domain.common.atr import wilder_atr
+from scanner.domain.common.atr import atr_at
 from scanner.domain.common.rvol import RvolClass, classify, median, relative_volume
 
 # P.volume.spike_floor -- an absolute quote-volume floor so a micro-cap's $8k
@@ -115,6 +115,8 @@ class VolumeExpansion:
 def detect_expansion(
     candles: Sequence[Candle],
     index: int,
+    *,
+    atrs: Sequence[Decimal | None] | None = None,
 ) -> VolumeExpansion | None:
     """§6.3 expansion: three rising volumes, mean RVOL >= 1.2, real progress.
 
@@ -151,7 +153,7 @@ def detect_expansion(
     if mean_rvol < EXPANSION_MEAN_RVOL:
         return None
 
-    atr = wilder_atr(candles, index)
+    atr = atr_at(candles, index, atrs)
 
     if atr is None or atr <= 0:
         return None
@@ -167,6 +169,8 @@ def detect_expansion(
 def detect_contraction(
     candles: Sequence[Candle],
     index: int,
+    *,
+    atrs: Sequence[Decimal | None] | None = None,
 ) -> bool:
     """§6.3 contraction: five-candle mean RVOL and mean range both compressed.
 
@@ -191,7 +195,7 @@ def detect_contraction(
     if mean_rvol > CONTRACTION_MEAN_RVOL:
         return False
 
-    atr = wilder_atr(candles, index)
+    atr = atr_at(candles, index, atrs)
 
     if atr is None or atr <= 0:
         return False

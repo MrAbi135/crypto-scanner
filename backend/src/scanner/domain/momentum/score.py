@@ -16,7 +16,7 @@ from decimal import Decimal
 from enum import Enum
 
 from scanner.domain.common import Candle
-from scanner.domain.common.atr import wilder_atr
+from scanner.domain.common.atr import atr_at
 from scanner.domain.common.rvol import relative_volume
 
 WINDOW = 10
@@ -76,6 +76,8 @@ def _linear(value: Decimal, full: Decimal) -> Decimal:
 def directional_roc(
     candles: Sequence[Candle],
     index: int,
+    *,
+    atrs: Sequence[Decimal | None] | None = None,
 ) -> Decimal | None:
     """`(Cl[i] - Cl[i-n]) / (ATR * sqrt(n))` for n = 10, per SLS 7.1.
 
@@ -85,7 +87,7 @@ def directional_roc(
     if index < ROC_PERIOD:
         return None
 
-    atr = wilder_atr(candles, index)
+    atr = atr_at(candles, index, atrs)
 
     if atr is None or atr <= 0:
         return None
@@ -98,6 +100,8 @@ def directional_roc(
 def momentum_score(
     candles: Sequence[Candle],
     index: int,
+    *,
+    atrs: Sequence[Decimal | None] | None = None,
 ) -> MomentumScore | None:
     """§7.1. Returns None until the 30-candle warm-up is satisfied.
 
@@ -107,7 +111,7 @@ def momentum_score(
     if index < WARMUP_CANDLES - 1 or index >= len(candles):
         return None
 
-    roc = directional_roc(candles, index)
+    roc = directional_roc(candles, index, atrs=atrs)
 
     if roc is None:
         return None
