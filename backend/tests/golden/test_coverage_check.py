@@ -132,6 +132,11 @@ UNVERIFIED_LABELS = frozenset(
         "a-walking-coil-is-not-a-coil.json",
         "one-candle-that-saturates-three-components.json",
         "a-spike-takes-its-direction-from-the-body.json",
+        "choch-then-mss-on-a-failure-swing.json",
+        "a-choch-without-displacement-is-not-an-mss.json",
+        "a-choch-with-no-follow-through-returns-the-trend.json",
+        "an-mss-reclaimed-inside-ten-candles-is-low-quality.json",
+        "a-choch-with-no-origin-evidence-is-not-an-mss.json",
     }
 )
 

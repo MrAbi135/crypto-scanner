@@ -1,0 +1,465 @@
+{
+  "dataset_id": "s4-a-choch-with-no-sweep-and-no-failure-swing-is-not-an-mss",
+  "engine": "structure_shift",
+  "sls_sections": [
+    "3.6"
+  ],
+  "sls_rules": [
+    "3.6-mss-needs-sweep-or-failure-swing"
+  ],
+  "description": "The break displaces and price follows through, but the last external high was an HH, not an LH, and no sweep is on record. §3.6's origin condition has neither branch, so the CHoCH stays a warning.",
+  "labelling_rationale": "The run-up is the one the other four §3.6 cases share, with its last leg removed. Seven external pivots print at 5-candle spacing, each strictly beyond the five candles on either side, so §3.1 confirms each exactly 5 closes after its pivot: a low at 87 (SEED), a high at 113 (SEED), a low at 93 (HL), a high at 125 (HH), a low at 105 (HL), a high at 137 (HH) and a low at 117 (HL). §3.4 turns the trend BULLISH the moment the 137 high confirms. **What is missing is the eighth pivot.** In `s4-choch-then-mss-on-a-failure-swing` the market prints one more high at 131, and because 131 is below 137 that high is an LH -- §3.6's failure swing. Here price simply goes flat at 120 for eleven candles instead. Flat is deliberate rather than lazy: §3.1 needs a strict inequality on both sides, so a run of identical highs produces no swing at all, and the most recent external high before the break stays the 137 **HH**. **The CHoCH.** The break candle opens at 120 and closes at 108, below the 117 HL that started the current up-leg, so the CHoCH fires and the trend moves to BULLISH_CAUTION. That much is identical to the other cases. **Why no MSS.** §3.6's condition 2 is a disjunction: the broken structure must follow either (a) a liquidity sweep of external liquidity within the preceding 10 closes, or (b) a failure swing -- \"in BULLISH: the most recent external swing high attempt was a LH\". Neither branch is available. This dataset supplies no liquidity evidence at all, so (a) cannot hold; and the most recent external high is an HH, not an LH, so (b) does not either. The other two conditions do hold, and that is the whole point of the case: the break candle's body of 12 against a mean 20-candle body of 0.5 clears §5.10's tests and closes in the bottom 25% of its range, so displacement is present, and the next candle closes at 106, below the break candle's low of 107.5, so follow-through arrives one close later. An MSS with two of three conditions is not an MSS. Five closes after the CHoCH the candidate expires, the warning stays on the record, and the trend returns to BULLISH. Every run-up candle is the same shape -- a 0.5 body inside a 2.0 range, centred on its level -- so its high and low both track that level strictly and the swing tests are decided by the level alone.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-12 from SLS §3.6; pending developer verification",
+  "labelled_at": "2026-09-12",
+  "algo_version": "s6-structure-shift-v4",
+  "symbol": "GOLDENSHIFT",
+  "timeframe": "H4",
+  "filler": {
+    "count": 241,
+    "open": "99.75",
+    "high": "101",
+    "low": "99",
+    "close": "100.25"
+  },
+  "candles": [
+    {
+      "open_time": "2026-02-24T04:00:00+00:00",
+      "open": "97.75",
+      "high": "99",
+      "low": "97",
+      "close": "98.25"
+    },
+    {
+      "open_time": "2026-02-24T08:00:00+00:00",
+      "open": "95.75",
+      "high": "97",
+      "low": "95",
+      "close": "96.25"
+    },
+    {
+      "open_time": "2026-02-24T12:00:00+00:00",
+      "open": "93.75",
+      "high": "95",
+      "low": "93",
+      "close": "94.25"
+    },
+    {
+      "open_time": "2026-02-24T16:00:00+00:00",
+      "open": "91.75",
+      "high": "93",
+      "low": "91",
+      "close": "92.25"
+    },
+    {
+      "open_time": "2026-02-24T20:00:00+00:00",
+      "open": "89.75",
+      "high": "91",
+      "low": "89",
+      "close": "90.25"
+    },
+    {
+      "open_time": "2026-02-25T00:00:00+00:00",
+      "open": "87.75",
+      "high": "89",
+      "low": "87",
+      "close": "88.25"
+    },
+    {
+      "open_time": "2026-02-25T04:00:00+00:00",
+      "open": "91.75",
+      "high": "93",
+      "low": "91",
+      "close": "92.25"
+    },
+    {
+      "open_time": "2026-02-25T08:00:00+00:00",
+      "open": "95.75",
+      "high": "97",
+      "low": "95",
+      "close": "96.25"
+    },
+    {
+      "open_time": "2026-02-25T12:00:00+00:00",
+      "open": "99.75",
+      "high": "101",
+      "low": "99",
+      "close": "100.25"
+    },
+    {
+      "open_time": "2026-02-25T16:00:00+00:00",
+      "open": "103.75",
+      "high": "105",
+      "low": "103",
+      "close": "104.25"
+    },
+    {
+      "open_time": "2026-02-25T20:00:00+00:00",
+      "open": "107.75",
+      "high": "109",
+      "low": "107",
+      "close": "108.25"
+    },
+    {
+      "open_time": "2026-02-26T00:00:00+00:00",
+      "open": "111.75",
+      "high": "113",
+      "low": "111",
+      "close": "112.25"
+    },
+    {
+      "open_time": "2026-02-26T04:00:00+00:00",
+      "open": "108.75",
+      "high": "110",
+      "low": "108",
+      "close": "109.25"
+    },
+    {
+      "open_time": "2026-02-26T08:00:00+00:00",
+      "open": "105.75",
+      "high": "107",
+      "low": "105",
+      "close": "106.25"
+    },
+    {
+      "open_time": "2026-02-26T12:00:00+00:00",
+      "open": "102.75",
+      "high": "104",
+      "low": "102",
+      "close": "103.25"
+    },
+    {
+      "open_time": "2026-02-26T16:00:00+00:00",
+      "open": "99.75",
+      "high": "101",
+      "low": "99",
+      "close": "100.25"
+    },
+    {
+      "open_time": "2026-02-26T20:00:00+00:00",
+      "open": "96.75",
+      "high": "98",
+      "low": "96",
+      "close": "97.25"
+    },
+    {
+      "open_time": "2026-02-27T00:00:00+00:00",
+      "open": "93.75",
+      "high": "95",
+      "low": "93",
+      "close": "94.25"
+    },
+    {
+      "open_time": "2026-02-27T04:00:00+00:00",
+      "open": "98.75",
+      "high": "100",
+      "low": "98",
+      "close": "99.25"
+    },
+    {
+      "open_time": "2026-02-27T08:00:00+00:00",
+      "open": "103.75",
+      "high": "105",
+      "low": "103",
+      "close": "104.25"
+    },
+    {
+      "open_time": "2026-02-27T12:00:00+00:00",
+      "open": "108.75",
+      "high": "110",
+      "low": "108",
+      "close": "109.25"
+    },
+    {
+      "open_time": "2026-02-27T16:00:00+00:00",
+      "open": "113.75",
+      "high": "115",
+      "low": "113",
+      "close": "114.25"
+    },
+    {
+      "open_time": "2026-02-27T20:00:00+00:00",
+      "open": "118.75",
+      "high": "120",
+      "low": "118",
+      "close": "119.25"
+    },
+    {
+      "open_time": "2026-02-28T00:00:00+00:00",
+      "open": "123.75",
+      "high": "125",
+      "low": "123",
+      "close": "124.25"
+    },
+    {
+      "open_time": "2026-02-28T04:00:00+00:00",
+      "open": "120.75",
+      "high": "122",
+      "low": "120",
+      "close": "121.25"
+    },
+    {
+      "open_time": "2026-02-28T08:00:00+00:00",
+      "open": "117.75",
+      "high": "119",
+      "low": "117",
+      "close": "118.25"
+    },
+    {
+      "open_time": "2026-02-28T12:00:00+00:00",
+      "open": "114.75",
+      "high": "116",
+      "low": "114",
+      "close": "115.25"
+    },
+    {
+      "open_time": "2026-02-28T16:00:00+00:00",
+      "open": "111.75",
+      "high": "113",
+      "low": "111",
+      "close": "112.25"
+    },
+    {
+      "open_time": "2026-02-28T20:00:00+00:00",
+      "open": "108.75",
+      "high": "110",
+      "low": "108",
+      "close": "109.25"
+    },
+    {
+      "open_time": "2026-03-01T00:00:00+00:00",
+      "open": "105.75",
+      "high": "107",
+      "low": "105",
+      "close": "106.25"
+    },
+    {
+      "open_time": "2026-03-01T04:00:00+00:00",
+      "open": "110.75",
+      "high": "112",
+      "low": "110",
+      "close": "111.25"
+    },
+    {
+      "open_time": "2026-03-01T08:00:00+00:00",
+      "open": "115.75",
+      "high": "117",
+      "low": "115",
+      "close": "116.25"
+    },
+    {
+      "open_time": "2026-03-01T12:00:00+00:00",
+      "open": "120.75",
+      "high": "122",
+      "low": "120",
+      "close": "121.25"
+    },
+    {
+      "open_time": "2026-03-01T16:00:00+00:00",
+      "open": "125.75",
+      "high": "127",
+      "low": "125",
+      "close": "126.25"
+    },
+    {
+      "open_time": "2026-03-01T20:00:00+00:00",
+      "open": "130.75",
+      "high": "132",
+      "low": "130",
+      "close": "131.25"
+    },
+    {
+      "open_time": "2026-03-02T00:00:00+00:00",
+      "open": "135.75",
+      "high": "137",
+      "low": "135",
+      "close": "136.25"
+    },
+    {
+      "open_time": "2026-03-02T04:00:00+00:00",
+      "open": "132.75",
+      "high": "134",
+      "low": "132",
+      "close": "133.25"
+    },
+    {
+      "open_time": "2026-03-02T08:00:00+00:00",
+      "open": "129.75",
+      "high": "131",
+      "low": "129",
+      "close": "130.25"
+    },
+    {
+      "open_time": "2026-03-02T12:00:00+00:00",
+      "open": "126.75",
+      "high": "128",
+      "low": "126",
+      "close": "127.25"
+    },
+    {
+      "open_time": "2026-03-02T16:00:00+00:00",
+      "open": "123.75",
+      "high": "125",
+      "low": "123",
+      "close": "124.25"
+    },
+    {
+      "open_time": "2026-03-02T20:00:00+00:00",
+      "open": "120.75",
+      "high": "122",
+      "low": "120",
+      "close": "121.25"
+    },
+    {
+      "open_time": "2026-03-03T00:00:00+00:00",
+      "open": "117.75",
+      "high": "119",
+      "low": "117",
+      "close": "118.25"
+    },
+    {
+      "open_time": "2026-03-03T04:00:00+00:00",
+      "open": "119.75",
+      "high": "121",
+      "low": "119",
+      "close": "120.25"
+    },
+    {
+      "open_time": "2026-03-03T08:00:00+00:00",
+      "open": "119.75",
+      "high": "121",
+      "low": "119",
+      "close": "120.25"
+    },
+    {
+      "open_time": "2026-03-03T12:00:00+00:00",
+      "open": "119.75",
+      "high": "121",
+      "low": "119",
+      "close": "120.25"
+    },
+    {
+      "open_time": "2026-03-03T16:00:00+00:00",
+      "open": "119.75",
+      "high": "121",
+      "low": "119",
+      "close": "120.25"
+    },
+    {
+      "open_time": "2026-03-03T20:00:00+00:00",
+      "open": "119.75",
+      "high": "121",
+      "low": "119",
+      "close": "120.25"
+    },
+    {
+      "open_time": "2026-03-04T00:00:00+00:00",
+      "open": "119.75",
+      "high": "121",
+      "low": "119",
+      "close": "120.25"
+    },
+    {
+      "open_time": "2026-03-04T04:00:00+00:00",
+      "open": "119.75",
+      "high": "121",
+      "low": "119",
+      "close": "120.25"
+    },
+    {
+      "open_time": "2026-03-04T08:00:00+00:00",
+      "open": "119.75",
+      "high": "121",
+      "low": "119",
+      "close": "120.25"
+    },
+    {
+      "open_time": "2026-03-04T12:00:00+00:00",
+      "open": "119.75",
+      "high": "121",
+      "low": "119",
+      "close": "120.25"
+    },
+    {
+      "open_time": "2026-03-04T16:00:00+00:00",
+      "open": "119.75",
+      "high": "121",
+      "low": "119",
+      "close": "120.25"
+    },
+    {
+      "open_time": "2026-03-04T20:00:00+00:00",
+      "open": "119.75",
+      "high": "121",
+      "low": "119",
+      "close": "120.25"
+    },
+    {
+      "open_time": "2026-03-05T00:00:00+00:00",
+      "open": "120",
+      "high": "120.5",
+      "low": "107.5",
+      "close": "108"
+    },
+    {
+      "open_time": "2026-03-05T04:00:00+00:00",
+      "open": "108",
+      "high": "108.5",
+      "low": "105.5",
+      "close": "106"
+    },
+    {
+      "open_time": "2026-03-05T08:00:00+00:00",
+      "open": "106.75",
+      "high": "108",
+      "low": "106",
+      "close": "107.25"
+    },
+    {
+      "open_time": "2026-03-05T12:00:00+00:00",
+      "open": "107.75",
+      "high": "109",
+      "low": "107",
+      "close": "108.25"
+    },
+    {
+      "open_time": "2026-03-05T16:00:00+00:00",
+      "open": "108.75",
+      "high": "110",
+      "low": "108",
+      "close": "109.25"
+    },
+    {
+      "open_time": "2026-03-05T20:00:00+00:00",
+      "open": "109.75",
+      "high": "111",
+      "low": "109",
+      "close": "110.25"
+    }
+  ],
+  "expected": {
+    "report": {
+      "choch_created": 1,
+      "mss_created": 0,
+      "failed_candidates": 1,
+      "events_inserted": 1,
+      "trend_state": "BULLISH"
+    },
+    "events": [
+      {
+        "event_type": "CHOCH_DOWN",
+        "event_at": "2026-03-05T00:00:00+00:00",
+        "payload": {
+          "direction": "DOWN",
+          "break_index": 294,
+          "candle_close": "108",
+          "swing_index": 282,
+          "swing_price": "117",
+          "swing_kind": "LOW",
+          "swing_strength": "EXTERNAL",
+          "previous_trend": "BULLISH",
+          "next_trend": "BULLISH_CAUTION"
+        }
+      }
+    ]
+  }
+}
