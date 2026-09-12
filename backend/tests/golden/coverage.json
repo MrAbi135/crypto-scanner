@@ -93,13 +93,13 @@
           "id": "3.2-internal-defines-warnings-and-refinement",
           "rule": "internal structure is the confirmed internal swings between two external ones, and it defines CHoCH warnings, internal liquidity and entry refinement",
           "status": "pending",
-          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+          "blocked_on": "the 3.6 cases produce CHoCHs, but every one of them fires on an EXTERNAL HL because 3.6 prefers external swings; needs a leg with no external HL in it, so the internal sequence is what warns"
         },
         {
           "id": "3.2-internal-may-never-override-external",
           "rule": "an internal event may only warn (CAUTION) or refine; it may never override external state",
           "status": "pending",
-          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+          "blocked_on": "needs an internal event that would flip external state if it were allowed to; the 3.6 cases only show CHoCH warning from external structure"
         }
       ]
     },
@@ -258,80 +258,69 @@
         {
           "id": "3.6-choch-close-beyond-the-initiating-swing",
           "rule": "CHoCH is the first close beyond the most recent confirmed swing that initiated the current leg, by more than epsilon",
-          "status": "pending",
-          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+          "status": "covered"
         },
         {
           "id": "3.6-choch-prefers-external-then-internal",
           "rule": "an internal HL qualifies only when no external HL exists in the current leg",
-          "status": "pending",
-          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+          "status": "covered"
         },
         {
           "id": "3.6-choch-sets-caution",
           "rule": "a CHoCH moves the trend state to CAUTION",
-          "status": "pending",
-          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+          "status": "covered"
         },
         {
           "id": "3.6-choch-consumes-its-swing",
           "rule": "a CHoCH marks its trigger swing consumed_by",
-          "status": "pending",
-          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+          "status": "covered"
         },
         {
           "id": "3.6-choch-references-the-most-recent-hl",
           "rule": "with nested legs the CHoCH always references the most recent confirmed HL at evaluation time",
           "status": "pending",
-          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+          "blocked_on": "needs two candidate HLs live at once -- a nested leg printing a second HL above the first before either is consumed. The 3.6 series print one HL per leg, so 'most recent' and 'only' coincide and the tie-break is never exercised"
         },
         {
           "id": "3.6-mss-needs-displacement",
           "rule": "the CHoCH break leg must displace on the break candle or either adjacent closed candle",
-          "status": "pending",
-          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+          "status": "covered"
         },
         {
           "id": "3.6-mss-needs-sweep-or-failure-swing",
           "rule": "the broken structure must follow an external liquidity sweep within 10 closes, or a failure swing",
-          "status": "pending",
-          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+          "status": "covered"
         },
         {
           "id": "3.6-mss-needs-follow-through",
           "rule": "a later candle must close beyond the CHoCH break candle's extreme within 5 closes",
-          "status": "pending",
-          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+          "status": "covered"
         },
         {
           "id": "3.6-mss-flips-the-trend",
           "rule": "MSS confirmation flips the trend state",
-          "status": "pending",
-          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+          "status": "covered"
         },
         {
           "id": "3.6-failed-follow-through-returns-the-state",
           "rule": "if follow-through fails the CHoCH stays a recorded warning, the trend returns from CAUTION, and the candidate is recorded failed",
-          "status": "pending",
-          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+          "status": "covered"
         },
         {
           "id": "3.6-evidence-chain-required",
           "rule": "an MSS without its full evidence chain -- sweep or failure-swing id, displacement measurements, follow-through candle -- is unpublishable",
-          "status": "pending",
-          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+          "status": "covered"
         },
         {
           "id": "3.6-low-quality-demotion",
           "rule": "a close back beyond the pre-MSS extreme within 10 candles demotes the new trend to RANGING and marks the MSS low_quality",
-          "status": "pending",
-          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+          "status": "covered"
         },
         {
           "id": "3.6-same-candle-event-order",
           "rule": "CHoCH evaluates against the pre-candle trend state, and transitions apply in the order swing then BOS then CHoCH within one close",
           "status": "pending",
-          "blocked_on": "no dataset produces a CHoCH or an MSS: deleting the CAUTION transition, and shrinking the follow-through window to zero, both leave every golden passing. The reversal half of 3.4's state machine has no case at all"
+          "blocked_on": "needs a candle on which a swing confirms, a BOS lands and a CHoCH fires together. s4-an-mss-reclaimed-inside-ten-candles-is-low-quality shows a different ordering -- invalidation evaluated before the CHoCH block, which is why the close that reclaims the pre-MSS extreme records no CHoCH -- but 3.6's edge case (1) is about swing then BOS then CHoCH, and BOS is not evaluated by this replay at all"
         },
         {
           "id": "3.6-no-mss-across-a-gap",

@@ -78,12 +78,15 @@ async def run_dataset(dataset: GoldenDataset) -> dict[str, Any]:
     if dataset.engine == "participation":
         return await _run_participation(dataset)
 
+    if dataset.engine == "structure_shift":
+        return await _run_structure_shift(dataset)
+
     if dataset.engine == "confluence":
         return await _run_confluence(dataset)
 
     raise ValueError(
-        f"{dataset.dataset_id}: unsupported engine {dataset.engine!r}. "
-        "Supported engines: structure, liquidity, ict, participation, confluence."
+        f"{dataset.dataset_id}: unsupported engine {dataset.engine!r}. Supported engines: "
+        "structure, structure_shift, liquidity, ict, participation, confluence."
     )
 
 
@@ -128,6 +131,78 @@ async def _run_structure(dataset: GoldenDataset) -> dict[str, Any]:
             key=lambda item: (item["event_at"], item["event_type"]),
         ),
     }
+
+
+async def _run_structure_shift(dataset: GoldenDataset) -> dict[str, Any]:
+    """SLS §3.6 — CHoCH and MSS, on their own.
+
+    `_run_structure` runs `StructureReplayService`, which detects swings and
+    breaks and never reaches §3.6; `_run_confluence` reaches it only underneath
+    six factors of scoring arithmetic. Between them §3.6 had no assertable
+    surface at all, which is why its fourteen rules sat at zero while deleting
+    the CAUTION transition broke nothing.
+
+    The evidence repository is real but its stores are empty, so
+    `list_liquidity` returns nothing. That is the honest wiring rather than a
+    shortcut: §3.6's origin condition is a disjunction — a sweep **or** a
+    failure swing — and a dataset that supplies no sweeps is asserting the
+    failure-swing branch. Reaching the sweep branch needs the liquidity engine
+    in front of this one, which is `_run_confluence`'s job.
+    """
+
+    events = InMemoryEngineEventRepository()
+
+    service = StructureShiftReplayService(
+        InMemoryCandleRepository(dataset.candles),
+        events,
+        InMemoryIctEvidenceRepository(events, InMemoryLiquidityTransitionRepository()),
+        FixedClock(HARNESS_CLOCK),
+        EngineStateManager(InMemoryEngineStateStore(), namespace=SHIFT_NAMESPACE),
+        algo_version=dataset.algo_version,
+    )
+
+    report = await service.run(
+        dataset.symbol,
+        dataset.timeframe,
+        dataset.start,
+        dataset.end,
+    )
+
+    _assert_unique_event_keys(events)
+
+    # §3.6 records a fact ABOUT a prior event by carrying that event's key, so
+    # an invalidation payload holds a sha256 of the MSS it demotes. The dataset
+    # format's own rule is that "nothing in the `expected` block requires the
+    # labeller to compute a hash or an id", and the liquidity runner already
+    # answers this by aliasing pool digests; this does the same for event keys.
+    aliases = {
+        event.event_key: f"event:{event.event_type}@{event.event_at.isoformat()}"
+        for event in events.events
+    }
+
+    return _apply_aliases(
+        {
+            "report": {
+                "choch_created": report.choch_created,
+                "mss_created": report.mss_created,
+                "failed_candidates": report.failed_candidates,
+                "events_inserted": report.events_inserted,
+                "trend_state": report.trend_state,
+            },
+            "events": sorted(
+                (
+                    {
+                        "event_type": event.event_type,
+                        "event_at": event.event_at,
+                        "payload": _parse_payload(event.payload),
+                    }
+                    for event in events.events
+                ),
+                key=lambda item: (item["event_at"], item["event_type"]),
+            ),
+        },
+        aliases,
+    )
 
 
 async def _run_confluence(dataset: GoldenDataset) -> dict[str, Any]:
