@@ -1,4 +1,20 @@
-"""Alembic environment (S0.2): async engine, DSN from SCANNER_DB_DSN."""
+"""Alembic environment (S0.2): async engine.
+
+DSN from `SCANNER_MIGRATION_DB_DSN` when set, else `SCANNER_DB_DSN`.
+
+Two variables because DDD's grant layer needs two roles. The application must
+connect as a role that cannot UPDATE, DELETE or TRUNCATE the sealed signal
+tables -- and cannot drop their triggers, which only an owner can -- while
+migrations need DDL and so must run as the owner. If both read one variable,
+either the application runs as the owner (the layer is absent, which the engine
+logs at every boot as `immutability_grant_layer_absent`) or migrations run as
+the restricted role and fail on their first `CREATE`.
+
+The migration DSN is meant to be supplied only to the migration run, never
+loaded into the long-running containers: a publishing process that can read
+the owner's credential is a publishing process that can drop the guard. See
+`docs/runbooks/deploy-p1b.md#least-privilege-role`.
+"""
 
 from __future__ import annotations
 
@@ -15,9 +31,11 @@ target_metadata = Base.metadata
 
 
 def _dsn() -> str:
-    dsn = os.environ.get("SCANNER_DB_DSN")
+    dsn = os.environ.get("SCANNER_MIGRATION_DB_DSN") or os.environ.get("SCANNER_DB_DSN")
     if not dsn:
-        raise RuntimeError("SCANNER_DB_DSN is required (use scripts/with-env.sh)")
+        raise RuntimeError(
+            "SCANNER_MIGRATION_DB_DSN or SCANNER_DB_DSN is required (use scripts/with-env.sh)"
+        )
     return dsn
 
 

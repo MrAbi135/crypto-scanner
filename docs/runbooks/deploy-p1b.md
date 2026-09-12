@@ -321,41 +321,63 @@ every boot logs `immutability_grant_layer_absent`, and that warning is honest:
 two of the three layers are doing work.
 
 Closing it needs a second role and a second secret, which is a deployment
-decision rather than a code change. The SQL, for whoever makes it:
+decision rather than a code change.
 
-```sql
--- As the owner (`scanner`), once per database.
-CREATE ROLE scanner_app LOGIN PASSWORD :'app_password';
+**The SQL is not in this document any more.** It lives in
+`ops/db/least-privilege-role.sql`, which is the same file
+`backend/tests/integration/test_grant_layer_pg.py` applies and then attacks as
+the restricted role -- UPDATE, DELETE and TRUNCATE refused *by the grant* rather
+than by the trigger, `DISABLE TRIGGER` refused outright, and every privilege the
+application legitimately uses still present. A copy pasted here would be a
+second definition of the layer, free to drift from the one CI tests.
 
-GRANT USAGE ON SCHEMA detection, market, ops TO scanner_app;
-GRANT SELECT, INSERT, UPDATE, DELETE
-  ON ALL TABLES IN SCHEMA detection, market, ops TO scanner_app;
+An earlier draft of this section granted `detection, market, ops` and nothing
+else. Migration 019 added `identity`, and a cut-over on that draft would have
+left the API unable to read a single user. The file covers all four schemas and
+the test fails if any application table is left without ordinary access.
 
--- The point of the exercise: the crown jewels are insert-and-read only.
-REVOKE UPDATE, DELETE, TRUNCATE ON
-  detection.signals,
-  detection.signal_transitions,
-  detection.signal_outcomes
-FROM scanner_app;
+### Order of operations
 
--- Tables added later inherit the broad grant, so re-run the REVOKE above
--- whenever a new immutable table appears. Default privileges cannot express
--- "everything except these three".
-ALTER DEFAULT PRIVILEGES IN SCHEMA detection, market, ops
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO scanner_app;
-```
+1. **Create the role and its secret**, as the owner, generating the password on
+   the host and never echoing it:
 
-Then point the **application** at `scanner_app` and leave **migrations** running
-as `scanner`: alembic needs DDL, and the whole arrangement collapses if the
-process that publishes signals is also the one that can drop the triggers.
+   ```bash
+   APP_PW=$(openssl rand -hex 24)
+   $PSQL -v pw="$APP_PW" -c "CREATE ROLE scanner_app LOGIN PASSWORD :'pw'"
+   ```
 
-Order matters on the switch — migrate first, then restart the app on the new
-credential. Reversing it starts an engine that cannot create the tables it is
-about to write to.
+2. **Apply the grants**, as the owner, after migrations:
 
-After the switch, `immutability_grant_layer_absent` should stop appearing in
-the engine logs. If it still does, the app is still connecting as the owner and
-nothing has changed but the password.
+   ```bash
+   $PSQL -f ops/db/least-privilege-role.sql
+   ```
+
+3. **Split the credentials.** `SCANNER_DB_DSN` in the environment the
+   long-running containers load becomes the `scanner_app` DSN. The owner DSN
+   moves to `SCANNER_MIGRATION_DB_DSN`, which alembic's `env.py` prefers when
+   set -- and it must be supplied **only to the migration run**, never loaded
+   into `api`, `engine`, `worker` or `ingest`. A publishing process that can
+   read the owner's credential is a publishing process that can drop the guard,
+   and the whole arrangement collapses.
+
+4. **Migrate first, then restart** the application on the new credential.
+   Reversing it starts an engine that cannot create the tables it is about to
+   write to. The restart resets any soak clock in progress; schedule it.
+
+5. **Confirm.** `immutability_grant_layer_absent` should stop appearing in the
+   engine logs on the next boot. If it still does, the application is still
+   connecting as the owner and nothing has changed but the password. Then prove
+   it on the live database rather than trusting the log:
+
+   ```bash
+   # As scanner_app: must say "permission denied", not append_only_violation.
+   psql "$SCANNER_DB_DSN_AS_LIBPQ" -c "UPDATE detection.signals SET signal_id = signal_id"
+   # As scanner_app: must say "must be owner".
+   psql "$SCANNER_DB_DSN_AS_LIBPQ" -c "ALTER TABLE detection.signals DISABLE TRIGGER trg_signals_append_only"
+   ```
+
+Re-run step 2 whenever a migration adds a sealed table: default privileges grant
+the broad set to new tables, and cannot express "everything except these".
 
 
 ## Step 10 — label the build before the soak
