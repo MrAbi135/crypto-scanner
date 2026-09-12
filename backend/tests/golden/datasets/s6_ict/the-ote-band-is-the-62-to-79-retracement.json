@@ -1,0 +1,164 @@
+{
+  "dataset_id": "s6-the-ote-band-is-the-62-to-79-retracement",
+  "engine": "ict",
+  "sls_sections": [
+    "5.8"
+  ],
+  "sls_rules": [
+    "5.8-band-62-to-79"
+  ],
+  "description": "The same two-swing shape with a leg long enough to qualify. The zone that registers is the 0.62-to-0.79 retracement of it, and nothing else.",
+  "labelling_rationale": "The companion to `s6-a-leg-under-two-atr-registers-no-ote`, with the leg lengthened past §5.8's floor so the band itself can be read. **The leg.** Two external pivots print: a low at 92 and, six candles later, a high at 108. §3.1 confirms each five closes after its pivot, and the high confirms on the final candle -- the first at which both anchors exist, so `dealing_ranges` and `impulse_legs` each read 1 for the same reason they do in the companion case. The leg runs from the low of 92 to the high of 108: bullish, length 16.0. Against an ATR of exactly 4.0 the floor is 8.0, and 16.0 clears it. **The band.** §5.8 puts the pocket at the \"retracement 0.62 -> 0.79 of the leg (bullish: measured down from the leg high)\". Measured down from 108: the shallow edge is 108 - 16.0 x 0.62 = 108 - 9.92 = **98.08**, and the deep edge is 108 - 16.0 x 0.79 = 108 - 12.64 = **95.36**. The zone is registered with exactly that band, polarity bullish, state FRESH, and its created_index is the leg's extreme rather than its origin -- the leg is not a leg until the swing that ends it confirms. Both edges are arithmetic on two numbers a reader can point at on the chart, which is the point of writing the case at these levels. **Why the pullback stops where it does.** After the high the series steps down only to 101, so the lowest low printed afterwards is 99 -- above the band's 98.08. That is deliberate: price entering its own OTE would start §5.9's interaction grammar, and this case is about where the band is, not about what happens inside it. The interaction counters are therefore all zero and the single zone is untouched. **The shape, and why every number in it is exact.** Every candle is the same figure moved up or down: a 0.5 body inside a 4.0 range, so its high and low both track its level strictly and §3.1's swing tests are decided by the level alone. The true range is 4.0 on every candle including the filler -- the level never moves far enough between closes for a gap term to exceed the bar's own span -- so Wilder's `(ATR_prev x 13 + TR) / 14` returns **4.0 unchanged** at every index, and every ATR multiple in §5.7 and §5.8 is a fixed number rather than a drifting one. The levels also step by at most 2 against a wick of 2, which keeps `low[i] - high[i-2]` at or below zero everywhere: no fair value gap is ever opened, so the zone list holds only what §5.8 puts in it. Bodies stay at 0.5 against a mean 20-candle body of 0.5, so nothing displaces either, and §5.1 has no order block to build.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-12 from SLS §5.7/§5.8; pending developer verification",
+  "labelled_at": "2026-09-12",
+  "algo_version": "s6-ote-v4",
+  "symbol": "GOLDENOTE",
+  "timeframe": "H4",
+  "filler": {
+    "count": 286,
+    "open": "99.75",
+    "high": "102",
+    "low": "98",
+    "close": "100.25"
+  },
+  "candles": [
+    {
+      "open_time": "2026-05-18T16:00:00+00:00",
+      "open": "97.75",
+      "high": "100",
+      "low": "96",
+      "close": "98.25"
+    },
+    {
+      "open_time": "2026-05-18T20:00:00+00:00",
+      "open": "95.75",
+      "high": "98",
+      "low": "94",
+      "close": "96.25"
+    },
+    {
+      "open_time": "2026-05-19T00:00:00+00:00",
+      "open": "93.75",
+      "high": "96",
+      "low": "92",
+      "close": "94.25"
+    },
+    {
+      "open_time": "2026-05-19T04:00:00+00:00",
+      "open": "95.75",
+      "high": "98",
+      "low": "94",
+      "close": "96.25"
+    },
+    {
+      "open_time": "2026-05-19T08:00:00+00:00",
+      "open": "97.75",
+      "high": "100",
+      "low": "96",
+      "close": "98.25"
+    },
+    {
+      "open_time": "2026-05-19T12:00:00+00:00",
+      "open": "99.75",
+      "high": "102",
+      "low": "98",
+      "close": "100.25"
+    },
+    {
+      "open_time": "2026-05-19T16:00:00+00:00",
+      "open": "101.75",
+      "high": "104",
+      "low": "100",
+      "close": "102.25"
+    },
+    {
+      "open_time": "2026-05-19T20:00:00+00:00",
+      "open": "103.75",
+      "high": "106",
+      "low": "102",
+      "close": "104.25"
+    },
+    {
+      "open_time": "2026-05-20T00:00:00+00:00",
+      "open": "105.75",
+      "high": "108",
+      "low": "104",
+      "close": "106.25"
+    },
+    {
+      "open_time": "2026-05-20T04:00:00+00:00",
+      "open": "104.75",
+      "high": "107",
+      "low": "103",
+      "close": "105.25"
+    },
+    {
+      "open_time": "2026-05-20T08:00:00+00:00",
+      "open": "103.75",
+      "high": "106",
+      "low": "102",
+      "close": "104.25"
+    },
+    {
+      "open_time": "2026-05-20T12:00:00+00:00",
+      "open": "102.75",
+      "high": "105",
+      "low": "101",
+      "close": "103.25"
+    },
+    {
+      "open_time": "2026-05-20T16:00:00+00:00",
+      "open": "101.75",
+      "high": "104",
+      "low": "100",
+      "close": "102.25"
+    },
+    {
+      "open_time": "2026-05-20T20:00:00+00:00",
+      "open": "100.75",
+      "high": "103",
+      "low": "99",
+      "close": "101.25"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "displacements": 0,
+      "fvgs_detected": 0,
+      "ifvgs_created": 0,
+      "bprs_created": 0,
+      "live_zones": 0,
+      "dealing_ranges": 1,
+      "impulse_legs": 1,
+      "otes_detected": 1,
+      "order_blocks_detected": 0,
+      "breakers_created": 0,
+      "mitigations_created": 0,
+      "zones_evaluated": 1,
+      "touches": 0,
+      "rejections": 0,
+      "mitigations": 0,
+      "respects": 0,
+      "violations": 0,
+      "confirmations": 0
+    },
+    "zones": [
+      {
+        "zone": "zone:OTE:BULLISH:294",
+        "zone_type": "OTE",
+        "polarity": "BULLISH",
+        "state": "FRESH",
+        "grade": "OTE",
+        "band_low": "95.36",
+        "band_high": "98.08",
+        "created_index": 294,
+        "created_at": "2026-05-20T04:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": null
+      }
+    ],
+    "transitions": [],
+    "interactions": []
+  }
+}
