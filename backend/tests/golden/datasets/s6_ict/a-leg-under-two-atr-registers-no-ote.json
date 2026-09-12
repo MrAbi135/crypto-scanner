@@ -1,0 +1,152 @@
+{
+  "dataset_id": "s6-a-leg-under-two-atr-registers-no-ote",
+  "engine": "ict",
+  "sls_sections": [
+    "5.7",
+    "5.8"
+  ],
+  "sls_rules": [
+    "5.7-dealing-range-anchors",
+    "5.8-leg-length-floor"
+  ],
+  "description": "Two external swings confirm and bracket price, so a dealing range exists and an impulse leg is read from them. The leg spans 6.5 against an ATR of 4, and §5.8 refuses to register a retracement pocket on it.",
+  "labelling_rationale": "**The dealing range.** §5.7 anchors it on \"the most recent confirmed external swing low <-> external swing high that bracket current price\". Two external pivots print here and no more: a low at 94 and, six candles later, a high at 100.5. §3.1 confirms an external swing five closes after its pivot, so the low is available from the sixth candle of the series and the high only on the very last one -- and the last candle is also the first at which both anchors exist. Its close of 96.25 sits between 94 and 100.5, so the pair brackets price and a range is recorded. That is why `dealing_ranges` reads exactly 1: the count is per candle, and only one candle in this series has a range at all. Before the high confirms there is a low and nothing to pair it with. **The impulse leg.** The same two swings give the leg: origin at the low of 94, extreme at the high of 100.5, direction bullish because the earlier swing is the low. `impulse_legs` is 1 for the same reason the range count is. **Why there is no OTE.** §5.8 validates the leg before it registers a zone: \"leg length >= `P.ict.ote_min_leg = 2 x ATR` (retracements of noise legs are noise)\". The leg is 100.5 - 94 = 6.5. ATR is exactly 4.0, so the floor is 8.0, and 6.5 falls short of it by more than a point. No zone is registered, the zone list is empty, and the interaction pass has nothing to evaluate. The refusal is the whole assertion -- a leg that exists and is measured, and is still too small to anchor a retracement pocket. **The shape, and why every number in it is exact.** Every candle is the same figure moved up or down: a 0.5 body inside a 4.0 range, so its high and low both track its level strictly and §3.1's swing tests are decided by the level alone. The true range is 4.0 on every candle including the filler -- the level never moves far enough between closes for a gap term to exceed the bar's own span -- so Wilder's `(ATR_prev x 13 + TR) / 14` returns **4.0 unchanged** at every index, and every ATR multiple in §5.7 and §5.8 is a fixed number rather than a drifting one. The levels also step by at most 2 against a wick of 2, which keeps `low[i] - high[i-2]` at or below zero everywhere: no fair value gap is ever opened, so the zone list holds only what §5.8 puts in it. Bodies stay at 0.5 against a mean 20-candle body of 0.5, so nothing displaces either, and §5.1 has no order block to build.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-12 from SLS §5.7/§5.8; pending developer verification",
+  "labelled_at": "2026-09-12",
+  "algo_version": "s6-ote-v4",
+  "symbol": "GOLDENOTE",
+  "timeframe": "H4",
+  "filler": {
+    "count": 286,
+    "open": "99.75",
+    "high": "102",
+    "low": "98",
+    "close": "100.25"
+  },
+  "candles": [
+    {
+      "open_time": "2026-05-18T16:00:00+00:00",
+      "open": "98.75",
+      "high": "101",
+      "low": "97",
+      "close": "99.25"
+    },
+    {
+      "open_time": "2026-05-18T20:00:00+00:00",
+      "open": "97.75",
+      "high": "100",
+      "low": "96",
+      "close": "98.25"
+    },
+    {
+      "open_time": "2026-05-19T00:00:00+00:00",
+      "open": "96.75",
+      "high": "99",
+      "low": "95",
+      "close": "97.25"
+    },
+    {
+      "open_time": "2026-05-19T04:00:00+00:00",
+      "open": "95.75",
+      "high": "98",
+      "low": "94",
+      "close": "96.25"
+    },
+    {
+      "open_time": "2026-05-19T08:00:00+00:00",
+      "open": "96.25",
+      "high": "98.5",
+      "low": "94.5",
+      "close": "96.75"
+    },
+    {
+      "open_time": "2026-05-19T12:00:00+00:00",
+      "open": "96.75",
+      "high": "99",
+      "low": "95",
+      "close": "97.25"
+    },
+    {
+      "open_time": "2026-05-19T16:00:00+00:00",
+      "open": "97.25",
+      "high": "99.5",
+      "low": "95.5",
+      "close": "97.75"
+    },
+    {
+      "open_time": "2026-05-19T20:00:00+00:00",
+      "open": "97.75",
+      "high": "100",
+      "low": "96",
+      "close": "98.25"
+    },
+    {
+      "open_time": "2026-05-20T00:00:00+00:00",
+      "open": "98.25",
+      "high": "100.5",
+      "low": "96.5",
+      "close": "98.75"
+    },
+    {
+      "open_time": "2026-05-20T04:00:00+00:00",
+      "open": "97.75",
+      "high": "100",
+      "low": "96",
+      "close": "98.25"
+    },
+    {
+      "open_time": "2026-05-20T08:00:00+00:00",
+      "open": "97.25",
+      "high": "99.5",
+      "low": "95.5",
+      "close": "97.75"
+    },
+    {
+      "open_time": "2026-05-20T12:00:00+00:00",
+      "open": "96.75",
+      "high": "99",
+      "low": "95",
+      "close": "97.25"
+    },
+    {
+      "open_time": "2026-05-20T16:00:00+00:00",
+      "open": "96.25",
+      "high": "98.5",
+      "low": "94.5",
+      "close": "96.75"
+    },
+    {
+      "open_time": "2026-05-20T20:00:00+00:00",
+      "open": "95.75",
+      "high": "98",
+      "low": "94",
+      "close": "96.25"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "displacements": 0,
+      "fvgs_detected": 0,
+      "ifvgs_created": 0,
+      "bprs_created": 0,
+      "live_zones": 0,
+      "dealing_ranges": 1,
+      "impulse_legs": 1,
+      "otes_detected": 0,
+      "order_blocks_detected": 0,
+      "breakers_created": 0,
+      "mitigations_created": 0,
+      "zones_evaluated": 0,
+      "touches": 0,
+      "rejections": 0,
+      "mitigations": 0,
+      "respects": 0,
+      "violations": 0,
+      "confirmations": 0
+    },
+    "zones": [],
+    "transitions": [],
+    "interactions": []
+  }
+}

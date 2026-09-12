@@ -1001,50 +1001,49 @@
         {
           "id": "5.7-dealing-range-anchors",
           "rule": "the range is the most recent confirmed external swing low and high that bracket current price",
-          "status": "pending",
-          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
+          "status": "covered"
         },
         {
           "id": "5.7-re-anchoring",
           "rule": "the range re-anchors whenever a new external swing confirms or an extreme is consumed by BOS or sweep-with-MSS",
           "status": "pending",
-          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
+          "blocked_on": "needs a third external swing confirming after a range is already anchored, and the series here end on the candle that anchors the first one"
         },
         {
           "id": "5.7-equilibrium-and-bands",
           "rule": "EQ is 50% of the range; premium is above EQ + epsilon, discount below EQ - epsilon, at-EQ otherwise",
           "status": "pending",
-          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
+          "blocked_on": "evaluate_pd_context is where 5.7's bands, range_position and gates live, and no runner output exposes it: _run_ict reports a dealing-range COUNT and nothing else, and the two confluence cases report pd_context unreachable. Needs either a confluence dataset that resolves a PD context or the ICT runner carrying the context it computes"
         },
         {
           "id": "5.7-range-position",
           "rule": "range_position = (Cl - range_low) / (range_high - range_low), stored to 4 decimals",
           "status": "pending",
-          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
+          "blocked_on": "evaluate_pd_context is where 5.7's bands, range_position and gates live, and no runner output exposes it: _run_ict reports a dealing-range COUNT and nothing else, and the two confluence cases report pd_context unreachable. Needs either a confluence dataset that resolves a PD context or the ICT runner carrying the context it computes"
         },
         {
           "id": "5.7-directional-gate",
           "rule": "long setups require range_position <= 0.5 and short setups >= 0.5",
           "status": "pending",
-          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
+          "blocked_on": "evaluate_pd_context is where 5.7's bands, range_position and gates live, and no runner output exposes it: _run_ict reports a dealing-range COUNT and nothing else, and the two confluence cases report pd_context unreachable. Needs either a confluence dataset that resolves a PD context or the ICT runner carrying the context it computes"
         },
         {
           "id": "5.7-extreme-third-for-reversals",
           "rule": "Sweep-Reversal archetypes additionally require <= 0.33 or >= 0.67",
           "status": "pending",
-          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
+          "blocked_on": "evaluate_pd_context is where 5.7's bands, range_position and gates live, and no runner output exposes it: _run_ict reports a dealing-range COUNT and nothing else, and the two confluence cases report pd_context unreachable. Needs either a confluence dataset that resolves a PD context or the ICT runner carrying the context it computes"
         },
         {
           "id": "5.7-range-height-floor",
           "rule": "a range under 1.5 x ATR suspends PD context as PD_SUSPENDED and withdraws the PD-gated archetypes",
           "status": "pending",
-          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
+          "blocked_on": "evaluate_pd_context is where 5.7's bands, range_position and gates live, and no runner output exposes it: _run_ict reports a dealing-range COUNT and nothing else, and the two confluence cases report pd_context unreachable. Needs either a confluence dataset that resolves a PD context or the ICT runner carrying the context it computes. The floor is the PD_SUSPENDED branch of that same function"
         },
         {
           "id": "5.7-history-never-recomputed",
           "rule": "re-anchoring applies prospectively; historical range_position values are facts and are never recomputed",
           "status": "pending",
-          "blocked_on": "dealing_ranges is 0 in every ICT dataset and the two confluence cases report pd_context unreachable; PD context needs two confirmed external swings bracketing price"
+          "blocked_on": "needs two ranges in one series and a reader that can show the earlier range_position unchanged; nothing in the compared output carries a historical position"
         }
       ]
     },
@@ -1057,49 +1056,47 @@
           "id": "5.8-leg-from-bos-to-post-break-extreme",
           "rule": "the impulse leg runs from the origin swing to the post-break extreme after a confirmed BOS/MSS with displacement",
           "status": "pending",
-          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
+          "blocked_on": "5.8 opens the leg 'after a confirmed BOS/MSS with displacement'. _impulse_leg_at applies neither test: it takes the last two eligible external swings of alternating kind and calls the pair a leg. A dataset written to 5.8's wording would assert a precondition the engine does not implement, so this needs a ruling before it can be labelled"
         },
         {
           "id": "5.8-leg-finalises-on-confirmation",
           "rule": "the leg finalises when a confirmed internal swing forms at the extreme",
           "status": "pending",
-          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
+          "blocked_on": "the leg is read from confirmed swings, so it cannot be observed unfinalised; asserting the rule needs a case where an unconfirmed extreme is visibly NOT used, and the confirmation cut is the same one 3.1's rules already cover"
         },
         {
           "id": "5.8-band-62-to-79",
           "rule": "the OTE band is the 0.62 to 0.79 retracement of the leg",
-          "status": "pending",
-          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
+          "status": "covered"
         },
         {
           "id": "5.8-leg-length-floor",
           "rule": "the leg must be at least 2 x ATR",
-          "status": "pending",
-          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
+          "status": "covered"
         },
         {
           "id": "5.8-validity-conditions",
           "rule": "the zone is valid only while the trend is unchanged, the leg-end swing is unconsumed and the PD gate passes at touch",
           "status": "pending",
-          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
+          "blocked_on": "trend state and PD gate are not inputs to this replay; the OTE pass reads swings and ATR only. Needs the pipeline, which is _run_confluence's shape"
         },
         {
           "id": "5.8-invalidation",
           "rule": "a close beyond 100% retracement or a trend flip kills the zone; age past 100 candles expires it",
           "status": "pending",
-          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
+          "blocked_on": "needs price closing beyond 100% of the leg, a trend flip, or 100 candles of age; each case here ends on the candle that registers the zone"
         },
         {
           "id": "5.8-overlap-is-zone-stack",
           "rule": "overlap with an OB or FVG inside the band is recorded as zone-stack evidence",
           "status": "pending",
-          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
+          "blocked_on": "needs an OB or FVG inside the OTE band; this series is built to open no gaps at all so the band can be read alone"
         },
         {
           "id": "5.8-one-live-ote-per-direction",
           "rule": "one live OTE per direction per timeframe; a newer leg replaces it prospectively",
           "status": "pending",
-          "blocked_on": "otes_detected is 0 in every dataset; an OTE needs a confirmed BOS with displacement and an impulse leg finalised by a confirmed internal swing at its extreme"
+          "blocked_on": "needs a second, newer leg in the same direction while the first zone is still live"
         }
       ]
     },

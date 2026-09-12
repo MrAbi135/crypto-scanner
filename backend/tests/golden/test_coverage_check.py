@@ -141,6 +141,8 @@ UNVERIFIED_LABELS = frozenset(
         "an-origin-run-stops-at-three-candles.json",
         "a-v-continuation-has-no-order-block.json",
         "a-displacement-with-no-consequence-has-no-order-block.json",
+        "a-leg-under-two-atr-registers-no-ote.json",
+        "the-ote-band-is-the-62-to-79-retracement.json",
     }
 )
 
