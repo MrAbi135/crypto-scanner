@@ -1,0 +1,94 @@
+{
+  "dataset_id": "s6-a-displacement-with-no-consequence-has-no-order-block",
+  "engine": "ict",
+  "sls_sections": [
+    "5.1"
+  ],
+  "sls_rules": [
+    "5.1-qualifying-needs-structural-consequence"
+  ],
+  "description": "The bearish run and the displacement are both there, but the move leaves no gap behind and breaks no structure. Energy without a consequence forms nothing.",
+  "labelling_rationale": "§5.1's condition 2 is a conjunction: within 5 closed candles of the candidate, **both** a displacement candle occurs **and** \"the move produces a structural consequence: closes above a confirmed swing high (internal or external) **or** creates a confirmed bullish FVG\". The other three §5.1 cases satisfy the second half through the FVG branch. This one removes it and changes nothing else. The origin run is the same pair of bearish candles, 100 down to 98 and 98 down to 96, and the displacement is the same candle -- body 16 against a mean 20-candle body near 0.5, range 16.5, closing half a point under its high. What differs is the candle after it. Instead of holding the gap open at 116 it retraces to a low of 97, which is beneath the last candidate candle's high of 98.5, so the three-candle window has no gap in it and §5.4 confirms nothing. Nor is there a structure break available: a zone-only dataset produces no swing evidence, so \"closes above a confirmed swing high\" cannot be satisfied by any candle in this series. Both branches of the consequence test are therefore unavailable and the expected output is empty -- no order block, no FVG, no zone at all, and no zones for the interaction pass to evaluate. The displacement itself is still detected and reported, which is the point: §5.1 does not treat a large candle as evidence of accumulation. It treats a large candle **that achieved something** as evidence, and asks what was achieved. The engine sees no structure evidence here -- a zone-only dataset produces no swings and no sweeps -- so §5.1's condition 2(b) can only be met by its second branch, \"creates a confirmed bullish FVG (§5.4)\", and the grade rule can only return OB_B. That bounds what this case asserts and is why the manifest still records the OB_A half as pending. **The shared shape.** Filler is a flat candle repeated -- a 0.5 body inside a 2.0 range at 100 -- which pins the mean 20-candle body near 0.5, so §5.10's `body >= 2.0 x mean_body_20` is a number a labeller can evaluate. The displacement is the same candle in every case: it opens at 101, closes at 117 and prints a high of 117.5, so its body of 16 is over twenty times the mean body, its range of 16.5 is several times ATR, and it closes half a point under its high -- inside the extreme 25% §5.10 requires. It opens **above** the candidate run rather than inside it, which is deliberate: an OB whose own confirming candle trades back through its band would exercise §5.1's state machine, and this case is about formation.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-12 from SLS §5.1; pending developer verification",
+  "labelled_at": "2026-09-12",
+  "algo_version": "s6-ob-v6",
+  "symbol": "GOLDENOB",
+  "timeframe": "H4",
+  "filler": {
+    "count": 294,
+    "open": "99.75",
+    "high": "101",
+    "low": "99",
+    "close": "100.25"
+  },
+  "candles": [
+    {
+      "open_time": "2026-04-10T00:00:00+00:00",
+      "open": "100",
+      "high": "100.5",
+      "low": "97.5",
+      "close": "98"
+    },
+    {
+      "open_time": "2026-04-10T04:00:00+00:00",
+      "open": "98",
+      "high": "98.5",
+      "low": "95.5",
+      "close": "96"
+    },
+    {
+      "open_time": "2026-04-10T08:00:00+00:00",
+      "open": "101",
+      "high": "117.5",
+      "low": "101",
+      "close": "117"
+    },
+    {
+      "open_time": "2026-04-10T12:00:00+00:00",
+      "open": "117",
+      "high": "117.5",
+      "low": "97",
+      "close": "116"
+    },
+    {
+      "open_time": "2026-04-10T16:00:00+00:00",
+      "open": "115.75",
+      "high": "117",
+      "low": "115",
+      "close": "116.25"
+    },
+    {
+      "open_time": "2026-04-10T20:00:00+00:00",
+      "open": "116.25",
+      "high": "117.5",
+      "low": "115.5",
+      "close": "116.75"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "displacements": 1,
+      "fvgs_detected": 0,
+      "ifvgs_created": 0,
+      "bprs_created": 0,
+      "live_zones": 0,
+      "dealing_ranges": 0,
+      "impulse_legs": 0,
+      "otes_detected": 0,
+      "order_blocks_detected": 0,
+      "breakers_created": 0,
+      "mitigations_created": 0,
+      "zones_evaluated": 0,
+      "touches": 0,
+      "rejections": 0,
+      "mitigations": 0,
+      "respects": 0,
+      "violations": 0,
+      "confirmations": 0
+    },
+    "zones": [],
+    "transitions": [],
+    "interactions": []
+  }
+}

@@ -700,104 +700,98 @@
         {
           "id": "5.1-candidate-is-the-last-opposing-candle",
           "rule": "the candidate is the last opposing-bodied candle immediately preceding the move",
-          "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "status": "covered"
         },
         {
           "id": "5.1-candidate-run-max-3",
           "rule": "a contiguous run of up to 3 opposing candles may form the candidate, zoned by their combined extremes",
-          "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "status": "covered"
         },
         {
           "id": "5.1-qualifying-window-5",
           "rule": "the qualifying move must occur within 5 closed candles after the candidate",
           "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "blocked_on": "in every case the candidate run ends on the candle immediately before the displacement, so the distance is 1 and any window of 1 or more passes; needs a run separated from its displacement by 5 and by 6"
         },
         {
           "id": "5.1-qualifying-needs-displacement",
           "rule": "the qualifying move must contain a displacement candle (5.10)",
           "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "blocked_on": "the OB pass iterates detected displacements, so 'no displacement' and 'no candidate to iterate' are the same state; a case would have to loosen 5.10 rather than the series"
         },
         {
           "id": "5.1-qualifying-needs-structural-consequence",
           "rule": "the move must also close beyond a confirmed swing or create a confirmed FVG",
-          "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "status": "covered"
         },
         {
           "id": "5.1-zone-is-full-range",
           "rule": "zone edges are the candidate's high and low, not its body",
-          "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "status": "covered"
         },
         {
           "id": "5.1-refined-body-subzone",
           "rule": "the body-only edges are recorded separately as refined_zone",
           "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "blocked_on": "the OB records its body-only edges, but the golden runner's zone rows carry band_low and band_high only; the refined band is not in the compared output"
         },
         {
           "id": "5.1-grade-ob-a",
           "rule": "OB_A when the qualifying move broke external structure or sits at an MSS origin",
           "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "blocked_on": "a zone-only dataset produces no swing or sweep evidence, so the OB pass sees none; needs a case run through the whole pipeline, which is _run_confluence's shape rather than _run_ict's"
         },
         {
           "id": "5.1-grade-ob-b",
           "rule": "OB_B when the qualification was an internal break or an FVG alone",
-          "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "status": "covered"
         },
         {
           "id": "5.1-height-floor",
           "rule": "zone height must be at least 0.15 x ATR",
           "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "blocked_on": "needs an origin run whose combined extremes span under 0.15 x ATR"
         },
         {
           "id": "5.1-height-ceiling",
           "rule": "zone height must be at most 3 x ATR",
           "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "blocked_on": "needs an origin run whose combined extremes span over 3 x ATR"
         },
         {
           "id": "5.1-state-machine",
           "rule": "FRESH -> TESTED -> MITIGATED -> INVALIDATED -> EXPIRED, every transition close-confirmed and logged",
           "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "blocked_on": "the lifecycle walk starts one candle early, so the state a golden would pin is not the state doctrine specifies. window_time.rebased_indices assumes 'every zone type stamps created_at with its creation candle's CLOSE' and subtracts one duration; order_blocks.py:130 stamps the candle's OPEN (fvg.py stamps the close, so the assumption holds there). Both OB indices therefore rebase one lower, start_index = confirmed + 1 lands on the displacement candle itself, and an OB whose displacement re-enters its own band is born MITIGATED rather than FRESH -- measured, not inferred. Needs a fix and an algo_version bump before any state can be labelled"
         },
         {
           "id": "5.1-invalidated-becomes-breaker-candidate",
           "rule": "an INVALIDATED order block becomes a breaker candidate",
           "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "blocked_on": "a zone-only dataset produces no swing or sweep evidence, so the OB pass sees none; needs a case run through the whole pipeline, which is _run_confluence's shape rather than _run_ict's"
         },
         {
           "id": "5.1-doji-candidate-permitted",
           "rule": "a doji candidate is permitted if the height floor passes, but the run rule counts bodied candles",
           "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "blocked_on": "needs a doji inside the origin run; the run rule counts bodied candles and a doji joins silently, so the case must also show the run not ending on it"
         },
         {
           "id": "5.1-v-continuation-has-no-ob",
           "rule": "displacement with no prior opposing candle produces no order block: the doctrine requires an origin footprint",
-          "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "status": "covered"
         },
         {
           "id": "5.1-overlapping-obs-are-independent",
           "rule": "nested displacements produce independent order blocks; the confluence engine deduplicates by price band",
           "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "blocked_on": "needs two displacements whose origin runs overlap in price; each detected OB is upserted under its own id, and the deduplication 5.1 describes happens in the confluence engine"
         },
         {
           "id": "5.1-max-zones-60",
           "rule": "the zone set is bounded at 60 per symbol-TF, evicting the oldest EXPIRED first",
           "status": "pending",
-          "blocked_on": "no dataset produces an order block -- order_blocks_detected is 0 in all five ICT cases. One needs a displacement candle plus a structural consequence inside five closes, on a series carrying confirmed swings; the zone datasets are built around three-candle gaps instead"
+          "blocked_on": "needs more than 60 zones on one symbol-timeframe"
         }
       ]
     },
