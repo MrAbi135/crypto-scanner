@@ -76,6 +76,24 @@ def test_every_pending_rule_explains_itself() -> None:
                 assert rule.blocked_on, f"{rule.id} is pending with no reason given"
 
 
+def test_every_subsection_is_enumerated() -> None:
+    """Roadmap §8.1 as amended in v2.1.0: enumeration is part of "map complete",
+    and *"a subsection still carrying a stub fails the build"*.
+
+    A stub hides a section's real size rather than reporting it. §5.1 read
+    `0/1` while carrying seventeen rules, and §8.3, §8.5 and §8.6 each read
+    "not enumerated" while already holding a covered rule. A new SLS
+    subsection arriving as a stub must fail here rather than quietly shrinking
+    the denominator that G2 is measured against.
+    """
+    stubs = sorted(section.id for section in load_manifest() if not section.enumerated)
+
+    assert not stubs, (
+        f"these subsections still carry a stub entry: {stubs}. Write their rules out in "
+        "coverage.json; Roadmap §8.1 counts enumeration as part of 'map complete'."
+    )
+
+
 def test_the_manifest_covers_every_detection_subsection() -> None:
     """§3 through §8 have 45 subsections between them, and a coverage map that
     silently omits one reports a gap smaller than the real one."""

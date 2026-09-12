@@ -38,10 +38,16 @@ rule is and, for each uncovered one, what stands in the way. The other half --
 a dataset behind every rule -- is two thirds unbuilt, and the manifest is where
 that shows.
 
-`enumerated` is kept even though every section now sets it. It marks a real
-distinction rather than a phase: an SLS amendment adds subsections, and a new
-one arriving as a stub must report as "not enumerated" rather than as "0 of 1
-rules covered", which would understate the gap it opens.
+Roadmap §8.1, amended to v2.1.0 on the strength of that enumeration, now
+states the bar as **covered or explained**: every rule is either asserted by a
+golden case or carries a `blocked_on` naming what stands in the way, and every
+subsection is written out. Both halves fail the build -- an unexplained pending
+rule here, a remaining stub in `test_every_subsection_is_enumerated`.
+
+`enumerated` is kept even though every section now sets it, because it is what
+makes the second of those failures legible. An SLS amendment adds subsections,
+and a new one arriving as a stub would otherwise report "0 of 1 rules covered"
+and understate the gap it opens by an order of magnitude.
 """
 
 from __future__ import annotations

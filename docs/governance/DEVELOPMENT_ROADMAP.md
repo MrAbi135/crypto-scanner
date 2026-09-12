@@ -4,7 +4,7 @@
 
 **Document Status:** Official Development Roadmap — the executable build sequence for the frozen governance stack
 **Authority:** Subordinate to all eight governance documents (Constitution, SLS, TDR, PRD, TAD, DDD, API Specification, UI/UX Blueprint — frozen; each document's current version is stated in its own header); authoritative over build order, sprint scope, and release gating
-**Version:** 2.0.0 | **Ratified:** 2026-07-12 · **Last amended:** 2026-08-17 (resequenced for time-to-first-value; see Amendment History at the end of this document)
+**Version:** 2.1.0 | **Ratified:** 2026-07-12 · **Last amended:** 2026-09-12 (§8.1's golden bar amended to covered-or-explained; see Amendment History at the end of this document)
 **Sprint IDs are stable identifiers, not an execution order.** S0–S22 keep the numbers they were ratified with — they are cited by the SLS, the ADRs, and code docstrings, and renumbering them would edit a frozen document to no purpose. §7 is the only authority on what runs when. A `b` suffix (S4b) means *reopened*: scope that its original sprint was declared done without.
 **Team model:** One developer + AI assistance (Claude / ChatGPT), full-time equivalent
 **Amendment Rule:** Scope moves between sprints via roadmap revision; governance documents are never modified by scheduling pressure (Constitution §43.5, §46.1)
@@ -547,6 +547,29 @@ So the bar becomes, for every detection sprint:
 
 > **Every rule and every named edge case in the governing SLS section has at least one golden case asserting it, and the mapping from SLS clause → dataset is machine-checked in CI. A clause with no case fails the build.**
 
+**Amended v2.1.0 (2026-09-12).** That bar, read literally, cannot be met — and the reason is not effort. When the map was finally written out in full — 45 of 45 subsections, 323 rules — a large share of the uncovered rules turned out to be unreachable *by a golden dataset at all*:
+
+| Rule family | Why no candle series can assert it |
+|---|---|
+| §6.6 Fake Volume Defense (9 rules) | a symbol-level **daily batch** owned by `FakeVolumeJob` in the worker; the harness replays services over one candle series and has no path to a scheduled job |
+| §6.5 size-skew, stealth-flow, unmeasurable (3) | need **per-minute aggTrade buckets**; SLS §2 discards the prints once the minute is folded, so no candle file can carry them |
+| §7.4 Trend Strength (4) | `trend_strength()` **has no caller** — the composite §7.4 says is published to ranking is published nowhere |
+| §3.7 Multi-Timeframe (4) | need **two timeframes at once**; a dataset is one symbol on one timeframe |
+| every gap-dependent rule | the loader **rejects non-contiguous series by design**, so a declared data gap cannot be expressed |
+
+A bar that a correct implementation cannot clear stops being a bar and becomes a thing to be ignored — which is the exact failure mode §8.1 was written to prevent. So the bar becomes:
+
+> **Every rule and every named edge case in the governing SLS section is either covered by a golden case that asserts it, or carries a machine-checked `blocked_on` naming what stands in the way. Every subsection is enumerated. A clause that is neither covered nor explained fails the build — and so does a subsection still carrying a stub.**
+
+This keeps the whole of the original's strength: **no silent gaps**. What it drops is the assumption that every clause is reachable from a candle series. A rule blocked on *"the detector has no caller"* is not a missing test; it is a finding, and the manifest is where it becomes visible instead of being absorbed into a red build nobody can fix.
+
+Two guards stop this softening into a rubber stamp:
+
+1. **A `covered` claim is only written after the clause has been mutated out of the engine and a golden observed to fail.** Claiming coverage by reading a dataset and judging it relevant is not evidence. This caught seven claims that looked obvious and asserted nothing.
+2. **`blocked_on` is prose a reviewer reads.** An evasive one is visible as evasive, in a way a suppression flag never is.
+
+Both directions stay machine-checked, unchanged: a rule marked covered that no dataset declares fails the build, and so does a dataset covering a rule the manifest still calls pending.
+
 Three consequences, stated plainly:
 
 1. **This is a stronger bar, not a weaker one.** A count cannot fail for the right reason; a coverage map fails precisely when a rule is unproven. It also makes the gap *visible* — today nobody can say which of SLS §3's rules are covered by the four structure datasets, and after this anybody can.
@@ -570,7 +593,7 @@ Standing rule, unchanged: **derive the expectation from the SLS; never paste the
 | **G0** | S0 | Clean-clone bootstrap ≤ 15 min; CI red-blocks; staging pipeline works |
 | **G1** | S3 | 72 h clean ingest soak; replay determinism ×3; golden harness operational; all SLS §2 validation implemented |
 | **G1b** ⭐ | S13a | **The doctrine is observable.** Engine runs unattended ≥ 72 h; every candle close for the seeded universe produces a detection pass with no manual invocation; the chart renders live structure/liquidity/zone objects for a symbol the developer did not pre-select; kill -9 on the engine loses no closes (resume proven, not assumed) |
-| **G2** | S9 | Golden **rule-coverage map complete and CI-enforced** per §8.1, 100% pass; **zero datasets left `pending developer verification`** (§8.2); no-repaint properties hold; close→detection p95 ≤ 2 s full-universe; 7-day signal soak hand-audited; immutability attack-tested |
+| **G2** | S9 | Golden **rule-coverage map complete and CI-enforced** per §8.1 — every subsection enumerated, every rule either covered or `blocked_on`-explained — 100% pass; **zero datasets left `pending developer verification`** (§8.2); no-repaint properties hold; close→detection p95 ≤ 2 s full-universe; 7-day signal soak hand-audited; immutability attack-tested |
 | **G3** | S12 | Contract suite green (row-for-row vs API Spec); WS resume/entitlement wire-proven; 1k-conn soak |
 | **G4** | S16 | J2 journey E2E; one-truth stats test; a11y clean; zero-layout-shift verified |
 | **G5** | S18 | J3 E2E ≤ 3 s alert p95. *(v2.0.0: the AI validator criteria move with S19 past beta — they gate the AI release, not this one. No criterion is dropped; it is attached to the thing it actually guards.)* |
@@ -653,6 +676,31 @@ v2.0.0 does not soften that belief; it removes a way of failing it. Doctrine bui
 
 ## 17. Amendment History
 
+### v2.1.0 — 2026-09-12 — §8.1's golden bar amended to covered-or-explained
+
+**Trigger.** Writing the coverage map out in full. v2.0.0 created the map and left thirteen of the forty-five detection subsections carrying a one-line stub; §8.1's bar was therefore never tested against a complete enumeration. Completing it (45/45 subsections, 323 rules, 111 covered) showed that a substantial minority of the remainder cannot be asserted by any golden dataset — not because no one has written one, but because the fact lives in a daily worker job, in discarded trade prints, in a second timeframe, in a declared data gap the loader refuses, or in a detector with no caller. §8.1 as written fails the build for every one of them, permanently and unfixably.
+
+**Impact review against dependent sections.**
+
+| Section | Change | Nature |
+|---|---|---|
+| §8.1 | Bar restated as covered-or-explained; enumeration made part of "complete"; the two anti-softening guards written down | Bar change |
+| §9 | G2's first criterion restated to match | Gate wording |
+| §17 | This entry | Additive |
+
+**What was NOT changed.** No frozen document was touched. No detector behaviour, schema, API contract, sprint ID or gate boundary moved. G2's other five criteria are untouched, including *"zero datasets left `pending developer verification`"* — that one is Constitution §5 work and remains the developer's personally.
+
+**Rationale for each judgement call.**
+
+1. *Covered-or-explained, not covered-or-nothing.* The alternative readings were both worse. Keeping the literal bar makes G2 unreachable, and an unreachable gate teaches a team that gates are advisory — the failure §8.1 exists to prevent. Deleting the bar loses the property that actually matters, which is that no gap is silent. Requiring an explanation keeps the gap visible and makes it *reviewable*, which a red build does not.
+2. *Enumeration folded into "complete".* Under the old wording a section could hide 17 rules behind one stub entry and report `0/1`, which understates the gap by an order of magnitude. §5.1 was exactly that. "Complete" now means every subsection is written out, and a new SLS subsection arriving as a stub fails CI rather than quietly shrinking the denominator.
+3. *The mutation guard written into the bar rather than left as practice.* Marking a rule covered because a dataset "looks like" it asserts it is the same proxy error as counting cases. Seven claims that looked obvious during this pass turned out to assert nothing — a component whose constant no golden reads, a differential subtracting zero, a cap never reached. The bar now says what evidence a `covered` claim requires.
+4. *No numeric coverage target introduced.* A percentage would be the case count returning in a new costume. The manifest's honesty, not its ratio, is the deliverable.
+
+**What the amendment does not excuse.** Every `blocked_on` written during this pass names a specific obstacle, and several of them are defects rather than harness limits — §7.4's missing caller, §4.1's unimplemented weighting, §4.4's unlogged reclassification, and the golden runner dropping three fields the liquidity engine reports. Recording an obstacle is not resolving it; these remain open work, and a `blocked_on` that could be removed by fixing the engine should be.
+
+**Known debt this amendment does not discharge.** Everything listed under v2.0.0 that remains open, plus: §3.6 (CHoCH/MSS) has no golden case at all — 0 of 14 rules, and deleting the CAUTION transition breaks nothing; §5.1, §5.2, §5.3, §5.7 and §5.8 are unreached by any dataset; §4.3's clusters cannot be pinned until the golden runner compares `clusters` and `clustered_swings`; and the SLS itself now carries two recorded divergences — §7.1's "sign sets momentum direction" against an engine that counts closes, and §7.1's 5/5 neutral cap, which cannot bind as implemented. Both need SLS rulings and an `algo_version` bump under Constitution §44.5.
+
 ### v2.0.0 — 2026-08-17 — Resequenced for time-to-first-value
 
 **Trigger.** A full-codebase audit run before answering a scope question found that the detection pipeline has no unattended execution path: `runtime/engine.py` is a 21-line health-server skeleton, `DetectionOrchestrator` has no production caller, and `xadd` appears zero times in the source tree. Detection ran only under manual CLI invocation with an explicit symbol, timeframe and date window. Approximately seventeen thousand lines of doctrine existed as a library with a replay tool attached, and the v1 order added three more engines to that library before anything ran on its own.
@@ -684,4 +732,4 @@ v2.0.0 does not soften that belief; it removes a way of failing it. Doctrine bui
 
 See the SLS's own Amendment History.
 
-**— End of Development Roadmap v2.0.0 —**
+**— End of Development Roadmap v2.1.0 —**
