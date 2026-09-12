@@ -10,6 +10,8 @@ This module is the executable form of all three.
 
 from __future__ import annotations
 
+from itertools import combinations
+
 import pytest
 
 from tests.golden.harness.canonical import (
@@ -141,6 +143,39 @@ async def test_harness_detects_a_wrong_expectation() -> None:
     corrupted = {**actual, "report": {**actual["report"], "internal_swings": 999}}
 
     assert canonical_bytes(actual) != canonical_bytes(corrupted)
+
+
+def test_every_dataset_is_reachable_on_the_chart() -> None:
+    """Constitution §5 verification happens on a chart, and the chart reads the
+    database, so two datasets sharing one symbol and one span are one dataset as
+    far as the developer is concerned.
+
+    `tools_golden_to_db` inserts candles keyed on (symbol, timeframe,
+    open_time); the second dataset of an overlapping pair inserts nothing and
+    the chart shows the first one's candles under both names. Seventeen of the
+    twenty-four datasets awaiting verification were unreachable this way, and
+    nothing said so -- the loader printed `new=0`, which is also what it prints
+    for a dataset already loaded on an earlier run.
+
+    Timeframe is part of the key because the same symbol on H1 and H4 is two
+    contexts the chart selects separately.
+    """
+    seen: dict[tuple[str, str], list[GoldenDataset]] = {}
+
+    for dataset in DATASETS:
+        seen.setdefault((dataset.symbol, dataset.timeframe.value), []).append(dataset)
+
+    clashes = []
+
+    for (symbol, timeframe), group in sorted(seen.items()):
+        for first, second in combinations(sorted(group, key=lambda d: d.dataset_id), 2):
+            if first.start < second.end and second.start < first.end:
+                clashes.append(
+                    f"{symbol} {timeframe}: {first.dataset_id} and {second.dataset_id} "
+                    f"overlap in time -- only one of them can be loaded"
+                )
+
+    assert not clashes, "\n".join(("", *clashes))
 
 
 def test_the_clause_to_dataset_map_is_honest() -> None:
