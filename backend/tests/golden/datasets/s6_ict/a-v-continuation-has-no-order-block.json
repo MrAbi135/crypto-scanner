@@ -1,0 +1,108 @@
+{
+  "dataset_id": "s6-a-v-continuation-has-no-order-block",
+  "engine": "ict",
+  "sls_sections": [
+    "5.1"
+  ],
+  "sls_rules": [
+    "5.1-v-continuation-has-no-ob"
+  ],
+  "description": "The same displacement and the same fair value gap, but nothing bearish in front of it. No origin footprint, so no order block.",
+  "labelling_rationale": "§5.1's edge case (2) states it plainly: \"Displacement with no prior opposing candle (V-continuation): no OB -- the doctrine requires an origin footprint\". This case is that sentence made executable. The displacement is the same candle as in `s6-an-order-block-is-the-full-range-of-its-origin-run`, and it opens the same kind of fair value gap -- the third candle's low of 116 against the high of 101.5 two candles back -- so §5.1's condition 2 is satisfied in full: a displacement occurred and it produced a structural consequence. What is missing is condition 1. Every candle before the displacement closes above its open, so walking backwards from the candle before it finds no opposing candle at all and the run is empty. The doctrine's reason is worth restating because the arithmetic does not carry it: an order block is the footprint of orders that were accumulated before the move, and a market that only went up left no such footprint to defend. The expected output therefore records the FVG and no order block. Delete the run requirement from the engine and this series would manufacture a zone out of two ordinary up candles. The engine sees no structure evidence here -- a zone-only dataset produces no swings and no sweeps -- so §5.1's condition 2(b) can only be met by its second branch, \"creates a confirmed bullish FVG (§5.4)\", and the grade rule can only return OB_B. That bounds what this case asserts and is why the manifest still records the OB_A half as pending. **The shared shape.** Filler is a flat candle repeated -- a 0.5 body inside a 2.0 range at 100 -- which pins the mean 20-candle body near 0.5, so §5.10's `body >= 2.0 x mean_body_20` is a number a labeller can evaluate. The displacement is the same candle in every case: it opens at 101, closes at 117 and prints a high of 117.5, so its body of 16 is over twenty times the mean body, its range of 16.5 is several times ATR, and it closes half a point under its high -- inside the extreme 25% §5.10 requires. It opens **above** the candidate run rather than inside it, which is deliberate: an OB whose own confirming candle trades back through its band would exercise §5.1's state machine, and this case is about formation.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-12 from SLS §5.1; pending developer verification",
+  "labelled_at": "2026-09-12",
+  "algo_version": "s6-ob-v6",
+  "symbol": "GOLDENOB",
+  "timeframe": "H4",
+  "filler": {
+    "count": 294,
+    "open": "99.75",
+    "high": "101",
+    "low": "99",
+    "close": "100.25"
+  },
+  "candles": [
+    {
+      "open_time": "2026-04-10T00:00:00+00:00",
+      "open": "99.75",
+      "high": "101",
+      "low": "99",
+      "close": "100.25"
+    },
+    {
+      "open_time": "2026-04-10T04:00:00+00:00",
+      "open": "100.25",
+      "high": "101.5",
+      "low": "99.5",
+      "close": "100.75"
+    },
+    {
+      "open_time": "2026-04-10T08:00:00+00:00",
+      "open": "101",
+      "high": "117.5",
+      "low": "101",
+      "close": "117"
+    },
+    {
+      "open_time": "2026-04-10T12:00:00+00:00",
+      "open": "117",
+      "high": "118.5",
+      "low": "116",
+      "close": "118"
+    },
+    {
+      "open_time": "2026-04-10T16:00:00+00:00",
+      "open": "117.75",
+      "high": "119",
+      "low": "117",
+      "close": "118.25"
+    },
+    {
+      "open_time": "2026-04-10T20:00:00+00:00",
+      "open": "118.25",
+      "high": "119.5",
+      "low": "117.5",
+      "close": "118.75"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "displacements": 1,
+      "fvgs_detected": 1,
+      "ifvgs_created": 0,
+      "bprs_created": 0,
+      "live_zones": 1,
+      "dealing_ranges": 0,
+      "impulse_legs": 0,
+      "otes_detected": 0,
+      "order_blocks_detected": 0,
+      "breakers_created": 0,
+      "mitigations_created": 0,
+      "zones_evaluated": 1,
+      "touches": 0,
+      "rejections": 0,
+      "mitigations": 0,
+      "respects": 0,
+      "violations": 0,
+      "confirmations": 0
+    },
+    "zones": [
+      {
+        "zone": "zone:FVG:BULLISH:297",
+        "zone_type": "FVG",
+        "polarity": "BULLISH",
+        "state": "OPEN",
+        "grade": "FVG",
+        "band_low": "101.5",
+        "band_high": "116",
+        "created_index": 297,
+        "created_at": "2026-04-10T16:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": null
+      }
+    ],
+    "transitions": [],
+    "interactions": []
+  }
+}

@@ -1,0 +1,148 @@
+{
+  "dataset_id": "s6-an-origin-run-stops-at-three-candles",
+  "engine": "ict",
+  "sls_sections": [
+    "5.1"
+  ],
+  "sls_rules": [
+    "5.1-candidate-run-max-3"
+  ],
+  "description": "Four bearish candles precede the displacement. The order block takes the last three of them and leaves the fourth outside its band.",
+  "labelling_rationale": "The companion to `s6-an-order-block-is-the-full-range-of-its-origin-run`, with the origin run lengthened from two candles to four. §5.1 caps it: the candidate is \"the last bearish-bodied candle (or contiguous run of <= `P.ict.ob_max_run = 3` bearish candles, zone = their combined extremes)\". Four bearish candles print, stepping 100 down to 96 with highs of 100.5, 99.5, 98.5 and 97.5. The run walks backwards from the candle before the displacement and stops after three, so the band is 95.5 to **99.5** -- the last three candles' combined extremes. The first candle's high of 100.5 is a full point above the band and is simply not in it, and the zone's created_index is the second candle of the four, not the first. Without the cap the band would run to 100.5 and the zone would be born one candle earlier; that is the whole assertion, and it is why this case exists alongside the two-candle one rather than replacing it. Everything else is unchanged: the displacement is the same candle, the FVG that qualifies the block is the same three-candle window, and the grade is OB_B for the same reason. **A second FVG is registered here, and it is arithmetic rather than an accident.** Because the run is longer, the three-candle window ending on the displacement now spans from the run's third candle, whose high is 98.5, to the displacement's low of 101 -- a gap of 2.5. In the two-candle case the equivalent gap was 0.5 and §5.4's filter refused it; 2.5 clears 0.25 x ATR, so it is registered, with band 98.5 to 101. The engine sees no structure evidence here -- a zone-only dataset produces no swings and no sweeps -- so §5.1's condition 2(b) can only be met by its second branch, \"creates a confirmed bullish FVG (§5.4)\", and the grade rule can only return OB_B. That bounds what this case asserts and is why the manifest still records the OB_A half as pending. **The shared shape.** Filler is a flat candle repeated -- a 0.5 body inside a 2.0 range at 100 -- which pins the mean 20-candle body near 0.5, so §5.10's `body >= 2.0 x mean_body_20` is a number a labeller can evaluate. The displacement is the same candle in every case: it opens at 101, closes at 117 and prints a high of 117.5, so its body of 16 is over twenty times the mean body, its range of 16.5 is several times ATR, and it closes half a point under its high -- inside the extreme 25% §5.10 requires. It opens **above** the candidate run rather than inside it, which is deliberate: an OB whose own confirming candle trades back through its band would exercise §5.1's state machine, and this case is about formation.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-12 from SLS §5.1; pending developer verification",
+  "labelled_at": "2026-09-12",
+  "algo_version": "s6-ob-v6",
+  "symbol": "GOLDENOB",
+  "timeframe": "H4",
+  "filler": {
+    "count": 292,
+    "open": "99.75",
+    "high": "101",
+    "low": "99",
+    "close": "100.25"
+  },
+  "candles": [
+    {
+      "open_time": "2026-04-09T16:00:00+00:00",
+      "open": "100",
+      "high": "100.5",
+      "low": "98.5",
+      "close": "99"
+    },
+    {
+      "open_time": "2026-04-09T20:00:00+00:00",
+      "open": "99",
+      "high": "99.5",
+      "low": "97.5",
+      "close": "98"
+    },
+    {
+      "open_time": "2026-04-10T00:00:00+00:00",
+      "open": "98",
+      "high": "98.5",
+      "low": "96.5",
+      "close": "97"
+    },
+    {
+      "open_time": "2026-04-10T04:00:00+00:00",
+      "open": "97",
+      "high": "97.5",
+      "low": "95.5",
+      "close": "96"
+    },
+    {
+      "open_time": "2026-04-10T08:00:00+00:00",
+      "open": "101",
+      "high": "117.5",
+      "low": "101",
+      "close": "117"
+    },
+    {
+      "open_time": "2026-04-10T12:00:00+00:00",
+      "open": "117",
+      "high": "118.5",
+      "low": "116",
+      "close": "118"
+    },
+    {
+      "open_time": "2026-04-10T16:00:00+00:00",
+      "open": "117.75",
+      "high": "119",
+      "low": "117",
+      "close": "118.25"
+    },
+    {
+      "open_time": "2026-04-10T20:00:00+00:00",
+      "open": "118.25",
+      "high": "119.5",
+      "low": "117.5",
+      "close": "118.75"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "displacements": 1,
+      "fvgs_detected": 2,
+      "ifvgs_created": 0,
+      "bprs_created": 0,
+      "live_zones": 2,
+      "dealing_ranges": 0,
+      "impulse_legs": 0,
+      "otes_detected": 0,
+      "order_blocks_detected": 1,
+      "breakers_created": 0,
+      "mitigations_created": 0,
+      "zones_evaluated": 3,
+      "touches": 0,
+      "rejections": 0,
+      "mitigations": 0,
+      "respects": 0,
+      "violations": 0,
+      "confirmations": 0
+    },
+    "zones": [
+      {
+        "zone": "zone:OB:BULLISH:293",
+        "zone_type": "OB",
+        "polarity": "BULLISH",
+        "state": "FRESH",
+        "grade": "OB_B",
+        "band_low": "95.5",
+        "band_high": "99.5",
+        "created_index": 293,
+        "created_at": "2026-04-09T20:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": null
+      },
+      {
+        "zone": "zone:FVG:BULLISH:296",
+        "zone_type": "FVG",
+        "polarity": "BULLISH",
+        "state": "OPEN",
+        "grade": "FVG",
+        "band_low": "98.5",
+        "band_high": "101",
+        "created_index": 296,
+        "created_at": "2026-04-10T12:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": null
+      },
+      {
+        "zone": "zone:FVG:BULLISH:297",
+        "zone_type": "FVG",
+        "polarity": "BULLISH",
+        "state": "OPEN",
+        "grade": "FVG",
+        "band_low": "97.5",
+        "band_high": "116",
+        "created_index": 297,
+        "created_at": "2026-04-10T16:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": null
+      }
+    ],
+    "transitions": [],
+    "interactions": []
+  }
+}
