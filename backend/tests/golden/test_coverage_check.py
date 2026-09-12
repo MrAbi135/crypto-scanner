@@ -143,6 +143,7 @@ UNVERIFIED_LABELS = frozenset(
         "a-displacement-with-no-consequence-has-no-order-block.json",
         "a-leg-under-two-atr-registers-no-ote.json",
         "the-ote-band-is-the-62-to-79-retracement.json",
+        "a-swept-order-block-that-fails-becomes-a-breaker.json",
     }
 )
 

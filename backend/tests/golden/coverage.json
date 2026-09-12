@@ -738,8 +738,7 @@
         {
           "id": "5.1-grade-ob-a",
           "rule": "OB_A when the qualifying move broke external structure or sits at an MSS origin",
-          "status": "pending",
-          "blocked_on": "a zone-only dataset produces no swing or sweep evidence, so the OB pass sees none; needs a case run through the whole pipeline, which is _run_confluence's shape rather than _run_ict's"
+          "status": "covered"
         },
         {
           "id": "5.1-grade-ob-b",
@@ -767,8 +766,7 @@
         {
           "id": "5.1-invalidated-becomes-breaker-candidate",
           "rule": "an INVALIDATED order block becomes a breaker candidate",
-          "status": "pending",
-          "blocked_on": "a zone-only dataset produces no swing or sweep evidence, so the OB pass sees none; needs a case run through the whole pipeline, which is _run_confluence's shape rather than _run_ict's"
+          "status": "covered"
         },
         {
           "id": "5.1-doji-candidate-permitted",
@@ -803,44 +801,41 @@
         {
           "id": "5.2-invalidating-close-through",
           "rule": "the order block must be INVALIDATED by a close through its distal edge",
-          "status": "pending",
-          "blocked_on": "breakers are promoted from INVALIDATED order blocks, and no dataset produces an order block"
+          "status": "covered"
         },
         {
           "id": "5.2-invalidating-move-displaces-and-breaks",
           "rule": "the invalidating move must satisfy displacement and break structure, internal BOS at minimum",
           "status": "pending",
-          "blocked_on": "breakers are promoted from INVALIDATED order blocks, and no dataset produces an order block"
+          "blocked_on": "measured, not assumed: the invalidating candle here does displace and does break structure, so loosening either gate in the engine changes nothing -- only a case where the close-through happens WITHOUT one of them, and no breaker appears, asserts the requirement. Needs a second series whose invalidation is a quiet close beyond the distal edge"
         },
         {
           "id": "5.2-sweep-origin-is-brk-a",
           "rule": "the origin move must have swept a liquidity pool; that is grade BRK_A",
-          "status": "pending",
-          "blocked_on": "breakers are promoted from INVALIDATED order blocks, and no dataset produces an order block"
+          "status": "covered"
         },
         {
           "id": "5.2-no-simultaneous-promotion",
           "rule": "the invalidating break must confirm before the breaker is registered",
           "status": "pending",
-          "blocked_on": "breakers are promoted from INVALIDATED order blocks, and no dataset produces an order block"
+          "blocked_on": "needs the invalidating break to be unconfirmed at the candle that would promote; every transition here is close-confirmed by construction, so the branch is never taken"
         },
         {
           "id": "5.2-geometry-inherited-polarity-flipped",
           "rule": "the breaker inherits the order block's geometry with polarity flipped and state restarted at FRESH",
-          "status": "pending",
-          "blocked_on": "breakers are promoted from INVALIDATED order blocks, and no dataset produces an order block"
+          "status": "covered"
         },
         {
           "id": "5.2-second-flip-is-terminal",
           "rule": "a breaker invalidated in turn is terminal: no second polarity flip",
           "status": "pending",
-          "blocked_on": "breakers are promoted from INVALIDATED order blocks, and no dataset produces an order block"
+          "blocked_on": "needs the breaker itself invalidated afterwards; the series ends on the candle that creates it, because a longer tail re-enters the inverted gap and pulls 5.9's grammar in"
         },
         {
           "id": "5.2-gap-break-still-valid",
           "rule": "an order block invalidated by a gap-through still forms a breaker, with the displacement test applied to the gap candle",
           "status": "pending",
-          "blocked_on": "breakers are promoted from INVALIDATED order blocks, and no dataset produces an order block"
+          "blocked_on": "needs the invalidating move to gap over the band rather than trade through it, with the displacement test applied to the gap candle"
         }
       ]
     },
@@ -853,25 +848,25 @@
           "id": "5.3-no-sweep-at-origin",
           "rule": "a mitigation block is the same shape with no liquidity sweep at the origin move",
           "status": "pending",
-          "blocked_on": "mitigation blocks share the breaker path, which no dataset reaches"
+          "blocked_on": "the mitigation path is now reachable -- engine `ict_evidence` runs the structure and liquidity passes in front of the zone passes -- but it needs an order block whose origin move swept NOTHING and whose pre-invalidation structure shows a failure swing. The breaker case supplies the opposite of both, so this needs its own series"
         },
         {
           "id": "5.3-failure-swing-precondition",
           "rule": "the pre-invalidation structure must show a failure swing: LH before an upward invalidation, HL before a downward one",
           "status": "pending",
-          "blocked_on": "mitigation blocks share the breaker path, which no dataset reaches"
+          "blocked_on": "the mitigation path is now reachable -- engine `ict_evidence` runs the structure and liquidity passes in front of the zone passes -- but it needs an order block whose origin move swept NOTHING and whose pre-invalidation structure shows a failure swing. The breaker case supplies the opposite of both, so this needs its own series"
         },
         {
           "id": "5.3-grade-fixed-mit",
           "rule": "the grade is fixed at MIT and everything else matches the breaker rules",
           "status": "pending",
-          "blocked_on": "mitigation blocks share the breaker path, which no dataset reaches"
+          "blocked_on": "the mitigation path is now reachable -- engine `ict_evidence` runs the structure and liquidity passes in front of the zone passes -- but it needs an order block whose origin move swept NOTHING and whose pre-invalidation structure shows a failure swing. The breaker case supplies the opposite of both, so this needs its own series"
         },
         {
           "id": "5.3-one-deterministic-bit",
           "rule": "breaker and mitigation are distinguished only by origin-sweep evidence, stored on the order block at creation",
           "status": "pending",
-          "blocked_on": "mitigation blocks share the breaker path, which no dataset reaches"
+          "blocked_on": "the mitigation path is now reachable -- engine `ict_evidence` runs the structure and liquidity passes in front of the zone passes -- but it needs an order block whose origin move swept NOTHING and whose pre-invalidation structure shows a failure swing. The breaker case supplies the opposite of both, so this needs its own series"
         }
       ]
     },
