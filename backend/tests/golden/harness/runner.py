@@ -81,6 +81,9 @@ async def run_dataset(dataset: GoldenDataset) -> dict[str, Any]:
     if dataset.engine == "structure_shift":
         return await _run_structure_shift(dataset)
 
+    if dataset.engine == "ict_evidence":
+        return await _run_ict(dataset, with_evidence=True)
+
     if dataset.engine == "confluence":
         return await _run_confluence(dataset)
 
@@ -499,7 +502,7 @@ async def _run_liquidity(dataset: GoldenDataset) -> dict[str, Any]:
     )
 
 
-async def _run_ict(dataset: GoldenDataset) -> dict[str, Any]:
+async def _run_ict(dataset: GoldenDataset, *, with_evidence: bool = False) -> dict[str, Any]:
     """Run the S6 zone engine as the pipeline runs it.
 
     `DetectionPipeline` documents the order and this follows it exactly:
@@ -509,10 +512,18 @@ async def _run_ict(dataset: GoldenDataset) -> dict[str, Any]:
     harness that handed it a separate fixture would test the two halves
     against each other rather than against doctrine.
 
-    The order-block pass reads S4/S5 evidence that no zone-only dataset
-    produces, so it sees none. That bounds what an OB case can assert to
-    SLS 5.1's formation rules; the coverage manifest records the rest as
-    blocked rather than letting a green suite imply they are proven.
+    The order-block pass reads S4/S5 evidence that a zone-only dataset does
+    not produce. `engine: "ict"` leaves it with none, which bounds an OB case
+    to SLS 5.1's formation rules and is why 5.1's grade and lifecycle rules
+    stay blocked in the manifest rather than being implied by a green suite.
+
+    `engine: "ict_evidence"` runs the structure and liquidity replays in front
+    of the zone passes, into the same event store, so the OB pass sees real
+    swings and real sweep transitions. That is the only way to reach SLS 5.2:
+    a breaker is promoted from an INVALIDATED order block, and the promotion
+    is gated on `origin_swept`, which is a liquidity fact. The two engines are
+    kept separate rather than merged so the five zone-only datasets keep
+    asserting exactly what they were verified against.
     """
 
     candles = InMemoryCandleRepository(dataset.candles)
@@ -522,6 +533,25 @@ async def _run_ict(dataset: GoldenDataset) -> dict[str, Any]:
     zones = InMemoryIctZoneRepository()
     transitions = InMemoryIctZoneTransitionRepository()
     interactions = InMemoryIctZoneInteractionRepository()
+    pool_transitions = InMemoryLiquidityTransitionRepository()
+
+    if with_evidence:
+        await StructureReplayService(
+            candles,
+            events,
+            EngineStateManager(InMemoryEngineStateStore()),
+            clock,
+        ).run(dataset.symbol, dataset.timeframe, dataset.start, dataset.end)
+
+        await LiquidityReplayService(
+            candles,
+            InMemoryLiquidityPoolRepository(),
+            pool_transitions,
+            events,
+            InMemoryLiquidityStateStore(),
+            InMemoryIctEvidenceRepository(events, pool_transitions),
+            clock,
+        ).run(dataset.symbol, dataset.timeframe, dataset.start, dataset.end)
 
     report = await IctReplayService(
         candles,
@@ -555,7 +585,7 @@ async def _run_ict(dataset: GoldenDataset) -> dict[str, Any]:
         zones,
         transitions,
         InMemoryIctZoneStateStore(),
-        InMemoryIctEvidenceRepository(events),
+        InMemoryIctEvidenceRepository(events, pool_transitions),
         clock,
         algo_version=dataset.algo_version,
     ).run(

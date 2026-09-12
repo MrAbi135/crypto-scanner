@@ -1,0 +1,323 @@
+{
+  "dataset_id": "s6-a-swept-order-block-that-fails-becomes-a-breaker",
+  "engine": "ict_evidence",
+  "sls_sections": [
+    "5.1",
+    "5.2"
+  ],
+  "sls_rules": [
+    "5.1-grade-ob-a",
+    "5.1-invalidated-becomes-breaker-candidate",
+    "5.2-invalidating-close-through",
+    "5.2-sweep-origin-is-brk-a",
+    "5.2-geometry-inherited-polarity-flipped"
+  ],
+  "description": "A demand block whose origin run swept the low beneath it, graded OB_A on a structure break, then closed through from above. It comes back as a BRK_A breaker with the same band and the opposite polarity.",
+  "labelling_rationale": "§5.2 promotes a breaker from an order block that failed, so the case has to build the order block first and then take it apart. Every candle is the same figure moved up or down -- a 0.5 body inside a 4.0 range -- so the true range is 4.0 through the structural part of the series, Wilder holds ATR at exactly 4.0 there, and the levels step by at most 1 against a wick of 2, which opens no fair value gaps. **The liquidity the origin takes.** An external swing low prints at 87 and confirms five closes later, and §4.2 registers an SSL pool on it. Twelve candles after that, price comes back down: the candle at 2026-06-15T00:00 trades to a low of 86, through the pool, and closes at 87.75 back above it. Penetration plus a rejection close is §4.6's single-candle sweep, so the pool transitions to SWEPT with its reference level recorded at 87. **The order block.** That sweep candle and the two before it are all bearish-bodied, so §5.1's origin run is the three of them -- the cap, exactly -- and the band is their combined extremes, 86 to 91. The next candle displaces upward and closes at 112, which is above the confirmed swing high of 94, so §5.1's condition 2 is met by a **structure break** rather than by a gap. That matters twice over: it is what makes the grade **OB_A** (\"if the qualifying move broke external structure\"), and it is the branch the four zone-only §5.1 cases could not reach, because a dataset that runs no structure pass has no swings to break. The displacement also opens above 91, clear of the band, so the block is born FRESH rather than being walked through by its own confirming candle. **Why the block carries `origin_swept`.** §5.2's qualifying precondition is that \"the bearish OB's own down-move had swept a liquidity pool\". The engine asks it as: is there an opposite-side sweep whose reference level sits inside the band, transitioning between the origin candle's open and the confirmation candle's close? The SSL pool's 87 is inside 86 to 91, and the sweep transitioned on the last candle of the origin run. Both hold. **The failure.** Two candles later a bearish displacement closes at 84. That is below the band's distal edge of 86, so §5.1's state machine takes the block straight to INVALIDATED -- a close beyond the distal edge outranks a test, so there is no TESTED step. The same candle satisfies §5.2's other two requirements: its body of 25 against a mean 20-candle body near 0.5 and its range of 26 against ATR make it a displacement under §5.10, and it closes at 84, below the confirmed swing low of 87, which is a structure break. **The breaker.** With the sweep on record the promotion is BRK_A, which §5.2 calls the sweep-origin grade. Its geometry is inherited unchanged -- band 86 to 91, the order block's own -- its polarity is flipped from BULLISH to BEARISH, and its state restarts at FRESH: §5.2 says all three in one sentence. The zone records the block it came from as its parent, so the lineage is readable rather than inferred. **Everything else in the expected output, and why it is there.** The bullish gap the up-displacement opened -- 90 to 109, between the sweep candle's high and the low two candles later -- is closed through by the same crash, so §5.4 inverts it and §5.5 registers the IFVG born UNPROVEN. `dealing_ranges` and `impulse_legs` read 4 because the two external swings confirm at 2026-06-14T08:00 and only four candles after that hold a close inside the 87-to-94 bracket; the fifth is the displacement, which closes at 112, outside it. `otes_detected` is 0 because that leg spans 7.0 against §5.8's floor of 2 x ATR = 8.0. No second order block forms on the crash: its candidate scan finds the up-displacement as a one-candle bullish run, and that run's height of 21.25 is beyond §5.1's ceiling of 3 x ATR, so the block is refused on validation. The four interactions and two transitions all land on the final candle, which is the only one that touches anything. One thing this case does NOT assert, and says so rather than implying it: the invalidating candle satisfies §5.2's displacement and structure-break requirements, but because it satisfies them, loosening either gate in the engine moves nothing here. `5.2-invalidating-move-displaces-and-breaks` stays pending, and needs a series whose close-through arrives without one of the two.",
+  "labelled_by": "drafted by Claude Opus 5 2026-09-12 from SLS §5.1/§5.2; pending developer verification",
+  "labelled_at": "2026-09-12",
+  "algo_version": "s6-ob-v6",
+  "symbol": "GOLDENBRK",
+  "timeframe": "H4",
+  "filler": {
+    "count": 277,
+    "open": "95.25",
+    "high": "97",
+    "low": "93",
+    "close": "94.75"
+  },
+  "candles": [
+    {
+      "open_time": "2026-06-12T04:00:00+00:00",
+      "open": "94.25",
+      "high": "96",
+      "low": "92",
+      "close": "93.75"
+    },
+    {
+      "open_time": "2026-06-12T08:00:00+00:00",
+      "open": "93.25",
+      "high": "95",
+      "low": "91",
+      "close": "92.75"
+    },
+    {
+      "open_time": "2026-06-12T12:00:00+00:00",
+      "open": "92.25",
+      "high": "94",
+      "low": "90",
+      "close": "91.75"
+    },
+    {
+      "open_time": "2026-06-12T16:00:00+00:00",
+      "open": "91.25",
+      "high": "93",
+      "low": "89",
+      "close": "90.75"
+    },
+    {
+      "open_time": "2026-06-12T20:00:00+00:00",
+      "open": "90.25",
+      "high": "92",
+      "low": "88",
+      "close": "89.75"
+    },
+    {
+      "open_time": "2026-06-13T00:00:00+00:00",
+      "open": "89.25",
+      "high": "91",
+      "low": "87",
+      "close": "88.75"
+    },
+    {
+      "open_time": "2026-06-13T04:00:00+00:00",
+      "open": "89.25",
+      "high": "91.5",
+      "low": "87.5",
+      "close": "89.75"
+    },
+    {
+      "open_time": "2026-06-13T08:00:00+00:00",
+      "open": "89.75",
+      "high": "92",
+      "low": "88",
+      "close": "90.25"
+    },
+    {
+      "open_time": "2026-06-13T12:00:00+00:00",
+      "open": "90.25",
+      "high": "92.5",
+      "low": "88.5",
+      "close": "90.75"
+    },
+    {
+      "open_time": "2026-06-13T16:00:00+00:00",
+      "open": "90.75",
+      "high": "93",
+      "low": "89",
+      "close": "91.25"
+    },
+    {
+      "open_time": "2026-06-13T20:00:00+00:00",
+      "open": "91.25",
+      "high": "93.5",
+      "low": "89.5",
+      "close": "91.75"
+    },
+    {
+      "open_time": "2026-06-14T00:00:00+00:00",
+      "open": "91.75",
+      "high": "94",
+      "low": "90",
+      "close": "92.25"
+    },
+    {
+      "open_time": "2026-06-14T04:00:00+00:00",
+      "open": "91.75",
+      "high": "93.5",
+      "low": "89.5",
+      "close": "91.25"
+    },
+    {
+      "open_time": "2026-06-14T08:00:00+00:00",
+      "open": "91.25",
+      "high": "93",
+      "low": "89",
+      "close": "90.75"
+    },
+    {
+      "open_time": "2026-06-14T12:00:00+00:00",
+      "open": "90.75",
+      "high": "92.5",
+      "low": "88.5",
+      "close": "90.25"
+    },
+    {
+      "open_time": "2026-06-14T16:00:00+00:00",
+      "open": "90.25",
+      "high": "92",
+      "low": "88",
+      "close": "89.75"
+    },
+    {
+      "open_time": "2026-06-14T20:00:00+00:00",
+      "open": "89.75",
+      "high": "91.5",
+      "low": "87.5",
+      "close": "89.25"
+    },
+    {
+      "open_time": "2026-06-15T00:00:00+00:00",
+      "open": "89.25",
+      "high": "91",
+      "low": "87",
+      "close": "88.75"
+    },
+    {
+      "open_time": "2026-06-15T04:00:00+00:00",
+      "open": "88.75",
+      "high": "90.5",
+      "low": "86.5",
+      "close": "88.25"
+    },
+    {
+      "open_time": "2026-06-15T08:00:00+00:00",
+      "open": "88.25",
+      "high": "90",
+      "low": "86",
+      "close": "87.75"
+    },
+    {
+      "open_time": "2026-06-15T12:00:00+00:00",
+      "open": "91.25",
+      "high": "112.5",
+      "low": "91.25",
+      "close": "112"
+    },
+    {
+      "open_time": "2026-06-15T16:00:00+00:00",
+      "open": "111.25",
+      "high": "113",
+      "low": "109",
+      "close": "110.75"
+    },
+    {
+      "open_time": "2026-06-15T20:00:00+00:00",
+      "open": "109",
+      "high": "109.5",
+      "low": "83.5",
+      "close": "84"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "displacements": 2,
+      "fvgs_detected": 1,
+      "ifvgs_created": 1,
+      "bprs_created": 0,
+      "live_zones": 1,
+      "dealing_ranges": 4,
+      "impulse_legs": 4,
+      "otes_detected": 0,
+      "order_blocks_detected": 1,
+      "breakers_created": 1,
+      "mitigations_created": 0,
+      "zones_evaluated": 4,
+      "touches": 2,
+      "rejections": 0,
+      "mitigations": 0,
+      "respects": 0,
+      "violations": 2,
+      "confirmations": 0
+    },
+    "zones": [
+      {
+        "zone": "zone:OB:BULLISH:294",
+        "zone_type": "OB",
+        "polarity": "BULLISH",
+        "state": "INVALIDATED",
+        "grade": "OB_A",
+        "band_low": "86",
+        "band_high": "91",
+        "created_index": 294,
+        "created_at": "2026-06-15T00:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": null
+      },
+      {
+        "zone": "zone:FVG:BULLISH:298",
+        "zone_type": "FVG",
+        "polarity": "BULLISH",
+        "state": "INVERTED",
+        "grade": "FVG",
+        "band_low": "90",
+        "band_high": "109",
+        "created_index": 298,
+        "created_at": "2026-06-15T20:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": null
+      },
+      {
+        "zone": "zone:BREAKER:BEARISH:299",
+        "zone_type": "BREAKER",
+        "polarity": "BEARISH",
+        "state": "FRESH",
+        "grade": "BRK_A",
+        "band_low": "86",
+        "band_high": "91",
+        "created_index": 299,
+        "created_at": "2026-06-16T00:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": "zone:OB:BULLISH:294"
+      },
+      {
+        "zone": "zone:IFVG:BEARISH:299",
+        "zone_type": "IFVG",
+        "polarity": "BEARISH",
+        "state": "UNPROVEN",
+        "grade": "IFVG",
+        "band_low": "90",
+        "band_high": "109",
+        "created_index": 299,
+        "created_at": "2026-06-16T00:00:00+00:00",
+        "gap_adjacent": false,
+        "parent_zone": "zone:FVG:BULLISH:298"
+      }
+    ],
+    "transitions": [
+      {
+        "zone": "zone:OB:BULLISH:294",
+        "zone_type": "OB",
+        "from_state": "FRESH",
+        "to_state": "INVALIDATED",
+        "reason": "close_through",
+        "candle_index": 299,
+        "transitioned_at": "2026-06-16T00:00:00+00:00"
+      },
+      {
+        "zone": "zone:FVG:BULLISH:298",
+        "zone_type": "FVG",
+        "from_state": "OPEN",
+        "to_state": "INVERTED",
+        "reason": "close_through",
+        "candle_index": 299,
+        "transitioned_at": "2026-06-16T00:00:00+00:00"
+      }
+    ],
+    "interactions": [
+      {
+        "zone": "zone:FVG:BULLISH:298",
+        "zone_type": "FVG",
+        "kind": "TOUCH",
+        "candle_index": 299,
+        "observed_at": "2026-06-16T00:00:00+00:00",
+        "close_through": true
+      },
+      {
+        "zone": "zone:OB:BULLISH:294",
+        "zone_type": "OB",
+        "kind": "TOUCH",
+        "candle_index": 299,
+        "observed_at": "2026-06-16T00:00:00+00:00",
+        "close_through": true
+      },
+      {
+        "zone": "zone:FVG:BULLISH:298",
+        "zone_type": "FVG",
+        "kind": "VIOLATION",
+        "candle_index": 299,
+        "observed_at": "2026-06-16T00:00:00+00:00",
+        "close_through": true
+      },
+      {
+        "zone": "zone:OB:BULLISH:294",
+        "zone_type": "OB",
+        "kind": "VIOLATION",
+        "candle_index": 299,
+        "observed_at": "2026-06-16T00:00:00+00:00",
+        "close_through": true
+      }
+    ]
+  }
+}
