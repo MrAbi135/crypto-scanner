@@ -24,9 +24,9 @@ every property here — and the golden datasets are what cover that.
 
 from __future__ import annotations
 
-from hypothesis import given
+from hypothesis import event, given
 from hypothesis import strategies as st
-from tests.support.strategies import candle_series, walking_candle_series
+from tests.support.strategies import candle_series, equal_highs_series, walking_candle_series
 
 from scanner.domain.common import Candle, wilder_atr, wilder_atr_series
 from scanner.domain.common.atr import atr_at
@@ -233,11 +233,11 @@ def test_a_cluster_only_ever_gains_members(
     chain grows — so the first index is the stable identity here.
 
     **Measured coverage, because a property that never meets its subject proves
-    nothing.** Of 300 generated series, 44 hold a cluster present in both the
-    prefix and the full series, so the "it survives at all" half has teeth. Only
-    5 of those had a chain actually *grow*, so the "appends rather than
-    rewrites" half is thin — it is asserted here rather than left unsaid, and a
-    series generator that plants near-equal highs on demand would sharpen it.
+    nothing.** Of 300 series from `candle_series`, 44 hold a cluster present in
+    both the prefix and the full series, so the "it survives at all" half has
+    teeth here. Only 5 had a chain actually *grow*, so growth is exercised by
+    `test_a_growing_cluster_appends_rather_than_rewrites` below, on a generator
+    built to produce it.
     """
 
     split = data.draw(
@@ -263,6 +263,62 @@ def test_a_cluster_only_ever_gains_members(
             f"candles vanished once the series grew to {len(series)}"
         )
         grown = later[key]
+        assert grown[: len(members)] == members, (
+            f"the {key[1]} cluster seeded at index {key[0]} was rewritten rather "
+            f"than appended to: {members} became {grown}"
+        )
+
+
+@given(series=equal_highs_series(), data=st.data())
+def test_a_growing_cluster_appends_rather_than_rewrites(
+    series: list,
+    data: st.DataObject,
+) -> None:
+    """§4.3's append clause, on a series where chains actually grow.
+
+    The general cluster property above meets growth 5 times in 300, which is
+    not a test of "appends, never rewrites" so much as an occasional visit to
+    it. `equal_highs_series` prints three to six near-equal external highs, so
+    a prefix that ends between the second and last top holds a shorter chain
+    than the full series: measured 158 growths in 300 splits.
+
+    Asserted in two parts so a failure says which clause broke. Every cluster
+    on the prefix must still exist on the full series, and its members must be
+    an unchanged prefix of the grown chain -- earlier members neither dropped,
+    replaced nor re-ordered. The run is also required to have *seen* growth at
+    least once across the draw, via `event`, so a future generator change that
+    quietly stops producing it shows up in hypothesis statistics instead of
+    passing silently.
+    """
+
+    split = data.draw(
+        st.integers(min_value=_MIN_SERIES, max_value=len(series)),
+        label="prefix length",
+    )
+
+    def clusters(candles: list[Candle]) -> dict[tuple[int, str], tuple[int, ...]]:
+        return {
+            (cluster.member_indices[0], cluster.side.value): cluster.member_indices
+            for cluster in detect_equal_level_clusters(
+                detect_external_swings(candles),
+                atrs=wilder_atr_series(candles),
+            )
+        }
+
+    early = clusters(series[:split])
+    later = clusters(series)
+
+    for key, members in early.items():
+        assert key in later, (
+            f"the {key[1]} cluster seeded at index {key[0]} on the first {split} "
+            f"candles vanished once the series grew to {len(series)}"
+        )
+
+        grown = later[key]
+
+        if len(grown) > len(members):
+            event("cluster grew between prefix and full series")
+
         assert grown[: len(members)] == members, (
             f"the {key[1]} cluster seeded at index {key[0]} was rewritten rather "
             f"than appended to: {members} became {grown}"

@@ -44,6 +44,75 @@ def utc_datetimes() -> st.SearchStrategy[object]:
 _SERIES_ORIGIN = datetime(2026, 1, 5, tzinfo=UTC)  # Monday — valid for every TF
 
 
+def equal_highs_series(
+    *,
+    timeframe: Timeframe = Timeframe.H1,
+    symbol: str = "PROPEQ",
+) -> st.SearchStrategy[list[Candle]]:
+    """A series that prints three to six near-equal swing highs in a row.
+
+    Built for one property: §4.3's "later qualifying members join
+    incrementally (join events are appends, never rewrites)". That clause only
+    has teeth when a chain *grows* between a prefix and the full series, and
+    neither general strategy produces growth often enough to test it. Measured
+    over 300 random prefix splits: `candle_series` grew a chain **5** times;
+    this grows one **158** times.
+
+    Each peak is a pyramid -- an ascent of 1.5 per candle, a single top, a
+    matching descent to a shared valley -- so every top is strictly above the
+    five candles either side and confirms as an external swing. Candles span
+    4.0 and step at most 1.5, so a gap term never exceeds the candle's own
+    range and ATR settles near 4.0, putting §4.3's tolerance near 0.05 x 4 =
+    0.20. Tops are jittered by 0, 0.05 or 0.10 -- always inside that tolerance
+    pairwise -- and valleys sit 10.5 under them, far past the 0.5 x ATR depth
+    §4.3 requires between members. Sixteen flat candles lead in, because the
+    cluster test needs ATR at the second member's confirmation and Wilder
+    seeds over fourteen.
+
+    Hypothesis draws the peak count and every jitter, so it still explores
+    which members join and in what order; what it does not explore is whether
+    a cluster exists at all, because that is not what the property asks.
+    """
+
+    rise = 7
+    lead = 16
+
+    def bar(level: Decimal, index: int) -> Candle:
+        return Candle(
+            symbol=symbol,
+            timeframe=timeframe,
+            open_time=_SERIES_ORIGIN + timeframe.duration * index,
+            open=level - Decimal("0.25"),
+            high=level + Decimal(2),
+            low=level - Decimal(2),
+            close=level + Decimal("0.25"),
+            volume=Decimal(100),
+            quote_volume=Decimal(10_000),
+            taker_buy_volume=Decimal(50),
+            trade_count=10,
+            source=CandleSource.BACKFILL,
+        )
+
+    def build(jitters: list[int]) -> list[Candle]:
+        valley = Decimal(1000)
+        step = Decimal("1.5")
+        top = valley + step * rise
+        levels: list[Decimal] = [valley] * lead
+
+        for jitter in jitters:
+            levels += [valley + step * i for i in range(1, rise)]
+            levels.append(top + Decimal("0.05") * jitter)
+            levels += [top - step * i for i in range(1, rise + 1)]
+
+        return [bar(level, index) for index, level in enumerate(levels)]
+
+    return st.lists(
+        st.integers(min_value=0, max_value=2),
+        min_size=3,
+        max_size=6,
+    ).map(build)
+
+
 def walking_candle_series(
     *,
     min_size: int = 20,
