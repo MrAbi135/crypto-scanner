@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from scanner.domain.common import Candle
-from scanner.domain.common.atr import wilder_atr
+from scanner.domain.common.atr import atr_at
 from scanner.domain.momentum.score import MomentumDirection, momentum_score
 
 # §7.2
@@ -40,10 +40,12 @@ class MomentumPhase:
 def momentum_phase(
     candles: Sequence[Candle],
     index: int,
+    *,
+    atrs: Sequence[Decimal | None] | None = None,
 ) -> MomentumPhase | None:
     """§7.2. Three-candle score differential, plus the exhaustion tag."""
-    now = momentum_score(candles, index)
-    then = momentum_score(candles, index - ACCEL_LOOKBACK)
+    now = momentum_score(candles, index, atrs=atrs)
+    then = momentum_score(candles, index - ACCEL_LOOKBACK, atrs=atrs)
 
     if now is None or then is None:
         return None
@@ -63,7 +65,8 @@ def momentum_phase(
         decelerating=decelerating,
         # Fading energy while price still grinds out marginal extremes is the
         # tired-trend signature §7.2 wants flagged -- prime context for a sweep.
-        exhaustion_watch=decelerating and _marginal_new_extreme(candles, index, now.direction),
+        exhaustion_watch=decelerating
+        and _marginal_new_extreme(candles, index, now.direction, atrs=atrs),
     )
 
 
@@ -71,6 +74,8 @@ def _marginal_new_extreme(
     candles: Sequence[Candle],
     index: int,
     direction: MomentumDirection,
+    *,
+    atrs: Sequence[Decimal | None] | None = None,
 ) -> bool:
     """§7.2: "price makes marginal new extremes (< 0.5 x ATR progress per candle)".
 
@@ -92,7 +97,7 @@ def _marginal_new_extreme(
     if direction is MomentumDirection.NEUTRAL:
         return False
 
-    atr = wilder_atr(candles, index)
+    atr = atr_at(candles, index, atrs)
 
     if atr is None or atr <= 0:
         return False
@@ -113,12 +118,17 @@ def _marginal_new_extreme(
     return progress < EXHAUSTION_PROGRESS_ATR * atr * ACCEL_LOOKBACK
 
 
-def detect_range_expansion(candles: Sequence[Candle], index: int) -> bool:
+def detect_range_expansion(
+    candles: Sequence[Candle],
+    index: int,
+    *,
+    atrs: Sequence[Decimal | None] | None = None,
+) -> bool:
     """§7.3: three-candle mean range >= 1.4 x ATR."""
     if index < EXPANSION_WINDOW - 1:
         return False
 
-    atr = wilder_atr(candles, index)
+    atr = atr_at(candles, index, atrs)
 
     if atr is None or atr <= 0:
         return False
@@ -130,7 +140,12 @@ def detect_range_expansion(candles: Sequence[Candle], index: int) -> bool:
     return mean_range >= EXPANSION_MEAN_RANGE_ATR * atr
 
 
-def detect_compression(candles: Sequence[Candle], index: int) -> bool:
+def detect_compression(
+    candles: Sequence[Candle],
+    index: int,
+    *,
+    atrs: Sequence[Decimal | None] | None = None,
+) -> bool:
     """§7.3 NR7-style coil: seven tight candles inside a tight envelope.
 
     Both conditions, and the envelope is the one that matters. Seven small
@@ -141,7 +156,7 @@ def detect_compression(candles: Sequence[Candle], index: int) -> bool:
     if index < COMPRESSION_WINDOW - 1:
         return False
 
-    atr = wilder_atr(candles, index)
+    atr = atr_at(candles, index, atrs)
 
     if atr is None or atr <= 0:
         return False

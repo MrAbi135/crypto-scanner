@@ -16,8 +16,10 @@ candles, which is where it already lives.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 
 from scanner.application.detection.orchestrator import build_event_key
 from scanner.application.ports import CandleRepository, Clock
@@ -25,7 +27,7 @@ from scanner.application.ports.detection import (
     EngineEventRecord,
     EngineEventRepository,
 )
-from scanner.domain.common import Candle
+from scanner.domain.common import Candle, wilder_atr_series
 from scanner.domain.common.rvol import classify, relative_volume
 from scanner.domain.momentum import (
     detect_compression,
@@ -88,14 +90,19 @@ class ParticipationReplayService:
 
         series = list(await self._candles.fetch_series(symbol, timeframe, start, end))
 
+        # One Wilder pass for the whole window instead of a re-seed per
+        # detector per candle: the same fix six other replays already
+        # carry. Measured at 1.12s of a 6.0s live pass before this.
+        atrs = wilder_atr_series(series)
+
         report = _Counters()
 
         if not series:
             return report.finish(symbol, timeframe, 0)
 
         for index, candle in enumerate(series):
-            await self._record_volume(symbol, timeframe, series, index, candle, report)
-            await self._record_momentum(symbol, timeframe, series, index, candle, report)
+            await self._record_volume(symbol, timeframe, series, index, candle, report, atrs)
+            await self._record_momentum(symbol, timeframe, series, index, candle, report, atrs)
 
         return report.finish(symbol, timeframe, len(series))
 
@@ -107,6 +114,7 @@ class ParticipationReplayService:
         index: int,
         candle: Candle,
         report: _Counters,
+        atrs: Sequence[Decimal | None],
     ) -> None:
         # §6.4 keys on the ABNORMAL *class*, not on a spike. `detect_volume_spike`
         # additionally requires §6.2's absolute quote floor, so an abnormal candle
@@ -165,14 +173,14 @@ class ParticipationReplayService:
                 report,
             )
 
-        if detect_expansion(series, index):
+        if detect_expansion(series, index, atrs=atrs):
             report.expansions += 1
 
             await self._emit(
                 symbol, timeframe, "VOLUME_EXPANSION", candle, self._rvol(series, index), report
             )
 
-        if detect_contraction(series, index):
+        if detect_contraction(series, index, atrs=atrs):
             report.contractions += 1
 
             await self._emit(
@@ -187,23 +195,24 @@ class ParticipationReplayService:
         index: int,
         candle: Candle,
         report: _Counters,
+        atrs: Sequence[Decimal | None],
     ) -> None:
-        if detect_range_expansion(series, index):
+        if detect_range_expansion(series, index, atrs=atrs):
             report.range_expansions += 1
 
             await self._emit(symbol, timeframe, "RANGE_EXPANSION", candle, {}, report)
 
-        if detect_compression(series, index):
+        if detect_compression(series, index, atrs=atrs):
             report.compressions += 1
 
             await self._emit(symbol, timeframe, "COMPRESSION", candle, {}, report)
 
-        phase = momentum_phase(series, index)
+        phase = momentum_phase(series, index, atrs=atrs)
 
         if phase is None:
             return
 
-        score = momentum_score(series, index)
+        score = momentum_score(series, index, atrs=atrs)
 
         # Only phase changes are recorded, not every reading. A score on every
         # candle is a series, and a series belongs in a chart query rather than
