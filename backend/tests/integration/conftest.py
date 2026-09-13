@@ -39,6 +39,24 @@ async def engine(pg_dsn):
     await engine.dispose()
 
 
+@pytest.fixture()
+async def app_engine(pg_dsn, engine):
+    """A connection as the application role, after the operator's grants ran.
+
+    The compose stack connects as `scanner_app` since the least-privilege
+    cut-over, so a test of what the application can write has to be run as
+    that role -- a test run as the owner would pass on writes the real
+    process is refused.
+    """
+    from tests.support.least_privilege import restricted_engine
+
+    restricted = await restricted_engine(pg_dsn, engine)
+
+    yield restricted
+
+    await restricted.dispose()
+
+
 @pytest.fixture(scope="session")
 def redis_url():
     """One Redis for the suite, on the same reasoning as the database.

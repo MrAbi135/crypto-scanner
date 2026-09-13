@@ -28,67 +28,26 @@ Requires Docker (testcontainers). Run: pytest -m integration tests/integration
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 pytest.importorskip("testcontainers")
 
 from sqlalchemy import text
-from sqlalchemy.engine import make_url
 
 from scanner.application.immutability_verification import verify_immutability_guards
-from scanner.infrastructure.persistence.database import build_engine, build_session_factory
+from scanner.infrastructure.persistence.database import build_session_factory
 from scanner.infrastructure.persistence.immutability_inspector import PgImmutabilityInspector
+from tests.support.least_privilege import APP_ROLE as _ROLE
+from tests.support.least_privilege import LEAST_PRIVILEGE_SQL as _SQL
+from tests.support.least_privilege import least_privilege_statements as _statements
 
 pytestmark = pytest.mark.integration
 
-_SQL = Path(__file__).resolve().parents[3] / "ops" / "db" / "least-privilege-role.sql"
-
-_ROLE = "scanner_app"
-
 _SEALED = ("signals", "signal_transitions", "signal_outcomes")
 
-
-def _statements() -> list[str]:
-    """The operator's SQL, split the way psql would run it."""
-
-    body = "\n".join(
-        line for line in _SQL.read_text(encoding="utf-8").splitlines() if not line.startswith("--")
-    )
-
-    return [statement.strip() for statement in body.split(";") if statement.strip()]
-
-
-@pytest.fixture()
-async def app_engine(pg_dsn, engine):
-    """A connection as the restricted role, after the operator's SQL has run."""
-
-    async with engine.begin() as conn:
-        # The container is shared across the session, so both halves are
-        # idempotent: the role may already exist and the grants re-apply cleanly.
-        await conn.execute(
-            text(
-                f"""
-                DO $$ BEGIN
-                  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{_ROLE}') THEN
-                    CREATE ROLE {_ROLE} LOGIN PASSWORD '{_ROLE}';
-                  END IF;
-                END $$
-                """
-            )
-        )
-
-        for statement in _statements():
-            await conn.execute(text(statement))
-
-    dsn = make_url(pg_dsn).set(username=_ROLE, password=_ROLE).render_as_string(hide_password=False)
-
-    restricted = build_engine(dsn, pool_size=2)
-
-    yield restricted
-
-    await restricted.dispose()
+# `app_engine` -- the connection as the restricted role, after the operator's
+# SQL has run -- lives in conftest.py, because test_publish_path_pg.py needs
+# the identical role to publish through.
 
 
 async def test_the_operator_sql_is_the_file_this_test_reads() -> None:

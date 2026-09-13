@@ -33,6 +33,10 @@ from scanner.application.detection.structure_shift_replay import (
     StructureShiftReplayService,
 )
 from scanner.application.marketdata.contexts import higher_timeframe
+from scanner.application.ports.repositories import IncidentRepository
+from scanner.application.ports.setups import SetupRepository
+from scanner.application.ports.signal_transitions import SignalTransitionRepository
+from scanner.application.ports.signals import SignalRepository
 from tests.golden.harness.canonical import output_hash
 from tests.golden.harness.dataset import GoldenDataset
 from tests.golden.harness.memory import (
@@ -215,7 +219,26 @@ async def _run_structure_shift(dataset: GoldenDataset) -> dict[str, Any]:
 
 
 async def _run_confluence(dataset: GoldenDataset) -> dict[str, Any]:
+    return await run_confluence(dataset)
+
+
+async def run_confluence(
+    dataset: GoldenDataset,
+    *,
+    setups: SetupRepository | None = None,
+    signals: SignalRepository | None = None,
+    transitions: SignalTransitionRepository | None = None,
+    incidents: IncidentRepository | None = None,
+) -> dict[str, Any]:
     """SLS §8, which means the whole pipeline.
+
+    The four publish-path repositories can be injected. A golden run leaves
+    them at their defaults -- in-memory setups and signals, no transitions,
+    no incidents -- and `tests/integration/test_publish_path_pg.py` passes the
+    Postgres ones instead, so the same candles can be shown to publish the
+    same signal through the real tables. Both reads below go through the
+    ports (`list_at`, `scan`) rather than a double's attributes, so the two
+    runs are read back the same way.
 
     Confluence scores what the other engines found, so a case for it cannot
     run in isolation: with no swings, no pools and no zones behind it every
@@ -237,8 +260,8 @@ async def _run_confluence(dataset: GoldenDataset) -> dict[str, Any]:
     pools = InMemoryLiquidityPoolRepository()
     pool_transitions = InMemoryLiquidityTransitionRepository()
     interactions = InMemoryIctZoneInteractionRepository()
-    setups = InMemorySetupRepository()
-    signals = InMemorySignalRepository()
+    setups = setups if setups is not None else InMemorySetupRepository()
+    signals = signals if signals is not None else InMemorySignalRepository()
 
     evidence = InMemoryIctEvidenceRepository(events, pool_transitions)
 
@@ -323,6 +346,8 @@ async def _run_confluence(dataset: GoldenDataset) -> dict[str, Any]:
             algo_version=dataset.algo_version,
             setups=setups,
             signals=signals,
+            transitions=transitions,
+            incidents=incidents,
         ),
     )
 
@@ -362,7 +387,13 @@ async def _run_confluence(dataset: GoldenDataset) -> dict[str, Any]:
                 "evidence": row.evidence,
             }
             for row in sorted(
-                setups.rows.values(),
+                # The engine records every candidate of a run at the newest
+                # candle's open, so this is the whole run's T16 output.
+                await setups.list_at(
+                    (dataset.symbol,),
+                    dataset.timeframe,
+                    dataset.candles[-1].open_time,
+                ),
                 key=lambda r: (r.symbol, r.direction, r.evaluated_at),
             )
         ],
@@ -402,6 +433,8 @@ async def _run_confluence(dataset: GoldenDataset) -> dict[str, Any]:
                 "payload": json.loads(row.payload),
             }
             for row in await signals.scan()
+            # A real T17 holds every other test's signals too.
+            if row.symbol == dataset.symbol
         ],
     }
 
