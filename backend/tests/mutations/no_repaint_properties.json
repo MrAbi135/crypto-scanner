@@ -1,0 +1,62 @@
+{
+  "description": "PR #247's no-repaint properties, as its original hand-rolled battery defined them (transcript line 38051), re-run through tests.support.mutation_battery after the stale-bytecode fix (#255). Run from backend/.",
+  "pytest": [
+    "tests/property/test_no_repaint_zones.py"
+  ],
+  "mutations": [
+    {
+      "name": "ATR at an index depends on the series length",
+      "file": "backend/src/scanner/domain/common/atr.py",
+      "old": "        out[current] = atr\n",
+      "new": "        out[current] = atr + Decimal(len(candles) - current)\n",
+      "expect_failing": [
+        "test_atr_at_an_index_never_changes_as_the_series_grows"
+      ]
+    },
+    {
+      "name": "FVG peeks at the candle after its own (never-revoked property)",
+      "file": "backend/src/scanner/domain/ict/fvg.py",
+      "old": "    c1 = candles[index - 2]\n    c3 = candles[index]\n",
+      "new": "    c1 = candles[index - 2]\n    c3 = candles[min(index + 1, len(candles) - 1)]\n",
+      "expect_failing": [
+        "test_a_confirmed_fvg_is_never_revoked_by_later_candles"
+      ]
+    },
+    {
+      "name": "FVG peeks at the candle after its own (depends-only property)",
+      "file": "backend/src/scanner/domain/ict/fvg.py",
+      "old": "    c1 = candles[index - 2]\n    c3 = candles[index]\n",
+      "new": "    c1 = candles[index - 2]\n    c3 = candles[min(index + 1, len(candles) - 1)]\n",
+      "expect_failing": [
+        "test_an_fvg_depends_only_on_candles_up_to_its_own_index"
+      ]
+    },
+    {
+      "name": "displacement gated on the next candle",
+      "file": "backend/src/scanner/domain/ict/displacement.py",
+      "old": "    body_signed = candle.close - candle.open\n",
+      "new": "    if index + 1 < len(candles) and candles[index + 1].close <= candle.close:\n        return None\n\n    body_signed = candle.close - candle.open\n",
+      "expect_failing": [
+        "test_a_displacement_is_a_permanent_measurement"
+      ]
+    },
+    {
+      "name": "a grown cluster drops its first member (original #247 target)",
+      "file": "backend/src/scanner/domain/liquidity/clusters.py",
+      "old": "        if len(chain) >= 2:\n",
+      "new": "        if len(chain) > 2:\n            chain = chain[1:]\n            positions = positions[1:]\n\n        if len(chain) >= 2:\n",
+      "expect_failing": [
+        "test_a_cluster_only_ever_gains_members"
+      ]
+    },
+    {
+      "name": "atr_at disagrees with the scalar past seeding",
+      "file": "backend/src/scanner/domain/common/atr.py",
+      "old": "    if index < 0 or index >= len(atrs):\n        return None\n\n    return atrs[index]\n",
+      "new": "    if index < 0 or index >= len(atrs):\n        return None\n\n    value = atrs[index]\n    return value + 1 if value is not None and index > 30 else value\n",
+      "expect_failing": [
+        "test_the_atr_shim_agrees_with_the_scalar_it_replaces"
+      ]
+    }
+  ]
+}
