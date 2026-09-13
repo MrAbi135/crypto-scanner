@@ -46,3 +46,6 @@ test-results/
 pgdata/
 redisdata/
 backend/tests/golden/**/raw/    # raw captures stay local; curated datasets ARE committed
+
+# JUnit reports the CI suite gate reads
+backend/reports/

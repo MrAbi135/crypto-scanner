@@ -1,0 +1,53 @@
+{
+  "description": "PR #252: the signal-repository contract and the Postgres publish-path tests must each notice their own mutation. Needs Docker. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/publish_path_pg.json",
+  "pytest": [
+    "tests/integration/test_signal_repository_contract.py",
+    "tests/integration/test_publish_path_pg.py",
+    "-m",
+    "integration"
+  ],
+  "mutations": [
+    {
+      "name": "memory: dedup tie-break picks the lower signal_id",
+      "file": "backend/tests/golden/harness/memory.py",
+      "old": "            key=lambda row: (row.published_at, row.signal_id),",
+      "new": "            key=lambda row: (row.published_at, [-ord(ch) for ch in row.signal_id]),",
+      "expect_failing": ["test_a_dedup_tie_on_one_close_is_broken_by_the_signal_id[memory]"]
+    },
+    {
+      "name": "memory: a second append overwrites",
+      "file": "backend/tests/golden/harness/memory.py",
+      "old": "        if signal.signal_id in self.rows:\n            return False\n\n        self.rows[signal.signal_id] = signal",
+      "new": "        existed = signal.signal_id in self.rows\n\n        self.rows[signal.signal_id] = signal\n\n        if existed:\n            return False",
+      "expect_failing": ["test_a_second_append_on_one_id_is_refused_and_the_first_write_stands[memory]"]
+    },
+    {
+      "name": "postgres: dedup lookup answers the oldest",
+      "file": "backend/src/scanner/infrastructure/persistence/signal_repository.py",
+      "old": "            .order_by(SignalRow.published_at.desc(), SignalRow.signal_id.desc())",
+      "new": "            .order_by(SignalRow.published_at.asc(), SignalRow.signal_id.desc())",
+      "expect_failing": ["test_the_dedup_lookup_returns_the_newest_publication[postgres]"]
+    },
+    {
+      "name": "engine: refresh merge not recorded",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        if self._transitions is None:\n            return False\n\n        await self._transitions.append(",
+      "new": "        if True:\n            return False\n\n        await self._transitions.append(",
+      "expect_failing": ["test_a_second_pass_merges_a_refresh_instead_of_publishing_again"]
+    },
+    {
+      "name": "engine: open incidents ignored",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        return not await self._incidents.list_open(symbol)",
+      "new": "        return True",
+      "expect_failing": ["test_an_open_incident_on_the_symbol_withholds_the_same_signal"]
+    },
+    {
+      "name": "grants: the application role cannot INSERT signals",
+      "file": "ops/db/least-privilege-role.sql",
+      "old": "REVOKE UPDATE, DELETE, TRUNCATE ON",
+      "new": "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON",
+      "expect_failing": ["test_the_golden_signal_is_published_through_postgres_as_the_app_role"]
+    }
+  ]
+}
