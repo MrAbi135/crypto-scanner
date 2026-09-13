@@ -97,7 +97,7 @@ remote_rev=$(git rev-parse origin/main)
 # (blocking a good deploy: 's6-v3' did exactly that once ict_replay reached
 # s6-v4) or passes while proving nothing about what is being shipped.
 grep -qF 's4-v9' backend/src/scanner/application/detection/structure_replay.py   || fail "#203 missing: STRUCTURE_ALGO_VERSION is not s4-v9"
-grep -qF 's5-v10' backend/src/scanner/application/detection/liquidity_replay.py   || fail "#203 missing: LIQUIDITY_ALGO_VERSION is not s5-v10"
+grep -qF 's5-v11' backend/src/scanner/application/detection/liquidity_replay.py   || fail "sweep-class fix missing: LIQUIDITY_ALGO_VERSION is not s5-v11"
 grep -qF 's8-confluence-v29' backend/src/scanner/application/detection/confluence_replay.py   || fail "#206 missing: CONFLUENCE_ALGO_VERSION is not s8-confluence-v29"
 grep -qF '_mature_recent_sweeps' backend/src/scanner/application/detection/liquidity_replay.py   || fail "#199 missing: sweeps never mature, so reclaimed/displaced/stop-hunt stay unreachable"
 grep -qF 'def apply_recovery' backend/src/scanner/domain/structure/trend.py   || fail "#198 missing: the trend machine has no recovery edge"
@@ -190,7 +190,7 @@ sleep 15
 step "5. Verify the RUNNING containers, not the tree"
 # ---------------------------------------------------------------------------
 
-docker exec scanner-dev-engine-1 grep -qF 's5-v10' /app/src/scanner/application/detection/liquidity_replay.py   || fail "running engine is not s5-v10 -- the image that started is not the image built"
+docker exec scanner-dev-engine-1 grep -qF 's5-v11' /app/src/scanner/application/detection/liquidity_replay.py   || fail "running engine is not s5-v11 -- the image that started is not the image built"
 docker exec scanner-dev-engine-1 grep -qF 's8-confluence-v29' /app/src/scanner/application/detection/confluence_replay.py   || fail "running engine is not s8-confluence-v29"
 docker exec scanner-dev-engine-1 grep -qF '_mature_recent_sweeps' /app/src/scanner/application/detection/liquidity_replay.py   || fail "running engine does not mature sweeps"
 docker exec scanner-dev-engine-1 grep -qF 'def apply_recovery' /app/src/scanner/domain/structure/trend.py   || fail "running engine has no trend recovery edge"

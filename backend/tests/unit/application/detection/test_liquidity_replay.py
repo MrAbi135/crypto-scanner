@@ -374,6 +374,7 @@ async def test_active_bsl_pool_sweep_becomes_terminal() -> None:
         pools.pool,
         candles,
         wilder_atr_series(candles),
+        (),
     )
 
     assert result == "SWEPT"
@@ -431,12 +432,14 @@ async def test_terminal_pool_cannot_transition_twice() -> None:
         pools.pool,
         candles,
         wilder_atr_series(candles),
+        (),
     )
 
     second = await service._replay_pool_lifecycle(
         pools.pool,
         candles,
         wilder_atr_series(candles),
+        (),
     )
 
     assert first == "SWEPT"
@@ -445,6 +448,120 @@ async def test_terminal_pool_cannot_transition_twice() -> None:
     assert len(transitions.items) == 1
 
     assert len(events.items) == 1
+
+
+def _sweep_candles() -> list[Candle]:
+    """The single-candle BSL sweep above: candle 1 wicks to 102 through the
+    100 pool and closes back at 99, on the last candle of the padded window."""
+
+    return pad_for_warmup(
+        [
+            make_candle(0, open_="98", high="99", low="97", close="98"),
+            make_candle(1, open_="99", high="102", low="98", close="99"),
+        ]
+    )
+
+
+def _external_swing(index: int, price: str, kind: SwingKind, candles: list[Candle]) -> SwingPoint:
+    return SwingPoint(
+        index=index,
+        open_time=candles[index].open_time,
+        price=Decimal(price),
+        kind=kind,
+        strength=SwingStrength.EXTERNAL,
+    )
+
+
+async def _sweep_with(
+    pool: LiquidityPoolRecord,
+    candles: list[Candle],
+    external_swings: tuple[SwingPoint, ...],
+) -> tuple[FakeTransitions, FakeEvents]:
+    pools = FakePools(pool)
+    transitions = FakeTransitions()
+    events = FakeEvents()
+
+    service = LiquidityReplayService(
+        FakeCandles(candles),  # type: ignore[arg-type]
+        pools,  # type: ignore[arg-type]
+        transitions,
+        events,
+        FakeSnapshots(),  # type: ignore[arg-type]
+        FakeEvidence(transitions),  # type: ignore[arg-type]
+        FakeClock(),
+    )
+
+    result = await service._replay_pool_lifecycle(
+        pools.pool,
+        candles,
+        wilder_atr_series(candles),
+        external_swings,
+    )
+
+    assert result == "SWEPT"
+
+    return transitions, events
+
+
+@pytest.mark.asyncio
+async def test_a_sweep_carries_the_class_its_level_had_on_the_sweep_candle() -> None:
+    """§4.4 at the moment of the sweep, not at the end of the window.
+
+    The pool row says EXTERNAL -- the class `run` last gave it. On the candle
+    the sweep confirms, the confirmed external swings bracket the range at 110
+    and 90, and 100 sits inside: INTERNAL liquidity. The sweep is a fact about
+    that candle, so the SWEPT evidence and the LIQUIDITY_SWEEP payload both
+    say INTERNAL, and §4.7's stop hunt, which needs EXTERNAL, cannot follow.
+
+    Before s5-v11 the sweep copied the row's class, which the window's newest
+    extremes decide, so replaying the same sweep over a longer window could
+    change it.
+    """
+    candles = _sweep_candles()
+
+    transitions, events = await _sweep_with(
+        make_pool(),
+        candles,
+        (
+            _external_swing(10, "110", SwingKind.HIGH, candles),
+            _external_swing(20, "90", SwingKind.LOW, candles),
+        ),
+    )
+
+    assert json.loads(transitions.items[0].evidence)["liquidity_class"] == "INTERNAL"
+    assert json.loads(events.items[0].payload)["liquidity_class"] == "INTERNAL"
+
+
+@pytest.mark.asyncio
+async def test_a_swing_confirming_after_the_sweep_does_not_classify_it() -> None:
+    """§3.1's confirmation delay applies to the bracket too.
+
+    The low at 90 pivots two candles before the sweep and needs five to
+    confirm, so on the sweep candle there is no range yet -- only the 110
+    high. With no bracket, the pool keeps the class it was born with: this one
+    came from an external swing, so EXTERNAL, even though its row has since
+    been relabelled INTERNAL by extremes the sweep candle never saw.
+    """
+    candles = _sweep_candles()
+    sweep_index = len(candles) - 1
+
+    pool = replace(
+        make_pool(),
+        liquidity_class="INTERNAL",
+        evidence=json.dumps({"swing_strength": "EXTERNAL"}),
+    )
+
+    transitions, events = await _sweep_with(
+        pool,
+        candles,
+        (
+            _external_swing(10, "110", SwingKind.HIGH, candles),
+            _external_swing(sweep_index - 2, "90", SwingKind.LOW, candles),
+        ),
+    )
+
+    assert json.loads(transitions.items[0].evidence)["liquidity_class"] == "EXTERNAL"
+    assert json.loads(events.items[0].payload)["liquidity_class"] == "EXTERNAL"
 
 
 def _maturation_service(
@@ -476,7 +593,7 @@ async def _sweep_then_mature(
 
     atrs = wilder_atr_series(candles)
 
-    await service._replay_pool_lifecycle(pools.pool, candles, atrs)
+    await service._replay_pool_lifecycle(pools.pool, candles, atrs, ())
     await service._mature_recent_sweeps("BTCUSDT", Timeframe.M5, candles, atrs)
 
 
@@ -743,6 +860,7 @@ async def test_a_pool_older_than_the_window_expires() -> None:
         pools.pool,
         candles,
         wilder_atr_series(candles),
+        (),
     )
 
     assert result == "EXPIRED"
@@ -771,6 +889,7 @@ async def test_a_pool_one_candle_short_of_retirement_survives() -> None:
         pools.pool,
         candles,
         wilder_atr_series(candles),
+        (),
     )
 
     assert result is None

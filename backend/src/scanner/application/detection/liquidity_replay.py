@@ -84,7 +84,13 @@ from scanner.shared import Timeframe
 # LIQUIDITY_STOP_HUNT / LIQUIDITY_STOP_HUNT_FAILED events.
 # v10: swing walk-back fix (Sec 3.1) -- the flat pause in a descent or
 # ascent no longer mints a pivot, so which swings exist changes.
-LIQUIDITY_ALGO_VERSION = "s5-v10"
+# v11: a sweep's §4.4 class is the class its level had on the candle the
+# sweep confirmed, not the class the window's newest extremes give it. The
+# SWEPT evidence and every fact matured from it (stop hunt, reclaim,
+# displaced) carry that class, so a replay over a longer window no longer
+# rewrites it -- measured before the fix, 39 of 1,619 sweeps on 40 generated
+# series changed class between a prefix run and the full run.
+LIQUIDITY_ALGO_VERSION = "s5-v11"
 
 _ATR_PERIOD = 14
 _SWEEP_SCAN_ATR = Decimal("3")
@@ -332,6 +338,7 @@ class LiquidityReplayService:
                 pool,
                 candles,
                 atrs,
+                external_swings,
             )
 
             if result == "SWEPT":
@@ -612,6 +619,7 @@ class LiquidityReplayService:
         record: LiquidityPoolRecord,
         candles: Sequence[Candle],
         atrs: Sequence[Decimal | None],
+        external_swings: Sequence[SwingPoint],
     ) -> str | None:
         if record.state != "ACTIVE":
             return None
@@ -693,7 +701,7 @@ class LiquidityReplayService:
             if sweep is not None:
                 transitioned = await self._record_sweep(
                     record,
-                    sweep,
+                    _classified_when_swept(sweep, record, external_swings),
                 )
 
                 if transitioned:
@@ -748,7 +756,7 @@ class LiquidityReplayService:
                 if two_candle_sweep is not None:
                     transitioned = await self._record_sweep(
                         record,
-                        two_candle_sweep,
+                        _classified_when_swept(two_candle_sweep, record, external_swings),
                     )
 
                     if transitioned:
@@ -1382,6 +1390,66 @@ def _extremes_of(swings: Sequence[SwingPoint]) -> _Extremes:
         high=max(highs, key=lambda s: s.index).price if highs else None,
         low=max(lows, key=lambda s: s.index).price if lows else None,
     )
+
+
+def _classified_when_swept(
+    sweep: SweepEvent,
+    record: LiquidityPoolRecord,
+    external_swings: Sequence[SwingPoint],
+) -> SweepEvent:
+    """§4.4's class as it stood on the candle the sweep confirmed.
+
+    `detect_*_sweep` copies the class off the pool row, and the row carries
+    the class the *newest* extremes give it -- `run` reclassifies every live
+    pool against the whole window before any lifecycle is walked. That is
+    right for the row, which is current state. It is wrong for the sweep,
+    which is a fact about one candle: the external swings that re-bracketed
+    the range afterwards had not happened yet, and neither had the
+    confirmation of the ones still inside their own window.
+
+    It was not cosmetic. The class is frozen into the SWEPT evidence and the
+    LIQUIDITY_SWEEP payload, maturation reads it back from there, and §4.7's
+    stop hunt exists only for an EXTERNAL sweep -- so the same sweep, replayed
+    over a longer window, changed class and gained or lost its stop hunt.
+    Measured on 40 generated series: 39 of 1,619 sweeps a prefix run
+    published changed class in the full run; with this, none do.
+
+    With no bracket yet at that candle, the pool keeps the class it was born
+    with rather than the row's current one, for the same reason.
+    """
+
+    confirmed = [
+        swing
+        for swing in external_swings
+        if swing.index + swing_window(swing.strength) <= sweep.confirmed_index
+    ]
+
+    liquidity_class = _extremes_of(confirmed).classify(record.price, _class_at_birth(record))
+
+    return replace(sweep, liquidity_class=liquidity_class)
+
+
+def _class_at_birth(record: LiquidityPoolRecord) -> LiquidityClass:
+    """The static label `run` falls back to when a pool is persisted.
+
+    A cluster pool and an external swing's pool are EXTERNAL, an internal
+    swing's pool INTERNAL -- the fallbacks passed to `classify` at the three
+    persist sites. Anything else keeps its row's class.
+    """
+
+    if record.source == PoolSource.CLUSTER.value:
+        return LiquidityClass.EXTERNAL
+
+    if record.source == PoolSource.SWING.value:
+        try:
+            strength = json.loads(record.evidence).get("swing_strength")
+        except (ValueError, TypeError, AttributeError):
+            strength = None
+
+        if strength in {LiquidityClass.INTERNAL.value, LiquidityClass.EXTERNAL.value}:
+            return LiquidityClass(strength)
+
+    return LiquidityClass(record.liquidity_class)
 
 
 class _LevelMap:
