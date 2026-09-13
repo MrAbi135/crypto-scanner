@@ -1,0 +1,26 @@
+{
+  "description": "PR #248's growth-only cluster mutations (transcript line 38251), re-run through tests.support.mutation_battery after the stale-bytecode fix (#255). Both are no-ops on a two-member chain. Run from backend/.",
+  "pytest": [
+    "tests/property/test_no_repaint_zones.py::test_a_growing_cluster_appends_rather_than_rewrites"
+  ],
+  "mutations": [
+    {
+      "name": "a grown chain drops its first member",
+      "file": "backend/src/scanner/domain/liquidity/clusters.py",
+      "old": "        if len(chain) >= 2:\n",
+      "new": "        if len(chain) > 2:\n            chain = chain[1:]\n            positions = positions[1:]\n\n        if len(chain) >= 2:\n",
+      "expect_failing": [
+        "test_a_growing_cluster_appends_rather_than_rewrites"
+      ]
+    },
+    {
+      "name": "a grown chain puts its newest member first",
+      "file": "backend/src/scanner/domain/liquidity/clusters.py",
+      "old": "        if len(chain) >= 2:\n",
+      "new": "        if len(chain) > 2:\n            chain = [chain[-1], *chain[:-1]]\n            positions = [positions[-1], *positions[:-1]]\n\n        if len(chain) >= 2:\n",
+      "expect_failing": [
+        "test_a_growing_cluster_appends_rather_than_rewrites"
+      ]
+    }
+  ]
+}
