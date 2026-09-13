@@ -10,6 +10,7 @@ here at least once, including the ones nobody hopes to see.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -237,6 +238,33 @@ def test_a_real_pytest_run_yields_each_verdict_and_restores_the_file(repo: Path)
         mb.Verdict.ERROR,
     ]
     assert (repo / "calc.py").read_bytes() == original
+
+
+def test_a_same_length_edit_in_the_same_second_is_not_read_from_stale_bytecode(
+    repo: Path,
+) -> None:
+    """The defect CI found on 2026-09-13, reproduced without relying on timing.
+
+    A `.pyc` is trusted when the source's mtime (whole seconds) and size match
+    what was recorded at compile time. `a + b` -> `a - b` keeps the size, and
+    on a fast machine the mutation lands in the same second as the control run
+    that compiled the original -- so the mutated run imported the old bytecode,
+    the test passed against code that no longer existed, and the verdict read
+    SURVIVED. Here the mtime is put back by hand, which is exactly that second.
+    """
+    source = repo / "calc.py"
+    before = source.stat()
+
+    assert mb.run_pytest(["test_calc.py"], cwd=repo).exit_code == 0
+
+    source.write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+    os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+    assert source.stat().st_size == before.st_size
+
+    mutated = mb.run_pytest(["test_calc.py"], cwd=repo)
+
+    assert mutated.exit_code == 1, "the run imported bytecode compiled from the original source"
 
 
 def test_a_failing_control_run_stops_the_battery(repo: Path) -> None:
