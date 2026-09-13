@@ -110,6 +110,29 @@ index 295, and the label says 295. Translating indices to be scenario-relative
 would put a layer between the engine's answer and the expectation, which is
 precisely where an off-by-one hides.
 
+### Declared higher-timeframe context (`htf_state`)
+
+§8.4's F6 and §8.6's "HTF aligned" read the §3.7 trend state of the timeframe
+one rung up, and a golden series has exactly one timeframe. Without a
+declaration the HTF always reads as unreachable, F6 scores its neutral 50, and
+A3 and A4 can never classify -- no matter how clean the scenario.
+
+```json
+"timeframe": "H4",
+"htf_state": "BULLISH",
+```
+
+The confluence runner writes the declared state where the engine reads it: the
+§3.7 shift snapshot of the rung above, under the shift engine's own version. The
+engine's `_read_htf_state` then runs unmodified, and the dataset's own timeframe
+is still derived by the shift pass from the candles. A value that is not a §3.7
+state is rejected by the loader, and a declaration on a timeframe with no rung
+above it is rejected by the runner.
+
+Like `filler`, this is declared *context*, not a fact the case asserts: §8.7
+opens by declaring it ("H4 BULLISH; D1 BULLISH"), and a rationale that uses it
+must say so.
+
 **Choosing the filler's height.** Filler contributes true range, so it moves
 ATR. Set the filler's high−low to the scenario's *mean* true range and the
 blended ATR lands exactly on the value the scenario was designed around — which
@@ -226,6 +249,13 @@ builds `DetectionPipeline` itself with in-memory ports and calls it, rather than
 re-assembling the nine services in the harness's own order — the pipeline's
 docstring insists there is exactly one definition of "run detection", and a
 second one here would be the thing it warns about.
+
+The confluence engine is also handed an in-memory T17 signal repository, and
+its rows are part of the canonical output as `signals`. Without one, `_publish`
+returns before §15.3 is evaluated, so a candidate could read `publishable: true`
+while no golden ever showed a signal actually being written -- and a
+zero-signal soak could not be told apart from a broken publish path. A case
+that publishes nothing asserts `"signals": []`.
 
 Every engine is now wired. What remains blocked is blocked on the *datasets*:
 a series long enough to confirm external swings, a declared data gap the loader

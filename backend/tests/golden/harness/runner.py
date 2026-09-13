@@ -22,12 +22,17 @@ from scanner.application.detection.ict_replay import IctReplayService
 from scanner.application.detection.liquidity_replay import LiquidityReplayService
 from scanner.application.detection.participation_replay import ParticipationReplayService
 from scanner.application.detection.pipeline import DetectionPipeline
-from scanner.application.detection.state import SHIFT_NAMESPACE, EngineStateManager
+from scanner.application.detection.state import (
+    SHIFT_NAMESPACE,
+    EngineStateManager,
+    StructureEngineState,
+)
 from scanner.application.detection.structure_replay import StructureReplayService
 from scanner.application.detection.structure_shift_replay import (
     STRUCTURE_SHIFT_ALGO_VERSION,
     StructureShiftReplayService,
 )
+from scanner.application.marketdata.contexts import higher_timeframe
 from tests.golden.harness.canonical import output_hash
 from tests.golden.harness.dataset import GoldenDataset
 from tests.golden.harness.memory import (
@@ -45,6 +50,7 @@ from tests.golden.harness.memory import (
     InMemoryLiquidityStateStore,
     InMemoryLiquidityTransitionRepository,
     InMemorySetupRepository,
+    InMemorySignalRepository,
     InMemorySymbolRepository,
     InMemoryTradeAggregateRepository,
 )
@@ -232,6 +238,7 @@ async def _run_confluence(dataset: GoldenDataset) -> dict[str, Any]:
     pool_transitions = InMemoryLiquidityTransitionRepository()
     interactions = InMemoryIctZoneInteractionRepository()
     setups = InMemorySetupRepository()
+    signals = InMemorySignalRepository()
 
     evidence = InMemoryIctEvidenceRepository(events, pool_transitions)
 
@@ -239,6 +246,28 @@ async def _run_confluence(dataset: GoldenDataset) -> dict[str, Any]:
         InMemoryEngineStateStore(),
         namespace=SHIFT_NAMESPACE,
     )
+
+    # A declared HTF is written where the engine reads it -- the §3.7 shift
+    # snapshot of the rung above, under the shift engine's own version -- so
+    # `_read_htf_state` runs unmodified. The dataset's own timeframe is a
+    # different key, and the shift pass below still derives that one itself.
+    if dataset.htf_state is not None:
+        above = higher_timeframe(dataset.timeframe)
+
+        if above is None:
+            raise ValueError(
+                f"{dataset.dataset_id}: htf_state declared on {dataset.timeframe.value}, "
+                "which has no timeframe above it"
+            )
+
+        await shift_state.save(
+            StructureEngineState(
+                symbol=dataset.symbol,
+                timeframe=above.value,
+                algo_version=STRUCTURE_SHIFT_ALGO_VERSION,
+                trend_state=dataset.htf_state,
+            )
+        )
 
     pipeline = DetectionPipeline(
         StructureReplayService(
@@ -293,6 +322,7 @@ async def _run_confluence(dataset: GoldenDataset) -> dict[str, Any]:
             shift_algo_version=STRUCTURE_SHIFT_ALGO_VERSION,
             algo_version=dataset.algo_version,
             setups=setups,
+            signals=signals,
         ),
     )
 
@@ -348,6 +378,30 @@ async def _run_confluence(dataset: GoldenDataset) -> dict[str, Any]:
                 "factors": candidate.factors,
             }
             for candidate in confluence.candidates
+        ],
+        # T17, the end of the chain. `publishable` on a candidate is a verdict
+        # about the setup; a row here is §15.3 having been evaluated and passed
+        # -- payload complete, levels coherent, R >= 1.5, dedup key clear. The
+        # two can disagree, and a case that asserted only the first would pass
+        # against a publish path that writes nothing. `signal_id` and
+        # `payload_hash` are digests of fields already compared.
+        "signals": [
+            {
+                "symbol": row.symbol,
+                "direction": row.direction,
+                "archetype": row.archetype,
+                "grade": row.grade,
+                "final_confidence": row.final_confidence,
+                "entry_proximal": row.entry_proximal,
+                "entry_distal": row.entry_distal,
+                "invalidation_level": row.invalidation_level,
+                "target_bands": row.target_bands,
+                "published_at": row.published_at,
+                "ttl_candles": row.ttl_candles,
+                "dedup_key": row.dedup_key,
+                "payload": json.loads(row.payload),
+            }
+            for row in await signals.scan()
         ],
     }
 
