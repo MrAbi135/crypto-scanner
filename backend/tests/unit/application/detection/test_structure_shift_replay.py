@@ -11,6 +11,7 @@ import pytest
 from tests.golden.harness.memory import InMemoryEngineStateStore
 
 import scanner.application.detection.structure_shift_replay as shift_module
+from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
 from scanner.application.detection.state import (
     SHIFT_NAMESPACE,
     EngineStateManager,
@@ -104,6 +105,7 @@ class FakeEvidenceRepository:
         ],
     ) -> None:
         self.liquidity = liquidity
+        self.asked_version: str | None = "never asked"
 
     async def list_structure(
         self,
@@ -120,10 +122,13 @@ class FakeEvidenceRepository:
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_version: str | None = None,
     ) -> tuple[
         LiquidityEvidenceRecord,
         ...,
     ]:
+        self.asked_version = only_version
         return self.liquidity
 
 
@@ -287,6 +292,33 @@ async def test_external_sweep_choch_confirms_mss(
     assert report.choch_created == 1
     assert report.mss_created == 1
     assert report.trend_state == "BEARISH"
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_origin_is_read_from_the_running_liquidity_version_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """§3.6's sweep origin reads the liquidity ledger. After a version bump it
+    holds both generations of each sweep, the old one still carrying the class
+    the bump corrected, so the read asks for the running version."""
+    series = candles()
+
+    monkeypatch.setattr(shift_module, "detect_external_swings", lambda _: external_swings(series))
+    monkeypatch.setattr(shift_module, "detect_internal_swings", lambda _: ())
+
+    evidence = FakeEvidenceRepository(())
+
+    service = StructureShiftReplayService(
+        FakeCandleRepository(series),
+        FakeEventRepository(),
+        evidence,
+        FakeClock(),
+        EngineStateManager(InMemoryEngineStateStore(), namespace=SHIFT_NAMESPACE),
+    )
+
+    await service.run("BTCUSDT", Timeframe.H1, series[0].open_time, series[-1].close_time)
+
+    assert evidence.asked_version == LIQUIDITY_ALGO_VERSION
 
 
 @pytest.mark.asyncio

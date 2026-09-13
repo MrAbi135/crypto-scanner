@@ -749,6 +749,63 @@ async def test_evidence_reader_returns_liquidity_transitions_in_candle_order(
     assert all(r.pool_id == "p-ev" for r in found)
 
 
+async def test_list_active_can_be_pinned_to_one_liquidity_version(engine) -> None:
+    """A version bump re-hashes every pool, so one symbol-TF holds two
+    generations of ACTIVE pools until the old one ages out. Pinned, the read
+    sees the generation the pool's own evidence names; unpinned, both."""
+    repo = PgLiquidityPoolRepository(build_session_factory(engine))
+    symbol = "PPINACT"
+
+    await repo.upsert(pool("pin-old", symbol=symbol, evidence='{"algo_version":"s5-old"}'))
+    await repo.upsert(pool("pin-new", symbol=symbol, evidence='{"algo_version":"s5-new"}'))
+
+    assert {p.pool_id for p in await repo.list_active(symbol, TF)} == {"pin-old", "pin-new"}
+    assert [p.pool_id for p in await repo.list_active(symbol, TF, only_version="s5-new")] == [
+        "pin-new"
+    ]
+
+
+async def test_the_liquidity_ledger_is_pinned_through_its_pools(engine) -> None:
+    """A transition row names no version; its pool does. The pinned read joins
+    the pool, so rows written before anyone asked are pinned too."""
+    sessions = build_session_factory(engine)
+    symbol = "PPINLEDG"
+    pools_repo = PgLiquidityPoolRepository(sessions)
+
+    await pools_repo.upsert(pool("led-old", symbol=symbol, evidence='{"algo_version":"s5-old"}'))
+    await pools_repo.upsert(pool("led-new", symbol=symbol, evidence='{"algo_version":"s5-new"}'))
+
+    appender = PgLiquidityTransitionRepository(sessions)
+
+    for pool_id, minutes in (("led-old", 10), ("led-new", 20)):
+        await appender.append(
+            LiquidityTransitionRecord(
+                transition_id=f"t-{pool_id}",
+                pool_id=pool_id,
+                symbol=symbol,
+                timeframe=TF,
+                from_state="ACTIVE",
+                to_state="SWEPT",
+                reason="liquidity_sweep",
+                transitioned_at=T0 + timedelta(minutes=minutes),
+                candle_index=minutes,
+                evidence='{"v":1}',
+            )
+        )
+
+    reader = PgIctEvidenceRepository(sessions)
+    window = (symbol, TF, T0, T0 + timedelta(minutes=100))
+
+    assert [r.pool_id for r in await reader.list_liquidity(*window)] == ["led-old", "led-new"]
+    assert [r.pool_id for r in await reader.list_liquidity(*window, only_version="s5-new")] == [
+        "led-new"
+    ]
+
+    recent = await reader.list_recent_sweeps(limit=500, only_version="s5-new")
+
+    assert [r.pool_id for r in recent if r.symbol == symbol] == ["led-new"]
+
+
 async def test_evidence_reader_is_empty_for_an_unknown_symbol(engine) -> None:
     reader = PgIctEvidenceRepository(build_session_factory(engine))
 

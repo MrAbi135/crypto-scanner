@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from fastapi.testclient import TestClient
 
+from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
 from scanner.application.feed import Feed, FeedRow
 from scanner.application.identity import AccountService, SessionService
 from scanner.application.identity.tokens import AccessTokens
@@ -85,9 +86,11 @@ class SweepEvidence(EmptySignals):
     def __init__(self, rows=()) -> None:
         self._rows = tuple(rows)
         self.asked_limit: int | None = None
+        self.asked_version: str | None = "never asked"
 
-    async def list_recent_sweeps(self, *, limit):
+    async def list_recent_sweeps(self, *, limit, only_version=None):
         self.asked_limit = limit
+        self.asked_version = only_version
 
         return self._rows[:limit]
 
@@ -162,6 +165,16 @@ def test_recent_sweeps_carry_their_context_and_side() -> None:
 
     assert (row["symbol"], row["timeframe"], row["side"]) == ("BTCUSDT", "M15", "BSL")
     assert evidence.asked_limit == 10
+
+
+def test_recent_sweeps_are_the_running_liquidity_versions() -> None:
+    """Through a version bump's window one physical sweep exists under both
+    generations of pools; the hub lists it once."""
+    evidence = SweepEvidence([sweep("p1")])
+
+    get(build(evidence=evidence))
+
+    assert evidence.asked_version == LIQUIDITY_ALGO_VERSION
 
 
 def test_a_sweep_whose_pool_is_gone_lists_with_no_side() -> None:

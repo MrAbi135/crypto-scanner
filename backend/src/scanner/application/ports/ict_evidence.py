@@ -87,10 +87,13 @@ class IctEvidenceRepository(Protocol):
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_version: str | None = None,
     ) -> tuple[LiquidityEvidenceRecord, ...]: ...
 
     async def list_recent_sweeps(
         self,
         *,
         limit: int,
+        only_version: str | None = None,
     ) -> tuple[RecentSweepRecord, ...]: ...

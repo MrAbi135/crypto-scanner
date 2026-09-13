@@ -1,0 +1,139 @@
+{
+  "description": "Liquidity reads pinned to the running algo version (2026-09-14). After the s5-v11 deploy the engine had swept and matured the s5-v10 generation's pools under its own label and every consumer read both generations. Each mutation removes one pin. The Postgres SQL filters are covered by tests/integration/test_detection_persistence_pg.py, which needs a database and runs in CI. These tests are deterministic (no Hypothesis), so one battery run is a verdict. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/liquidity_version_pin.json",
+  "pytest": [
+    "tests/unit/application/detection/test_liquidity_version_pin.py",
+    "tests/unit/application/detection/test_confluence_replay.py",
+    "tests/unit/application/detection/test_structure_shift_replay.py",
+    "tests/unit/application/detection/test_ict_replay_coverage.py",
+    "tests/unit/interfaces/api/test_coins_endpoints.py",
+    "tests/unit/interfaces/api/test_dashboard_overview.py"
+  ],
+  "mutations": [
+    {
+      "name": "the level map counts another version's pools",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "list_active(symbol, timeframe, only_version=self._algo_version)",
+      "new": "list_active(symbol, timeframe)",
+      "expect_failing": [
+        "test_a_level_held_by_another_version_does_not_absorb_this_versions_pool"
+      ]
+    },
+    {
+      "name": "the lifecycle sweeps another version's pools",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "            timeframe,\n            only_version=self._algo_version,\n        )\n\n        # A previous version's pools",
+      "new": "            timeframe,\n        )\n\n        # A previous version's pools",
+      "expect_failing": [
+        "test_another_versions_pool_is_not_swept_by_this_version"
+      ]
+    },
+    {
+      "name": "the resting-liquidity snapshot holds another version's pools",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "            only_version=self._algo_version,\n        )\n\n        await self._snapshots.save(",
+      "new": "        )\n\n        await self._snapshots.save(",
+      "expect_failing": [
+        "test_another_versions_pool_is_not_swept_by_this_version"
+      ]
+    },
+    {
+      "name": "maturation reads another version's sweeps",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "            candles[-1].close_time + duration,\n            only_version=self._algo_version,",
+      "new": "            candles[-1].close_time + duration,",
+      "expect_failing": [
+        "test_only_this_versions_sweeps_mature"
+      ]
+    },
+    {
+      "name": "a superseded pool gets the whole lifecycle, not just expiry",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "        if expire_only:\n            return None",
+      "new": "        if False:\n            return None",
+      "expect_failing": [
+        "test_another_versions_pool_is_not_swept_by_this_version"
+      ]
+    },
+    {
+      "name": "a superseded pool is never retired",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "        for pool in superseded:",
+      "new": "        for pool in ():",
+      "expect_failing": [
+        "test_another_versions_pool_is_retired_by_age_and_nothing_else"
+      ]
+    },
+    {
+      "name": "confluence reads every generation of the liquidity ledger",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "symbol, timeframe, start, end, only_version=LIQUIDITY_ALGO_VERSION",
+      "new": "symbol, timeframe, start, end",
+      "expect_failing": [
+        "test_liquidity_is_read_from_the_running_liquidity_version_only"
+      ]
+    },
+    {
+      "name": "confluence reads every generation of the pool map",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "symbol, timeframe, only_version=LIQUIDITY_ALGO_VERSION",
+      "new": "symbol, timeframe",
+      "expect_failing": [
+        "test_liquidity_is_read_from_the_running_liquidity_version_only"
+      ]
+    },
+    {
+      "name": "a stop hunt on a pool this version never swept earns credit",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        if pool_id not in current_pools:\n            continue",
+      "new": "        if False:\n            continue",
+      "expect_failing": [
+        "test_a_stop_hunt_on_a_pool_this_version_never_swept_earns_nothing"
+      ]
+    },
+    {
+      "name": "the structure shift reads every generation of sweeps",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            end,\n            only_version=LIQUIDITY_ALGO_VERSION,",
+      "new": "            end,",
+      "expect_failing": [
+        "test_the_sweep_origin_is_read_from_the_running_liquidity_version_only"
+      ]
+    },
+    {
+      "name": "the order-block pass reads every generation of sweeps",
+      "file": "backend/src/scanner/application/detection/ict_ob_replay.py",
+      "old": "            end,\n            only_version=LIQUIDITY_ALGO_VERSION,",
+      "new": "            end,",
+      "expect_failing": [
+        "test_the_origin_sweep_is_read_from_the_running_liquidity_version_only"
+      ]
+    },
+    {
+      "name": "the chart draws every generation of pools",
+      "file": "backend/src/scanner/interfaces/api/coins.py",
+      "old": "parsed, only_version=LIQUIDITY_ALGO_VERSION)",
+      "new": "parsed)",
+      "expect_failing": [
+        "test_the_liquidity_row_draws_one_liquidity_version"
+      ]
+    },
+    {
+      "name": "the chart draws every generation of sweeps",
+      "file": "backend/src/scanner/interfaces/api/coins.py",
+      "old": "start, end, only_version=LIQUIDITY_ALGO_VERSION",
+      "new": "start, end",
+      "expect_failing": [
+        "test_the_liquidity_row_draws_one_liquidity_version"
+      ]
+    },
+    {
+      "name": "the hub lists every generation's sweeps",
+      "file": "backend/src/scanner/interfaces/api/dashboard.py",
+      "old": "limit=RECENT_SWEEPS, only_version=LIQUIDITY_ALGO_VERSION",
+      "new": "limit=RECENT_SWEEPS",
+      "expect_failing": [
+        "test_recent_sweeps_are_the_running_liquidity_versions"
+      ]
+    }
+  ]
+}

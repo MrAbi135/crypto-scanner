@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
+from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
 from scanner.application.detection.orchestrator import build_event_key
 from scanner.application.detection.signal_monitor import _transition_id
 from scanner.application.detection.state import EngineStateManager
@@ -434,7 +435,17 @@ class ConfluenceReplayService:
         # G2. A confluence engine that grades nothing looks exactly like a
         # market that offered nothing.
         events = await self._events.list_events(symbol, timeframe, start, end)
-        liquidity = await self._evidence.list_liquidity(symbol, timeframe, start, end)
+        # Pinned to the running liquidity version, like the zones below: a
+        # version bump re-hashes every pool, and for one window the ledger holds
+        # two generations of the same sweeps -- the old one still carrying the
+        # class and the facts the new one corrected.
+        liquidity = await self._evidence.list_liquidity(
+            symbol, timeframe, start, end, only_version=LIQUIDITY_ALGO_VERSION
+        )
+        # The sweep facts below are events, and an event's own label does not
+        # say whose sweep it is about: after a bump the new engine had matured
+        # the old generation's sweeps under its label. The pool decides.
+        current_pools = frozenset(record.pool_id for record in liquidity)
         # Pinned to each type's current version: during a migration window the
         # table holds both generations of the same physical zone, and scoring
         # both is counting one gap twice. Lifecycles read unpinned on purpose
@@ -448,13 +459,17 @@ class ConfluenceReplayService:
         # SLS 4.5 defines resting liquidity as the ACTIVE pool map, and
         # names target selection as one of its consumers. Read once per
         # pass; _target_pool picks the side each direction trades toward.
-        resting = await self._pools.list_active(symbol, timeframe)
+        resting = await self._pools.list_active(
+            symbol, timeframe, only_version=LIQUIDITY_ALGO_VERSION
+        )
 
         event_types = {record.event_type for record in events}
 
         # The maturing sweep facts (s5-v9) live in events, not in the frozen
         # transition evidence -- for a live sweep the row's `reclaimed` was
         # written before the reclaiming candle existed and stays false.
+        # Not intersected with `current_pools`: it is only ever joined to a sweep
+        # from the pinned ledger, so an old generation's reclaim cannot reach one.
         reclaimed_pools = _pool_ids_of(events, "LIQUIDITY_SWEEP_RECLAIMED", key="pool_id")
 
         # §4.7: a hunt whose own pool later recorded a failure is withdrawn
@@ -465,6 +480,7 @@ class ConfluenceReplayService:
         stop_hunt_key = _newest_surviving_hunt(
             events,
             failed_pools=_pool_ids_of(events, "LIQUIDITY_STOP_HUNT_FAILED", key="sweep_pool_id"),
+            current_pools=current_pools,
         )
 
         # §6.5 compares this candle's p90 print size against the median of
@@ -1556,8 +1572,13 @@ def _newest_surviving_hunt(
     events: Sequence[EngineEventRecord],
     *,
     failed_pools: frozenset[str],
+    current_pools: frozenset[str],
 ) -> str | None:
-    """The newest §4.7 hunt whose own pool never recorded a failure."""
+    """The newest §4.7 hunt whose own pool never recorded a failure.
+
+    Only a hunt on one of this liquidity version's pools counts; see the
+    pinned read in `run`.
+    """
 
     best: EngineEventRecord | None = None
 
@@ -1571,6 +1592,9 @@ def _newest_surviving_hunt(
             continue
 
         if not isinstance(pool_id, str) or not pool_id or pool_id in failed_pools:
+            continue
+
+        if pool_id not in current_pools:
             continue
 
         if best is None or record.event_at >= best.event_at:

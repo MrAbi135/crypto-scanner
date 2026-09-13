@@ -115,8 +115,10 @@ grep -qF '_broken_premise' backend/src/scanner/application/detection/signal_moni
 grep -qF 'abs(candles[cursor].high - candidate)' backend/src/scanner/domain/structure/swings.py   || fail "#203 missing: the swing walk-back still consumes higher candles"
 grep -qF 's6-ob-v6' backend/src/scanner/application/detection/ict_ob_replay.py   || fail "#222 missing: ICT_OB_ALGO_VERSION is not s6-ob-v6"
 grep -qF 'origin_opens = ob.created_at' backend/src/scanner/application/detection/ict_ob_replay.py   || fail "#222 missing: the OB helpers still index the window with frozen offsets"
+grep -qF 'expire_only' backend/src/scanner/application/detection/liquidity_replay.py   || fail "liquidity version pin missing: the replay still sweeps and matures another version's pools"
+grep -qF 'only_version=LIQUIDITY_ALGO_VERSION' backend/src/scanner/application/detection/confluence_replay.py   || fail "liquidity version pin missing: confluence still reads every liquidity generation"
 
-echo "   all nine batch markers present in the tree at $(git rev-parse --short HEAD)"
+echo "   all eleven batch markers present in the tree at $(git rev-parse --short HEAD)"
 
 # ---------------------------------------------------------------------------
 step "1. Invariants before touching anything (expect: exit 0, 1 acknowledged)"
@@ -207,6 +209,8 @@ docker exec scanner-dev-engine-1 grep -qF 'def apply_recovery' /app/src/scanner/
 docker exec scanner-dev-engine-1 grep -qF '_broken_premise' /app/src/scanner/application/detection/signal_monitor.py   || fail "running engine cannot reach INVALIDATED_EARLY"
 docker exec scanner-dev-engine-1 grep -qF 'abs(candles[cursor].high - candidate)' /app/src/scanner/domain/structure/swings.py   || fail "running engine still has the old swing walk-back"
 docker exec scanner-dev-engine-1 grep -qF 'origin_opens = ob.created_at' /app/src/scanner/application/detection/ict_ob_replay.py   || fail "running engine still indexes the window with the OB's frozen offsets"
+docker exec scanner-dev-engine-1 grep -qF 'expire_only' /app/src/scanner/application/detection/liquidity_replay.py   || fail "running engine does not pin liquidity to its own version"
+docker exec scanner-dev-engine-1 grep -qF 'only_version=LIQUIDITY_ALGO_VERSION' /app/src/scanner/application/detection/confluence_replay.py   || fail "running confluence still reads every liquidity generation"
 
 running_release=$(docker exec scanner-dev-engine-1 printenv SCANNER_RELEASE 2>/dev/null | tr -d '
 ')

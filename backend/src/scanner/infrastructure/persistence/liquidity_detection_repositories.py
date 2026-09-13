@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, cast, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -93,15 +94,29 @@ class PgLiquidityPoolRepository:
         self,
         symbol: str,
         timeframe: Timeframe,
+        *,
+        only_version: str | None = None,
     ) -> tuple[LiquidityPoolRecord, ...]:
+        """ACTIVE pools, optionally only those one liquidity version wrote.
+
+        A version bump re-hashes every pool id, so for one window after a
+        deploy the table holds two generations of the same levels. Pinned, a
+        reader sees one; `None` sees both, which is only right for a caller
+        that means to retire the old generation.
+        """
+        conditions = [
+            LiquidityPoolRow.symbol == symbol,
+            LiquidityPoolRow.timeframe == timeframe.value,
+            LiquidityPoolRow.state == "ACTIVE",
+        ]
+
+        if only_version is not None:
+            conditions.append(pool_version_of(LiquidityPoolRow) == only_version)
+
         async with self._sessions() as session:
             result = await session.execute(
                 select(LiquidityPoolRow)
-                .where(
-                    LiquidityPoolRow.symbol == symbol,
-                    LiquidityPoolRow.timeframe == timeframe.value,
-                    LiquidityPoolRow.state == "ACTIVE",
-                )
+                .where(*conditions)
                 .order_by(
                     LiquidityPoolRow.strength.desc(),
                     LiquidityPoolRow.price.asc(),
@@ -206,3 +221,15 @@ def _pool_record(
         updated_at=row.updated_at,
         evidence=row.evidence,
     )
+
+
+def pool_version_of(row: type[LiquidityPoolRow]) -> ColumnElement[str]:
+    """The liquidity algo version a pool row's own evidence claims.
+
+    There is no algo_version column: detection rows carry their version inside
+    their evidence (DDD v1.0.1), exactly as zones do -- see
+    `ict_zone_repositories.list_live`.
+    """
+    version: ColumnElement[str] = cast(row.evidence, JSONB)["algo_version"].astext
+
+    return version

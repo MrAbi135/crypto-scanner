@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
+from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
 from scanner.application.ports.ict_evidence import (
     LiquidityEvidenceRecord,
     StructureEvidenceRecord,
@@ -37,12 +38,14 @@ class FakeEvidence:
         self.structure = tuple(structure)
         self.liquidity = tuple(liquidity)
         self.windows: list[tuple[datetime, datetime]] = []
+        self.asked_version: str | None = "never asked"
 
     async def list_structure(self, symbol, timeframe, start, end):
         self.windows.append((start, end))
         return self.structure
 
-    async def list_liquidity(self, symbol, timeframe, start, end):
+    async def list_liquidity(self, symbol, timeframe, start, end, *, only_version=None):
+        self.asked_version = only_version
         return self.liquidity
 
 
@@ -59,8 +62,10 @@ class FakeZones:
 class FakePools:
     def __init__(self, pools=()) -> None:
         self.pools = tuple(pools)
+        self.asked_version: str | None = "never asked"
 
-    async def list_active(self, symbol, timeframe):
+    async def list_active(self, symbol, timeframe, *, only_version=None):
+        self.asked_version = only_version
         return self.pools
 
 
@@ -287,6 +292,33 @@ def test_liquidity_ships_strength_with_its_components() -> None:
 
     assert strength["score"] == "74.25"
     assert strength["components"] == {"cluster": "6.25", "age": "10"}
+
+
+def test_the_liquidity_row_draws_one_liquidity_version() -> None:
+    """The envelope names LIQUIDITY_ALGO_VERSION, so both reads behind the row
+    ask for exactly that one -- through a bump's window the tables hold two
+    generations of every level, and the chart must not draw both."""
+    evidence = FakeEvidence()
+    pools = FakePools()
+
+    app = build_read_api(
+        candles=NoCandles(),
+        evidence=evidence,
+        zones=FakeZones(),
+        pools=pools,
+        clock=FakeClock(),
+        **identity(),
+    )
+
+    response = TestClient(app).get(
+        "/api/v1/coins/BTCUSDT/liquidity",
+        params={"timeframe": "H1"},
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    assert evidence.asked_version == LIQUIDITY_ALGO_VERSION
+    assert pools.asked_version == LIQUIDITY_ALGO_VERSION
 
 
 def test_only_sweeps_appear_under_sweeps() -> None:

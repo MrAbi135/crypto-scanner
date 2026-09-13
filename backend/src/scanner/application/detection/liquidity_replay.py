@@ -90,6 +90,14 @@ from scanner.shared import Timeframe
 # displaced) carry that class, so a replay over a longer window no longer
 # rewrites it -- measured before the fix on 150 generated series, 1,205 of
 # 5,711 sweeps (21%) changed class between a prefix run and the full run.
+#
+# Pinned reads, 2026-09-14 -- deliberately not a bump. Every read of pools, the
+# transition ledger and the sweep facts is pinned to the running version, here
+# and in every engine that consumes liquidity. Within one version the output is
+# byte-identical, which the golden suite proves; across a bump the new engine no
+# longer sweeps, absorbs or matures the previous generation's pools -- measured
+# after the s5-v11 deploy, it had re-matured 124 stop hunts and 1,596 reclaims of
+# s5-v10 sweeps under its own label -- and only retires them by age.
 LIQUIDITY_ALGO_VERSION = "s5-v11"
 
 _ATR_PERIOD = 14
@@ -222,7 +230,9 @@ class LiquidityReplayService:
         newest_atr = atrs[-1] if atrs else None
         epsilon = TOLERANCE_ATR * (newest_atr or Decimal(0))
 
-        levels = _LevelMap(await self._pools.list_active(symbol, timeframe))
+        levels = _LevelMap(
+            await self._pools.list_active(symbol, timeframe, only_version=self._algo_version)
+        )
 
         extremes = _extremes_of(external_swings)
 
@@ -311,6 +321,18 @@ class LiquidityReplayService:
         lifecycle_pools = await self._pools.list_active(
             symbol,
             timeframe,
+            only_version=self._algo_version,
+        )
+
+        # A previous version's pools are still ACTIVE rows after a bump. They
+        # are not this engine's to sweep, break or reclassify -- doing so
+        # published this version's facts about the old generation's levels --
+        # but left alone they would stay ACTIVE forever. So they only age out.
+        current_ids = {pool.pool_id for pool in lifecycle_pools}
+        superseded = tuple(
+            pool
+            for pool in await self._pools.list_active(symbol, timeframe)
+            if pool.pool_id not in current_ids
         )
 
         sweeps = 0
@@ -348,6 +370,18 @@ class LiquidityReplayService:
             elif result == "EXPIRED":
                 expired += 1
 
+        for pool in superseded:
+            retired = await self._replay_pool_lifecycle(
+                pool,
+                candles,
+                atrs,
+                external_swings,
+                expire_only=True,
+            )
+
+            if retired == "EXPIRED":
+                expired += 1
+
         await self._mature_recent_sweeps(
             symbol,
             timeframe,
@@ -358,6 +392,7 @@ class LiquidityReplayService:
         active = await self._pools.list_active(
             symbol,
             timeframe,
+            only_version=self._algo_version,
         )
 
         await self._snapshots.save(
@@ -620,6 +655,8 @@ class LiquidityReplayService:
         candles: Sequence[Candle],
         atrs: Sequence[Decimal | None],
         external_swings: Sequence[SwingPoint],
+        *,
+        expire_only: bool = False,
     ) -> str | None:
         if record.state != "ACTIVE":
             return None
@@ -661,6 +698,10 @@ class LiquidityReplayService:
             if transitioned:
                 return "EXPIRED"
 
+            return None
+
+        # Another version's pool: aged, never swept or broken by this one.
+        if expire_only:
             return None
 
         # Surviving that, the pool is younger than the window, so its creation
@@ -869,11 +910,15 @@ class LiquidityReplayService:
         """
         duration = timeframe.duration
 
+        # Only this version's sweeps. Unpinned, the pass after a bump matured
+        # the previous generation's sweeps and published their facts under
+        # this version's label, carrying the class the bump had corrected.
         rows = await self._evidence.list_liquidity(
             symbol,
             timeframe,
             candles[0].open_time,
             candles[-1].close_time + duration,
+            only_version=self._algo_version,
         )
 
         for row in rows:
