@@ -185,12 +185,47 @@ def test_a_displacement_is_a_permanent_measurement(
     every gap a true range and push ATR far above any candle's own span. The
     property was passing by finding nothing. On the walking strategy the rate
     is 136 of 200, and the same mutation is caught.
+
+    **Half the splits are aimed, and the reason is a measured miss.** A
+    detector that reads past its own candle is only visible here when the
+    prefix *ends on* a displacement and the candle after it would change the
+    answer. A uniformly drawn split lands there rarely: on 2026-09-13 a
+    full-file mutation battery run reported SURVIVED for "displacement gated
+    on the next candle". So a drawn half of the examples end the prefix
+    immediately after a displacement.
+
+    The candidates come from what each prefix detects **at its own close**,
+    never from the full series. A detector that peeks forward removes exactly
+    the displacements it disqualifies from the full series, so choosing
+    targets there would hide the very splits that expose it. The other half
+    of the splits stay uniform, so nothing the property covered before is
+    dropped.
     """
 
-    split = data.draw(
-        st.integers(min_value=_MIN_SERIES, max_value=len(series)),
-        label="prefix length",
+    atrs = wilder_atr_series(series)
+
+    # Prefix lengths whose last candle is a displacement as recorded at that
+    # candle's close, and which still leave a later candle in the full series.
+    ends_on_displacement = [
+        index + 1
+        for index in range(_MIN_SERIES - 1, len(series) - 1)
+        if (atr := atrs[index]) is not None
+        and atr > 0
+        and detect_displacement(series[: index + 1], index, atr=atr) is not None
+    ]
+
+    aimed = bool(ends_on_displacement) and data.draw(
+        st.booleans(), label="end the prefix on a displacement"
     )
+
+    if aimed:
+        event("prefix ends on a displacement")
+        split = data.draw(st.sampled_from(ends_on_displacement), label="prefix length")
+    else:
+        split = data.draw(
+            st.integers(min_value=_MIN_SERIES, max_value=len(series)),
+            label="prefix length",
+        )
 
     def found(candles: list[Candle]) -> dict[int, object]:
         atrs = wilder_atr_series(candles)
