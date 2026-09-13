@@ -88,8 +88,8 @@ from scanner.shared import Timeframe
 # sweep confirmed, not the class the window's newest extremes give it. The
 # SWEPT evidence and every fact matured from it (stop hunt, reclaim,
 # displaced) carry that class, so a replay over a longer window no longer
-# rewrites it -- measured before the fix, 39 of 1,619 sweeps on 40 generated
-# series changed class between a prefix run and the full run.
+# rewrites it -- measured before the fix on 150 generated series, 1,205 of
+# 5,711 sweeps (21%) changed class between a prefix run and the full run.
 LIQUIDITY_ALGO_VERSION = "s5-v11"
 
 _ATR_PERIOD = 14
@@ -1411,8 +1411,10 @@ def _classified_when_swept(
     LIQUIDITY_SWEEP payload, maturation reads it back from there, and §4.7's
     stop hunt exists only for an EXTERNAL sweep -- so the same sweep, replayed
     over a longer window, changed class and gained or lost its stop hunt.
-    Measured on 40 generated series: 39 of 1,619 sweeps a prefix run
-    published changed class in the full run; with this, none do.
+    Measured on 150 generated series: 1,205 of 5,711 sweeps a prefix run
+    published (21%) changed class in the full run; with this, none do. The
+    per-series spread is wide (median 16%, some series over 60%), so a
+    small sample can read anywhere from a few percent to a quarter.
 
     With no bracket yet at that candle, the pool keeps the class it was born
     with rather than the row's current one, for the same reason.

@@ -1,0 +1,62 @@
+{
+  "description": "SLS 3.6 MSS invalidation, reached with mss_then_reclaim_series: within 10 candles of an MSS, a close back beyond the pre-MSS extreme marks it low_quality. Each mutation breaks the rule, either edge of its window, its anchor, its timing or its once-only fact. The two edge mutations bite on a single reclaim delay each (1 and 10, 11 for the widened window), so those three are caught by test_the_window_edges_are_exact, which pins each delay, rather than by chance draws. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/mss_invalidation.json",
+  "pytest": [
+    "tests/property/test_mss_invalidation.py"
+  ],
+  "mutations": [
+    {
+      "name": "the candle straight after the MSS cannot invalidate it",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "if since >= 1 and mss_is_low_quality(",
+      "new": "if since >= 2 and mss_is_low_quality(",
+      "expect_failing": [
+        "test_the_window_edges_are_exact"
+      ]
+    },
+    {
+      "name": "the invalidation window is nine candles, not ten",
+      "file": "backend/src/scanner/domain/structure/mss.py",
+      "old": "MSS_INVALIDATION_MAX = 10",
+      "new": "MSS_INVALIDATION_MAX = 9",
+      "expect_failing": [
+        "test_the_window_edges_are_exact"
+      ]
+    },
+    {
+      "name": "the invalidation window is eleven candles, not ten",
+      "file": "backend/src/scanner/domain/structure/mss.py",
+      "old": "MSS_INVALIDATION_MAX = 10",
+      "new": "MSS_INVALIDATION_MAX = 11",
+      "expect_failing": [
+        "test_the_window_edges_are_exact"
+      ]
+    },
+    {
+      "name": "the watch is never armed",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "if candidate.pre_mss_extreme is not None:",
+      "new": "if candidate.pre_mss_extreme is None:",
+      "expect_failing": [
+        "test_an_mss_is_invalidated_exactly_when_price_reclaims_within_ten_candles"
+      ]
+    },
+    {
+      "name": "the reclaim is judged on the next candle's close",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "candle.close > mss_watch.pre_mss_extreme",
+      "new": "candles[min(candle_index + 1, len(candles) - 1)].close > mss_watch.pre_mss_extreme",
+      "expect_failing": [
+        "test_an_mss_is_invalidated_exactly_when_price_reclaims_within_ten_candles"
+      ]
+    },
+    {
+      "name": "the watch stays armed after it fires, so one reclaim invalidates again and again",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "mss_watch = None",
+      "new": "mss_watch = mss_watch",
+      "expect_failing": [
+        "test_an_mss_is_invalidated_exactly_when_price_reclaims_within_ten_candles"
+      ]
+    }
+  ]
+}
