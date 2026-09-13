@@ -25,6 +25,22 @@ impulse and should not. What is not ordinary is zero on one side *while
 `ESCALATE` is piled on that same side*, because an escalating leg is one the
 market travelled; a real trend simply has fewer legs the other way, not a
 drawer full of them under a different name.
+
+**And not that either, on its own -- the other side has to be empty too.**
+Since the #142 fix an escalating leg that out-travels its anchor re-anchors,
+so in a steady trend the anchor flips on every counter-leg and a with-trend
+leg can only be an impulse when two strong legs run the same way back to
+back. A strong uptrend rarely gives the down side that, so it collects
+escalations and no impulses -- while the up side collects escalations too,
+because the anchor keeps flipping. The ratchet cannot do that: its anchor
+never leaves the first impulse's side, so the locked-out side is the ONLY
+side that can escalate. Measured 2026-09-13 on the host's newest 501 H1/H4
+candles, 29 contexts: the check as first written fired on 4 (BTCUSDT,
+DOGEUSDT, LINKUSDT and SOLUSDT H4 -- all in strong uptrends, escalating both
+ways), which blocked a deploy and fired hourly for two days; requiring the
+other side's escalations to be zero fired on 0. With the #142 fix reverted,
+both forms fired on 29 of 29 -- so the narrower check lost nothing it exists
+to catch.
 """
 
 from __future__ import annotations
@@ -237,9 +253,12 @@ async def main() -> None:
                     f"IMPULSE up={up:<3} down={down:<3}  ESCALATE up={esc_up:<3} down={esc_down}"
                 )
 
-                # Zero impulses one way while escalations pile up that same
-                # way. Either half alone is an ordinary market.
-                starved = (up == 0 and esc_up >= 5) or (down == 0 and esc_down >= 5)
+                # The ratchet's whole signature: zero impulses one way,
+                # escalations piled up that same way, and none the other way.
+                # Any part alone is an ordinary market -- see the docstring.
+                starved = (up == 0 and esc_up >= 5 and esc_down == 0) or (
+                    down == 0 and esc_down >= 5 and esc_up == 0
+                )
 
                 if starved:
                     print(f"VIOLATION {line}")
