@@ -63,8 +63,18 @@ elapsed_h=$(( (now_s - t0_s) / 3600 ))
 echo "   soak T0     : $t0  (${elapsed_h}h ago)"
 echo "   engine start: $started"
 
+# Cutting a soak short is sometimes the owner's call -- a fix worth more than
+# the hours left on the clock. It is allowed only out loud, the same way a
+# restart is: without a declared reason the gate still refuses, and with one
+# the reason is printed into the deploy log next to the hours thrown away.
+# Faking T0 instead would put a lie in ~/soak-logs/T0 that every later check
+# would read as truth.
 if [ "$elapsed_h" -lt 72 ]; then
-  fail "soak is at ${elapsed_h}h of 72 -- this script exists so nobody resets it early"
+  if [ -z "${EARLY_DEPLOY_REASON:-}" ]; then
+    fail "soak is at ${elapsed_h}h of 72 -- this script exists so nobody resets it early. Set EARLY_DEPLOY_REASON='...' only if the owner approved ending it now."
+  fi
+
+  echo "   !! soak ENDED EARLY at ${elapsed_h}h of 72, declared: $EARLY_DEPLOY_REASON"
 fi
 
 # RestartCount cannot see this. `docker kill` followed by `docker start` --
