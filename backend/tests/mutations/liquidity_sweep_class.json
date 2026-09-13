@@ -1,0 +1,45 @@
+{
+  "description": "Liquidity s5-v11: a sweep carries the §4.4 class its level had on the candle the sweep confirmed. Each mutation brings back a way the class could be decided with knowledge that candle did not have. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/liquidity_sweep_class.json",
+  "pytest": [
+    "tests/unit/application/detection/test_liquidity_replay.py",
+    "tests/property/test_no_repaint_liquidity.py"
+  ],
+  "mutations": [
+    {
+      "name": "single-candle sweep copies the pool row's window-end class",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "_classified_when_swept(sweep, record, external_swings)",
+      "new": "sweep",
+      "expect_failing": [
+        "test_a_sweep_carries_the_class_its_level_had_on_the_sweep_candle"
+      ]
+    },
+    {
+      "name": "two-candle sweep copies the pool row's window-end class",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "_classified_when_swept(two_candle_sweep, record, external_swings)",
+      "new": "two_candle_sweep",
+      "expect_failing": [
+        "test_a_published_sweep_and_its_class_are_never_rewritten"
+      ]
+    },
+    {
+      "name": "with no bracket yet, the sweep takes the row's current class instead of its birth class",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "classify(record.price, _class_at_birth(record))",
+      "new": "classify(record.price, LiquidityClass(record.liquidity_class))",
+      "expect_failing": [
+        "test_a_swing_confirming_after_the_sweep_does_not_classify_it"
+      ]
+    },
+    {
+      "name": "a swing still inside its confirmation window brackets the sweep",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "if swing.index + swing_window(swing.strength) <= sweep.confirmed_index",
+      "new": "if swing.index <= sweep.confirmed_index",
+      "expect_failing": [
+        "test_a_swing_confirming_after_the_sweep_does_not_classify_it"
+      ]
+    }
+  ]
+}
