@@ -263,7 +263,7 @@ async def run_confluence(
     setups = setups if setups is not None else InMemorySetupRepository()
     signals = signals if signals is not None else InMemorySignalRepository()
 
-    evidence = InMemoryIctEvidenceRepository(events, pool_transitions)
+    evidence = InMemoryIctEvidenceRepository(events, pool_transitions, pools)
 
     shift_state = EngineStateManager(
         InMemoryEngineStateStore(),
@@ -503,7 +503,7 @@ async def _run_liquidity(dataset: GoldenDataset) -> dict[str, Any]:
         transitions,
         events,
         InMemoryLiquidityStateStore(),
-        InMemoryIctEvidenceRepository(events, transitions),
+        InMemoryIctEvidenceRepository(events, transitions, pools),
         FixedClock(HARNESS_CLOCK),
         algo_version=dataset.algo_version,
     )
@@ -621,6 +621,7 @@ async def _run_ict(dataset: GoldenDataset, *, with_evidence: bool = False) -> di
     transitions = InMemoryIctZoneTransitionRepository()
     interactions = InMemoryIctZoneInteractionRepository()
     pool_transitions = InMemoryLiquidityTransitionRepository()
+    liquidity_pools = InMemoryLiquidityPoolRepository()
 
     if with_evidence:
         await StructureReplayService(
@@ -632,11 +633,11 @@ async def _run_ict(dataset: GoldenDataset, *, with_evidence: bool = False) -> di
 
         await LiquidityReplayService(
             candles,
-            InMemoryLiquidityPoolRepository(),
+            liquidity_pools,
             pool_transitions,
             events,
             InMemoryLiquidityStateStore(),
-            InMemoryIctEvidenceRepository(events, pool_transitions),
+            InMemoryIctEvidenceRepository(events, pool_transitions, liquidity_pools),
             clock,
         ).run(dataset.symbol, dataset.timeframe, dataset.start, dataset.end)
 
@@ -672,7 +673,7 @@ async def _run_ict(dataset: GoldenDataset, *, with_evidence: bool = False) -> di
         zones,
         transitions,
         InMemoryIctZoneStateStore(),
-        InMemoryIctEvidenceRepository(events, pool_transitions),
+        InMemoryIctEvidenceRepository(events, pool_transitions, liquidity_pools),
         clock,
         algo_version=dataset.algo_version,
     ).run(

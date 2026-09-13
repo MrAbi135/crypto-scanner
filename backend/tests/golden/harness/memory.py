@@ -231,11 +231,16 @@ class InMemoryLiquidityPoolRepository:
         self,
         symbol: str,
         timeframe: Timeframe,
+        *,
+        only_version: str | None = None,
     ) -> tuple[LiquidityPoolRecord, ...]:
         matching = [
             pool
             for pool in self.pools.values()
-            if pool.symbol == symbol and pool.timeframe is timeframe and pool.state == "ACTIVE"
+            if pool.symbol == symbol
+            and pool.timeframe is timeframe
+            and pool.state == "ACTIVE"
+            and (only_version is None or pool_version(pool) == only_version)
         ]
 
         return tuple(sorted(matching, key=lambda pool: (-pool.strength, pool.price, pool.pool_id)))
@@ -273,6 +278,18 @@ class InMemoryLiquidityTransitionRepository:
         self._ids.add(transition.transition_id)
         self.transitions.append(transition)
         return True
+
+
+def pool_version(pool: LiquidityPoolRecord) -> str | None:
+    """The version a pool row's own evidence claims, exactly as the SQL reads it."""
+    try:
+        parsed = json.loads(pool.evidence)
+    except ValueError:
+        return None
+
+    version = parsed.get("algo_version") if isinstance(parsed, dict) else None
+
+    return version if isinstance(version, str) else None
 
 
 def _evidence_version(zone: IctZoneRecord) -> str | None:
@@ -455,9 +472,13 @@ class InMemoryIctEvidenceRepository:
         self,
         events: InMemoryEngineEventRepository,
         transitions: InMemoryLiquidityTransitionRepository | None = None,
+        pools: InMemoryLiquidityPoolRepository | None = None,
     ) -> None:
         self._events = events
         self._transitions = transitions
+        # The pool store a version-pinned read resolves each transition's
+        # version through, as the SQL join does.
+        self._pools = pools
 
     def _in_window(
         self,
@@ -534,9 +555,25 @@ class InMemoryIctEvidenceRepository:
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_version: str | None = None,
     ) -> tuple[LiquidityEvidenceRecord, ...]:
         if self._transitions is None:
             return ()
+
+        def pinned(pool_id: str) -> bool:
+            if only_version is None:
+                return True
+
+            if self._pools is None:
+                raise ValueError(
+                    "a version-pinned liquidity read needs the pool store: pass "
+                    "pools= to InMemoryIctEvidenceRepository, as production joins it"
+                )
+
+            pool = self._pools.pools.get(pool_id)
+
+            return pool is not None and pool_version(pool) == only_version
 
         return tuple(
             LiquidityEvidenceRecord(
@@ -555,6 +592,7 @@ class InMemoryIctEvidenceRepository:
                     if item.symbol == symbol
                     and item.timeframe == timeframe
                     and start <= item.transitioned_at < end
+                    and pinned(item.pool_id)
                 ),
                 key=lambda item: (
                     item.candle_index,

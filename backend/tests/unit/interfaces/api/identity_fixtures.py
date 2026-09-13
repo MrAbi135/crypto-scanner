@@ -185,7 +185,7 @@ class EmptySignals:
     async def outcome_counts(self, *, group_by, since=None, until=None):
         return ()
 
-    async def list_recent_sweeps(self, *, limit):
+    async def list_recent_sweeps(self, *, limit, only_version=None):
         return ()
 
 

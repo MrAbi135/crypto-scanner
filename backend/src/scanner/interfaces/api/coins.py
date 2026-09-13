@@ -184,8 +184,12 @@ async def get_liquidity(
 
     start, end = await _window(candles, symbol, parsed, clock, window)
 
-    active = await pools.list_active(symbol, parsed)
-    transitions = await evidence.list_liquidity(symbol, parsed, start, end)
+    # The version the envelope below names, and only that one -- the chart
+    # must not draw both generations of a level through a bump's window.
+    active = await pools.list_active(symbol, parsed, only_version=LIQUIDITY_ALGO_VERSION)
+    transitions = await evidence.list_liquidity(
+        symbol, parsed, start, end, only_version=LIQUIDITY_ALGO_VERSION
+    )
 
     pool_rows = [
         {

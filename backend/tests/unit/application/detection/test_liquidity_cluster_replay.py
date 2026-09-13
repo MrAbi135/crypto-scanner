@@ -139,7 +139,9 @@ class CollectingPools:
     async def get(self, pool_id: str) -> LiquidityPoolRecord | None:
         return self.items.get(pool_id)
 
-    async def list_active(self, symbol, timeframe) -> tuple[LiquidityPoolRecord, ...]:
+    async def list_active(
+        self, symbol, timeframe, *, only_version=None
+    ) -> tuple[LiquidityPoolRecord, ...]:
         return tuple(p for p in self.items.values() if p.state == "ACTIVE")
 
     async def transition(self, pool_id, *, to_state, updated_at) -> bool:
@@ -171,7 +173,7 @@ class FakeEvidence:
     def __init__(self, transitions: FakeTransitions) -> None:
         self._transitions = transitions
 
-    async def list_liquidity(self, symbol, timeframe, start, end):
+    async def list_liquidity(self, symbol, timeframe, start, end, *, only_version=None):
         return tuple(
             LiquidityEvidenceRecord(
                 pool_id=item.pool_id,

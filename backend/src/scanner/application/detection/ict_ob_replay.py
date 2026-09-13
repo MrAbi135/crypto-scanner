@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
 
+from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
 from scanner.application.detection.window_time import rebased_indices
 from scanner.application.ports import (
     CandleRepository,
@@ -207,11 +208,14 @@ class IctOrderBlockReplayService:
 
         mss_spans = _mss_spans(shift_records, timeframe)
 
+        # The running liquidity version's sweeps only -- one physical sweep
+        # exists under both generations for a window after every bump.
         liquidity_records = await self._evidence.list_liquidity(
             symbol,
             timeframe,
             start,
             end,
+            only_version=LIQUIDITY_ALGO_VERSION,
         )
 
         swings = _parse_swings(structure_records)

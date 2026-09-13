@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -25,6 +25,7 @@ from scanner.infrastructure.persistence.liquidity_detection_models import (
     LiquidityPoolRow,
     LiquidityTransitionRow,
 )
+from scanner.infrastructure.persistence.liquidity_detection_repositories import pool_version_of
 from scanner.shared import Timeframe
 
 
@@ -128,17 +129,32 @@ class PgIctEvidenceRepository(IctEvidenceRepository):
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_version: str | None = None,
     ) -> tuple[LiquidityEvidenceRecord, ...]:
+        """The transition ledger, optionally only for one version's pools.
+
+        A transition row carries no version of its own; its pool does. Pinned,
+        the read joins the pool and keeps the rows whose pool evidence names
+        `only_version` -- which pins every row already written too, so nothing
+        needs backfilling.
+        """
+        query = select(LiquidityTransitionRow).where(
+            LiquidityTransitionRow.symbol == symbol,
+            LiquidityTransitionRow.timeframe == timeframe.value,
+            LiquidityTransitionRow.transitioned_at >= start,
+            LiquidityTransitionRow.transitioned_at < end,
+        )
+
+        if only_version is not None:
+            query = query.join(
+                LiquidityPoolRow,
+                LiquidityPoolRow.pool_id == LiquidityTransitionRow.pool_id,
+            ).where(pool_version_of(LiquidityPoolRow) == only_version)
+
         async with self._sessions() as session:
             result = await session.execute(
-                select(LiquidityTransitionRow)
-                .where(
-                    LiquidityTransitionRow.symbol == symbol,
-                    LiquidityTransitionRow.timeframe == timeframe.value,
-                    LiquidityTransitionRow.transitioned_at >= start,
-                    LiquidityTransitionRow.transitioned_at < end,
-                )
-                .order_by(
+                query.order_by(
                     LiquidityTransitionRow.candle_index.asc(),
                     LiquidityTransitionRow.transitioned_at.asc(),
                     LiquidityTransitionRow.transition_id.asc(),
@@ -164,6 +180,7 @@ class PgIctEvidenceRepository(IctEvidenceRepository):
         self,
         *,
         limit: int,
+        only_version: str | None = None,
     ) -> tuple[RecentSweepRecord, ...]:
         """The platform's latest consumed levels, newest first (§18.3).
 
@@ -185,7 +202,23 @@ class PgIctEvidenceRepository(IctEvidenceRepository):
                     LiquidityPoolRow.pool_id == LiquidityTransitionRow.pool_id,
                     isouter=True,
                 )
-                .where(LiquidityTransitionRow.to_state.in_(("SWEPT", "STOP_HUNT")))
+                .where(
+                    LiquidityTransitionRow.to_state.in_(("SWEPT", "STOP_HUNT")),
+                    # Pinned to one generation of pools -- but a sweep whose
+                    # pool row is gone still lists, as the docstring promises:
+                    # it cannot prove its version, and erasing it would be the
+                    # worse lie.
+                    *(
+                        ()
+                        if only_version is None
+                        else (
+                            or_(
+                                LiquidityPoolRow.pool_id.is_(None),
+                                pool_version_of(LiquidityPoolRow) == only_version,
+                            ),
+                        )
+                    ),
+                )
                 .order_by(
                     LiquidityTransitionRow.transitioned_at.desc(),
                     LiquidityTransitionRow.transition_id.desc(),

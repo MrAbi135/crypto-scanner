@@ -21,6 +21,7 @@ from scanner.application.detection.confluence_replay import (
     _read_participation,
     _size_skew,
 )
+from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
 from scanner.application.detection.state import (
     SHIFT_NAMESPACE,
     EngineStateManager,
@@ -204,8 +205,10 @@ class FakePools:
 
     def __init__(self, items: list | None = None) -> None:
         self.items = items or []
+        self.asked_version: str | None = "never asked"
 
-    async def list_active(self, symbol: str, timeframe) -> tuple:
+    async def list_active(self, symbol: str, timeframe, *, only_version=None) -> tuple:
+        self.asked_version = only_version
         return tuple(self.items)
 
 
@@ -253,6 +256,7 @@ def interaction(zone_id: str, kind: str, index: int) -> IctZoneInteractionRecord
 class FakeEvidenceRepository:
     def __init__(self, liquidity: list[LiquidityEvidenceRecord] | None = None) -> None:
         self.liquidity = liquidity or []
+        self.asked_version: str | None = "never asked"
 
     async def list_structure(self, symbol, timeframe, start, end):
         raise AssertionError(
@@ -260,7 +264,8 @@ class FakeEvidenceRepository:
             "BOS, CHOCH, MSS, sweeps and participation too"
         )
 
-    async def list_liquidity(self, symbol, timeframe, start, end):
+    async def list_liquidity(self, symbol, timeframe, start, end, *, only_version=None):
+        self.asked_version = only_version
         return tuple(self.liquidity)
 
 
@@ -3281,8 +3286,13 @@ async def test_a_failed_stop_hunt_withdraws_its_own_credit_only() -> None:
     # withdrawn the candidate cannot classify as A1.
     assert up.archetype != "A1"
 
-    # A second, clean hunt on a different pool restores the credit.
+    # A second, clean hunt on a different pool restores the credit -- a pool
+    # this liquidity version swept, as every hunt it publishes is on.
     setup["events"].append(event("LIQUIDITY_STOP_HUNT", 8, sweep_pool_id="p2"))
+    setup["liquidity"] = [
+        *setup["liquidity"],
+        replace(sweep(confirmed_index=RANGED_LAST - 5), pool_id="p2"),
+    ]
 
     svc, _ = service(**setup, candles=ranged_series(settle), htf_trend="BULLISH")
 
@@ -3291,6 +3301,58 @@ async def test_a_failed_stop_hunt_withdraws_its_own_credit_only() -> None:
     up = next(c for c in report.candidates if c.direction == "UP")
 
     assert up.archetype == "A1"
+
+
+@pytest.mark.asyncio
+async def test_liquidity_is_read_from_the_running_liquidity_version_only() -> None:
+    """After a version bump the ledger and the pool map hold two generations
+    of the same levels, the old one carrying the class the bump corrected.
+    Both of confluence's liquidity reads ask for the running version."""
+
+    svc, _ = service(**bullish_setup())
+
+    await run(svc, trend_state="BULLISH")
+
+    assert svc._evidence.asked_version == LIQUIDITY_ALGO_VERSION
+    assert svc._pools.asked_version == LIQUIDITY_ALGO_VERSION
+
+
+@pytest.mark.asyncio
+async def test_a_stop_hunt_on_a_pool_this_version_never_swept_earns_nothing() -> None:
+    """§4.7's credit belongs to a hunt on one of this liquidity version's
+    sweeps. After the s5-v11 deploy the engine had published hunts about the
+    s5-v10 generation's sweeps under its own label, so the event's label is
+    not enough -- the pool has to be one the pinned ledger knows."""
+
+    settle = 990
+
+    def with_hunt_on(pool_id: str) -> dict:
+        setup = ranged_setup(settle)
+        setup["events"] = [
+            event("BOS_UP", 3, direction="UP"),
+            event("MSS_UP", 6, direction="UP"),
+            event("LIQUIDITY_STOP_HUNT", 7, sweep_pool_id=pool_id),
+        ]
+        setup["zones"] = [
+            zone(
+                "ob",
+                grade="OB_A",
+                band_low=Decimal(settle - 1),
+                band_high=Decimal(settle + 1),
+                evidence=json.dumps({"mss_origin": True}),
+            )
+        ]
+        return setup
+
+    async def archetype(setup: dict) -> str | None:
+        svc, _ = service(**setup, candles=ranged_series(settle), htf_trend="BULLISH")
+        report = await run(svc, "BULLISH")
+        return next(c for c in report.candidates if c.direction == "UP").archetype
+
+    # The premise: the same hunt on the swept pool earns A1.
+    assert await archetype(with_hunt_on("p1")) == "A1"
+
+    assert await archetype(with_hunt_on("p-previous-generation")) != "A1"
 
 
 @pytest.mark.asyncio

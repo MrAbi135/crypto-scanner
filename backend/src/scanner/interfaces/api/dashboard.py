@@ -16,6 +16,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 
+from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
 from scanner.application.feed import FeedRow as LiveRow
 from scanner.application.feed import LiveFeedService
 from scanner.application.ports import CandleRepository, Clock
@@ -128,7 +129,9 @@ async def overview(
     now = clock.now()
 
     board = await feed.read()
-    sweeps = await evidence.list_recent_sweeps(limit=RECENT_SWEEPS)
+    sweeps = await evidence.list_recent_sweeps(
+        limit=RECENT_SWEEPS, only_version=LIQUIDITY_ALGO_VERSION
+    )
 
     return success(
         {

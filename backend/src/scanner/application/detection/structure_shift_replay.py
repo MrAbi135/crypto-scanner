@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
+from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
 from scanner.application.detection.orchestrator import build_event_key
 from scanner.application.detection.state import (
     EngineStateManager,
@@ -154,11 +155,14 @@ class StructureShiftReplayService:
         internal_swings = detect_internal_swings(candles)
         external_swings = detect_external_swings(candles)
 
+        # §3.6's sweep origin, from the running liquidity version only: after a
+        # bump the previous generation's sweeps still carry the class it fixed.
         liquidity = await self._evidence.list_liquidity(
             symbol,
             timeframe,
             start,
             end,
+            only_version=LIQUIDITY_ALGO_VERSION,
         )
 
         machine = TrendStateMachine()

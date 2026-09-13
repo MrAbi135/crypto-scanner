@@ -30,13 +30,13 @@ class EmptyRepo:
     async def list_structure(self, *args):
         return ()
 
-    async def list_liquidity(self, *args):
+    async def list_liquidity(self, *args, **kwargs):
         return ()
 
     async def list_live(self, *args):
         return ()
 
-    async def list_active(self, *args):
+    async def list_active(self, *args, **kwargs):
         return ()
 
 

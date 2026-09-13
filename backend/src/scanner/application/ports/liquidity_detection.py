@@ -59,6 +59,8 @@ class LiquidityPoolRepository(Protocol):
         self,
         symbol: str,
         timeframe: Timeframe,
+        *,
+        only_version: str | None = None,
     ) -> tuple[LiquidityPoolRecord, ...]: ...
 
     async def transition(

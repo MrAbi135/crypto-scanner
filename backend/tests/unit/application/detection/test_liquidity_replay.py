@@ -119,6 +119,8 @@ class FakePools:
         self,
         symbol: str,
         timeframe: Timeframe,
+        *,
+        only_version: str | None = None,
     ) -> tuple[LiquidityPoolRecord, ...]:
         if (
             self.pool.symbol == symbol
@@ -210,6 +212,8 @@ class FakeEvidence:
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_version: str | None = None,
     ) -> tuple[LiquidityEvidenceRecord, ...]:
         return tuple(
             LiquidityEvidenceRecord(

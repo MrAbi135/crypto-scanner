@@ -19,6 +19,7 @@ from scanner.application.detection.ict_ob_replay import (
 from scanner.application.detection.ict_replay import (
     IctReplayService,
 )
+from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
 from scanner.application.ports.ict_evidence import (
     LiquidityEvidenceRecord,
     ShiftEvidenceRecord,
@@ -171,6 +172,7 @@ class FakeEvidenceRepository:
         self.structure = structure
         self.liquidity = liquidity
         self.shifts = shifts
+        self.asked_version: str | None = "never asked"
 
     async def list_structure(
         self,
@@ -196,7 +198,10 @@ class FakeEvidenceRepository:
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_version: str | None = None,
     ) -> tuple[LiquidityEvidenceRecord, ...]:
+        self.asked_version = only_version
         return self.liquidity
 
 
@@ -360,6 +365,30 @@ async def test_full_ict_replay_fixture_exercises_detection_and_lifecycle() -> No
         "S6COVUSDT",
         Timeframe.M5,
     )
+
+
+@pytest.mark.asyncio
+async def test_the_origin_sweep_is_read_from_the_running_liquidity_version_only() -> None:
+    """§5.2's breaker promotion is gated on `origin_swept`, a liquidity fact.
+    After a version bump the ledger holds both generations of each sweep, so
+    the order-block pass asks for the running version's."""
+    candles = pad_for_warmup(fixture_series())
+    evidence = FakeEvidenceRepository()
+
+    service = IctOrderBlockReplayService(
+        FakeCandleRepository(candles),
+        FakeZoneRepository(),
+        FakeTransitionRepository(),
+        FakeSnapshotStore(),
+        evidence,
+        FakeClock(),
+    )
+
+    # The fixture candles belong to S6COVUSDT; any other symbol fetches none and
+    # the pass returns before it reads evidence at all.
+    await service.run("S6COVUSDT", Timeframe.M5, candles[0].open_time, candles[-1].close_time)
+
+    assert evidence.asked_version == LIQUIDITY_ALGO_VERSION
 
 
 @pytest.mark.asyncio
