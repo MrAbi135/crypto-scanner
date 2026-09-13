@@ -28,7 +28,9 @@ Guards around that:
 * each file is restored from its **original bytes** and checked against them
   before the next mutation;
 * the pytest `addopts` are replaced for the run, so the repository's
-  verbosity and coverage flags cannot change what the runner sees.
+  verbosity and coverage flags cannot change what the runner sees;
+* every run gets its own empty bytecode cache, so a same-length mutation
+  cannot be imported from `.pyc` compiled from the original source.
 
 Spec (JSON, paths relative to the repository root)::
 
@@ -47,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -148,9 +151,18 @@ def run_pytest(args: Sequence[str], *, cwd: Path) -> RunResult:
     with tempfile.TemporaryDirectory() as scratch:
         report = Path(scratch) / "report.xml"
 
+        # A fresh, empty bytecode cache for every run. A `.pyc` is trusted when
+        # the source's whole-second mtime and size match, so a same-length
+        # mutation (`a + b` -> `a - b`, `70` -> `71`) written in the same second
+        # the previous run compiled the original was imported as the ORIGINAL
+        # -- a false SURVIVED, found on CI on 2026-09-13. With the prefix, no
+        # run can read bytecode another run wrote.
+        env = {**os.environ, "PYTHONPYCACHEPREFIX": str(Path(scratch) / "pycache")}
+
         completed = subprocess.run(
             [sys.executable, "-m", "pytest", *args, *_ADDOPTS, f"--junitxml={report}"],
             cwd=cwd,
+            env=env,
             capture_output=True,
             text=True,
             check=False,
