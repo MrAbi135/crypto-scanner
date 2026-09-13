@@ -30,7 +30,9 @@ Guards around that:
 * the pytest `addopts` are replaced for the run, so the repository's
   verbosity and coverage flags cannot change what the runner sees;
 * every run gets its own empty bytecode cache, so a same-length mutation
-  cannot be imported from `.pyc` compiled from the original source.
+  cannot be imported from `.pyc` compiled from the original source;
+* every run gets its own empty Hypothesis example database, so a
+  counterexample one run found is not replayed by the next.
 
 Spec (JSON, paths relative to the repository root)::
 
@@ -157,7 +159,16 @@ def run_pytest(args: Sequence[str], *, cwd: Path) -> RunResult:
         # the previous run compiled the original was imported as the ORIGINAL
         # -- a false SURVIVED, found on CI on 2026-09-13. With the prefix, no
         # run can read bytecode another run wrote.
-        env = {**os.environ, "PYTHONPYCACHEPREFIX": str(Path(scratch) / "pycache")}
+        #
+        # The same for Hypothesis's example database: it replays every saved
+        # counterexample first on the next run, so one mutated run's discovery
+        # made every later run agree with it -- a verdict about the database,
+        # not the property. CI starts with no database; so does each run here.
+        env = {
+            **os.environ,
+            "PYTHONPYCACHEPREFIX": str(Path(scratch) / "pycache"),
+            "HYPOTHESIS_STORAGE_DIRECTORY": str(Path(scratch) / "hypothesis"),
+        }
 
         completed = subprocess.run(
             [sys.executable, "-m", "pytest", *args, *_ADDOPTS, f"--junitxml={report}"],

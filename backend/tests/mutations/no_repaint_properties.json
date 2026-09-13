@@ -1,5 +1,5 @@
 {
-  "description": "PR #247's no-repaint properties, as its original hand-rolled battery defined them (transcript line 38051), re-run through tests.support.mutation_battery after the stale-bytecode fix (#255). Run from backend/.",
+  "description": "PR #247's no-repaint properties, as its original hand-rolled battery defined them (transcript line 38051), re-run through tests.support.mutation_battery after the stale-bytecode fix (#255). Run from backend/. The cluster entry names the growth property (#248) rather than #247's original test_a_cluster_only_ever_gains_members: on candle_series a chain grows about 5 times in 300, so that test catches this mutation only when Hypothesis happens to draw growth -- NOT CAUGHT in the original run, CAUGHT on 2026-09-13. The growth property meets growth about 158 times in 300.",
   "pytest": [
     "tests/property/test_no_repaint_zones.py"
   ],
@@ -41,12 +41,12 @@
       ]
     },
     {
-      "name": "a grown cluster drops its first member (original #247 target)",
+      "name": "a grown cluster drops its first member",
       "file": "backend/src/scanner/domain/liquidity/clusters.py",
       "old": "        if len(chain) >= 2:\n",
       "new": "        if len(chain) > 2:\n            chain = chain[1:]\n            positions = positions[1:]\n\n        if len(chain) >= 2:\n",
       "expect_failing": [
-        "test_a_cluster_only_ever_gains_members"
+        "test_a_growing_cluster_appends_rather_than_rewrites"
       ]
     },
     {

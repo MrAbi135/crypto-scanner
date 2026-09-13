@@ -267,6 +267,45 @@ def test_a_same_length_edit_in_the_same_second_is_not_read_from_stale_bytecode(
     assert mutated.exit_code == 1, "the run imported bytecode compiled from the original source"
 
 
+def test_every_run_gets_its_own_hypothesis_example_database(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A counterexample saved by one run must not reach the next.
+
+    Hypothesis stores every failing example it finds and replays it first on
+    the next run of the same test. Under a battery that meant the first mutated
+    run's discovery was replayed by every later run, so a property that only
+    sometimes finds a bug read as catching it every time -- a verdict about the
+    example database, not about the property. CI starts with no database, so
+    no battery run may inherit one either.
+    """
+    (repo / "test_env.py").write_text(
+        "import os\n"
+        "import pathlib\n"
+        "\n"
+        "\n"
+        "def test_record():\n"
+        "    pathlib.Path(os.environ['PROBE_OUT']).write_text(\n"
+        "        os.environ.get('HYPOTHESIS_STORAGE_DIRECTORY', ''), encoding='utf-8'\n"
+        "    )\n",
+        encoding="utf-8",
+    )
+
+    stores = []
+
+    for run in ("first", "second"):
+        out = tmp_path / f"{run}.txt"
+        monkeypatch.setenv("PROBE_OUT", str(out))
+
+        assert mb.run_pytest(["test_env.py"], cwd=repo).exit_code == 0
+
+        stores.append(out.read_text(encoding="utf-8"))
+
+    assert all(stores), "a run inherited the default Hypothesis storage directory"
+    assert stores[0] != stores[1], "two runs shared one Hypothesis example database"
+    assert not (repo / ".hypothesis").exists(), "a run wrote to the repository's .hypothesis"
+
+
 def test_a_failing_control_run_stops_the_battery(repo: Path) -> None:
     failing = mb.RunResult(exit_code=1, outcomes=(_outcome("test_add", Status.FAILED),))
 
