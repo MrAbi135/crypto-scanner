@@ -1,0 +1,94 @@
+{
+  "description": "PR #251: the A3 publish golden must notice each of these engine changes. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/golden_a3_publish.json",
+  "pytest": [
+    "tests/golden/test_golden.py",
+    "-k",
+    "test_dataset_matches_its_labelled_expectation and a3-continuation"
+  ],
+  "mutations": [
+    {
+      "name": "A3 floor 70 -> 71",
+      "file": "backend/src/scanner/domain/confluence/archetypes.py",
+      "old": "    Archetype.CONTINUATION_PULLBACK: Decimal(70),",
+      "new": "    Archetype.CONTINUATION_PULLBACK: Decimal(71),",
+      "expect_failing": ["a3-continuation-pullback-publishes"]
+    },
+    {
+      "name": "floor comparison >= -> >",
+      "file": "backend/src/scanner/domain/confluence/archetypes.py",
+      "old": "    return final_confidence >= FLOORS[archetype]",
+      "new": "    return final_confidence > FLOORS[archetype]",
+      "expect_failing": ["a3-continuation-pullback-publishes"]
+    },
+    {
+      "name": "HTF alignment ignored",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "                htf_aligned=htf == direction,",
+      "new": "                htf_aligned=False,",
+      "expect_failing": ["a3-continuation-pullback-publishes"]
+    },
+    {
+      "name": "F1 displaced pays 17",
+      "file": "backend/src/scanner/domain/confluence/factor_points.py",
+      "old": "            parts.append(_contrib(e.evidence_ids, \"displaced\", BREAK_DISPLACED))",
+      "new": "            parts.append(_contrib(e.evidence_ids, \"displaced\", BREAK_DISPLACED - 1))",
+      "expect_failing": ["a3-continuation-pullback-publishes"]
+    },
+    {
+      "name": "F1 trend maturity over 5 pairs",
+      "file": "backend/src/scanner/domain/confluence/factor_points.py",
+      "old": "                TREND_MATURITY_MAX * Decimal(pairs) / Decimal(TREND_MATURITY_FULL_PAIRS),",
+      "new": "                TREND_MATURITY_MAX * Decimal(pairs) / Decimal(TREND_MATURITY_FULL_PAIRS + 1),",
+      "expect_failing": ["a3-continuation-pullback-publishes"]
+    },
+    {
+      "name": "F2 stop hunt pays 14",
+      "file": "backend/src/scanner/domain/confluence/factor_points.py",
+      "old": "        parts.append(_contrib(e.evidence_ids, \"stop_hunt\", STOP_HUNT_CONFIRMED))",
+      "new": "        parts.append(_contrib(e.evidence_ids, \"stop_hunt\", STOP_HUNT_CONFIRMED - 1))",
+      "expect_failing": ["a3-continuation-pullback-publishes"]
+    },
+    {
+      "name": "F2 depth scaled by 0.9",
+      "file": "backend/src/scanner/domain/confluence/factor_points.py",
+      "old": "            parts.append(_contrib(e.evidence_ids, \"depth\", SWEEP_DEPTH_MAX * depth))",
+      "new": "            parts.append(_contrib(e.evidence_ids, \"depth\", SWEEP_DEPTH_MAX * depth * Decimal(\"0.9\")))",
+      "expect_failing": ["a3-continuation-pullback-publishes"]
+    },
+    {
+      "name": "PD gates swapped by direction",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "    return pd.long_gate if direction == \"UP\" else pd.short_gate",
+      "new": "    return pd.short_gate if direction == \"UP\" else pd.long_gate",
+      "expect_failing": ["a3-continuation-pullback-publishes"]
+    },
+    {
+      "name": "min R-multiple 1.5 -> 4.7",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "MIN_RR = Decimal(\"1.5\")",
+      "new": "MIN_RR = Decimal(\"4.7\")",
+      "expect_failing": ["a3-continuation-pullback-publishes"]
+    },
+    {
+      "name": "A3 invalidation at the proximal edge",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "    return Invalidation(price=entry.distal, rule=ZONE_DISTAL_EDGE)",
+      "new": "    return Invalidation(price=entry.proximal, rule=ZONE_DISTAL_EDGE)",
+      "expect_failing": ["a3-continuation-pullback-publishes"]
+    },
+    {
+      "name": "grade B floor 70 -> 71",
+      "file": "backend/src/scanner/domain/confluence/weights.py",
+      "old": "GRADE_B_FLOOR = Decimal(70)",
+      "new": "GRADE_B_FLOOR = Decimal(71)",
+      "expect_failing": ["a3-continuation-pullback-publishes"]
+    },
+    {
+      "name": "publish skipped (signals never written)",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        if self._signals is None or candidate.payload is None:",
+      "new": "        if True:",
+      "expect_failing": ["a3-continuation-pullback-publishes"]
+    }
+  ]
+}

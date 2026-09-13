@@ -62,6 +62,8 @@ ignore = ["S101", "UP042"]   # UP042: (str, Enum) is intentional — StrEnum cha
 "src/scanner/interfaces/cli/**" = ["T20"]  # the CLI's job is printing
 "src/scanner/runtime/cli.py" = ["T20"]     # the CLI composition root renders reports
 "tests/golden/test_golden.py" = ["T20"]    # the SLS coverage report is the deliverable
+"tests/support/suite_gate.py" = ["T20"]    # a CI gate's report is its output
+"tests/support/mutation_battery.py" = ["T20"]  # the verdict table is the deliverable
 
 [tool.mypy]
 python_version = "3.12"

@@ -31,7 +31,12 @@ jobs:
       - run: uv run ruff format --check src tests
       - run: uv run mypy
       - run: uv run lint-imports
-      - run: uv run pytest -m "not integration" --cov=scanner
+      - run: uv run pytest -m "not integration" --cov=scanner --junitxml=reports/backend.xml
+      # Green pytest means no collected test failed, not that the tests ran.
+      # Fails the job if any test module outside tests/integration contributed
+      # no passing test, or if anything was skipped.
+      - name: every test module ran (suite gate)
+        run: uv run python -m tests.support.suite_gate --junit reports/backend.xml --modules "tests/**/test_*.py" --exclude "tests/integration/*" --forbid-skips
       - name: shared 100% coverage (scoped)
         run: uv run pytest tests/unit/shared -o addopts="" --cov=scanner.shared --cov-report=term-missing --cov-fail-under=100
       - name: no-float guard
@@ -55,7 +60,11 @@ jobs:
       - run: uv python install 3.12
       - run: uv sync --locked
       - name: integration suite (testcontainers)
-        run: uv run pytest tests/integration -m integration --no-cov
+        run: uv run pytest tests/integration -m integration --no-cov --junitxml=reports/integration.xml
+      # A missing Docker socket or testcontainers import skips whole modules and
+      # still exits 0. Here nothing may skip and every module must pass a test.
+      - name: every integration module ran, nothing skipped (suite gate)
+        run: uv run python -m tests.support.suite_gate --junit reports/integration.xml --modules "tests/integration/test_*.py" --forbid-skips
 
   frontend:
     runs-on: ubuntu-latest
