@@ -1813,8 +1813,7 @@
         {
           "id": "8.2-pd-gate",
           "rule": "G3: 5.7's directional gate, with PD_SUSPENDED narrowing archetypes rather than failing",
-          "status": "pending",
-          "blocked_on": "needs a series with a dealing range, which needs confirmed external swings"
+          "status": "covered"
         },
         {
           "id": "8.2-contrary-fact-gate",
@@ -1858,8 +1857,7 @@
         {
           "id": "8.3-f6-aligned-scores-100",
           "rule": "F6 scores 100 when the HTF trend state matches D",
-          "status": "pending",
-          "blocked_on": "no dataset resolves an HTF state at all -- both confluence cases report htf_state unreachable, so only the fallback branch is exercised"
+          "status": "covered"
         },
         {
           "id": "8.3-f6-caution-toward-scores-70",
@@ -1876,8 +1874,7 @@
         {
           "id": "8.3.1-f1-break-quality",
           "rule": "F1 break quality 0-45: 15 for a confirmed break, +18 displaced, +12 external",
-          "status": "pending",
-          "blocked_on": "the one scored candidate has no confirmed break; its whole F1 is the clean-record component"
+          "status": "covered"
         },
         {
           "id": "8.3.1-f1-mss-present",
@@ -1888,8 +1885,7 @@
         {
           "id": "8.3.1-f1-trend-maturity",
           "rule": "F1 trend maturity 0-30: min(pairs, 4) / 4 x 30 over consecutive unbroken pairs",
-          "status": "pending",
-          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+          "status": "covered"
         },
         {
           "id": "8.3.1-f1-clean-break-record",
@@ -1899,14 +1895,12 @@
         {
           "id": "8.3.1-f2-sweep-quality",
           "rule": "F2 sweep quality 0-60: 20 confirmed, +16 external, +12 depth, +6 unclaimed, +6 fresh",
-          "status": "pending",
-          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+          "status": "covered"
         },
         {
           "id": "8.3.1-f2-stop-hunt",
           "rule": "F2 pays 15 when 4.7's composite confirms",
-          "status": "pending",
-          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+          "status": "covered"
         },
         {
           "id": "8.3.1-f2-target-pool-strength",
@@ -2091,8 +2085,7 @@
         {
           "id": "8.6-confidence-floors",
           "rule": "A1 75, A2 72, A3 70, A4 70, A5 74",
-          "status": "pending",
-          "blocked_on": "no dataset produces a candidate carrying this fact; the two confluence cases publish nothing, one because its gates fail and one because no archetype matches"
+          "status": "covered"
         },
         {
           "id": "8.6-below-floor-recorded-not-published",
@@ -2111,7 +2104,7 @@
           "id": "8.7-worked-example",
           "rule": "the normative illustration's arithmetic: F1..F6 of 85/80/90/70/65/100 weight to a base of 82.25, +13 of synergy gives a final of 95, archetype A3 publishes at Grade S",
           "status": "pending",
-          "blocked_on": "asserted in tests/unit/domain/confluence/test_factor_points.py rather than by a golden. A dataset would need a candle series that actually produces a displaced external BOS, an external sweep at 0.8 ATR, and an OTE intersecting OB_A stack at range position 0.38"
+          "blocked_on": "the chain is now reproduced end to end by s8-a3-continuation-pullback-publishes (declared H4/D1 BULLISH, external SSL sweep, displaced BOS up, retrace into an OB_A/OTE stack, A3 published), but not the arithmetic this rule names: 8.3.1 itself records that F1 cannot reach 85 at any pair count, F4 70 needs a volume reading the golden quote floor cannot produce, and F3 90 needs an entry-grade Confirmation, which is a lower-timeframe fact a single-timeframe series cannot carry. The figures stay asserted in tests/unit/domain/confluence/test_factor_points.py"
         }
       ]
     }

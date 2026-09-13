@@ -145,6 +145,7 @@ UNVERIFIED_LABELS = frozenset(
         "the-ote-band-is-the-62-to-79-retracement.json",
         "a-swept-order-block-that-fails-becomes-a-breaker.json",
         "an-unswept-order-block-that-fails-becomes-a-mitigation-block.json",
+        "an-a3-continuation-pullback-publishes.json",
     }
 )
 

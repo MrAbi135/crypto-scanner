@@ -35,6 +35,7 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityTransitionRecord,
 )
 from scanner.application.ports.setups import SetupRecord
+from scanner.application.ports.signals import SignalRecord
 from scanner.domain.common import Candle, TradeAggregate
 from scanner.domain.ict import MAX_ZONES
 from scanner.domain.volume import WashRiskState
@@ -736,3 +737,55 @@ class InMemorySetupRepository:
             and row.timeframe is timeframe
             and row.evaluated_at == evaluated_at
         )
+
+
+class InMemorySignalRepository:
+    """T17 in memory: insert-once on the signal id.
+
+    Without it the confluence engine's `_publish` returns before §15.3 is
+    evaluated at all, so no golden case could ever show a signal being
+    written -- the one end-to-end fact a zero-signal soak cannot tell apart
+    from a broken publish path.
+    """
+
+    def __init__(self) -> None:
+        self.rows: dict[str, SignalRecord] = {}
+
+    async def append(self, signal: SignalRecord) -> bool:
+        if signal.signal_id in self.rows:
+            return False
+
+        self.rows[signal.signal_id] = signal
+
+        return True
+
+    async def latest_for_dedup_key(self, dedup_key: str) -> SignalRecord | None:
+        return max(
+            (row for row in self.rows.values() if row.dedup_key == dedup_key),
+            key=lambda row: (row.published_at, row.signal_id),
+            default=None,
+        )
+
+    async def get(self, signal_id: str) -> SignalRecord | None:
+        return self.rows.get(signal_id)
+
+    async def recent(
+        self,
+        *,
+        limit: int,
+        symbol: str | None = None,
+        timeframe: Timeframe | None = None,
+    ) -> tuple[SignalRecord, ...]:
+        rows = (
+            row
+            for row in self.rows.values()
+            if (symbol is None or row.symbol == symbol)
+            and (timeframe is None or row.timeframe is timeframe)
+        )
+
+        return tuple(
+            sorted(rows, key=lambda row: (row.published_at, row.signal_id), reverse=True)[:limit]
+        )
+
+    async def scan(self, *, batch: int = 500) -> list[SignalRecord]:
+        return sorted(self.rows.values(), key=lambda row: (row.published_at, row.signal_id))

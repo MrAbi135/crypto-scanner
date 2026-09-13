@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from scanner.domain.common import Candle, CandleSource
+from scanner.domain.structure.trend import TrendState
 from scanner.shared import Timeframe
 
 DATASET_ROOT = Path(__file__).resolve().parent.parent / "datasets"
@@ -63,6 +64,13 @@ class GoldenDataset:
     expected: dict[str, Any]
     path: Path
     filler_count: int = 0
+    # Declared higher-timeframe context, the counterpart of `filler` for the
+    # rung above. §8.4's F6 and §8.6's "HTF aligned" read the §3.7 trend state
+    # of the next timeframe up, and a golden series has exactly one timeframe,
+    # so without a declaration every candidate's HTF reads as unreachable and
+    # A3 and A4 can never classify. §8.7 itself opens by declaring it:
+    # "H4 BULLISH; D1 BULLISH".
+    htf_state: str | None = None
 
     @property
     def scenario_start_index(self) -> int:
@@ -131,6 +139,14 @@ def load_dataset(path: Path) -> GoldenDataset:
 
     _assert_contiguous(candles, path=path)
 
+    htf_state = raw.get("htf_state")
+
+    if htf_state is not None and htf_state not in {state.value for state in TrendState}:
+        raise ValueError(
+            f"{path.name}: htf_state {htf_state!r} is not a §3.7 trend state "
+            f"({', '.join(state.value for state in TrendState)})"
+        )
+
     return GoldenDataset(
         dataset_id=raw["dataset_id"],
         engine=raw["engine"],
@@ -147,6 +163,7 @@ def load_dataset(path: Path) -> GoldenDataset:
         expected=raw["expected"],
         path=path,
         filler_count=len(filler),
+        htf_state=htf_state,
     )
 
 
