@@ -290,6 +290,139 @@ async def test_external_sweep_choch_confirms_mss(
 
 
 @pytest.mark.asyncio
+async def test_an_external_swing_inside_its_window_does_not_move_the_protected_low(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """§3.1 at the CHoCH: a swing does not exist before it confirms.
+
+    The same bullish structure and the same close at 90 on candle 20, through
+    the protected 95. One swing is added: a higher low at 97 on candle 18,
+    which needs five candles and confirms at candle 23. On candle 20 it does
+    not exist, so the CHoCH is through the 95.
+
+    Admitted early, the 97 would be the most recent higher low -- the one
+    `_find_choch` protects -- and the CHoCH would be recorded through a level
+    that had not happened yet. No replay-level no-repaint property can see
+    that: the look-ahead reads five candles a prefix run has as well, so both
+    runs publish the same wrong level. It is pinned here instead.
+    """
+    series = candles()
+
+    monkeypatch.setattr(
+        shift_module,
+        "detect_external_swings",
+        lambda _: (
+            *external_swings(series),
+            SwingPoint(
+                18, series[18].open_time, Decimal("97"), SwingKind.LOW, SwingStrength.EXTERNAL
+            ),
+        ),
+    )
+
+    monkeypatch.setattr(
+        shift_module,
+        "detect_internal_swings",
+        lambda _: (),
+    )
+
+    events = FakeEventRepository()
+
+    service = StructureShiftReplayService(
+        FakeCandleRepository(series),
+        events,
+        FakeEvidenceRepository(()),
+        FakeClock(),
+        EngineStateManager(InMemoryEngineStateStore(), namespace=SHIFT_NAMESPACE),
+    )
+
+    await service.run(
+        "BTCUSDT",
+        Timeframe.H1,
+        series[0].open_time,
+        series[-1].close_time,
+    )
+
+    chochs = [
+        json.loads(event.payload)
+        for event in events.events.values()
+        if event.event_type.startswith("CHOCH_")
+    ]
+
+    assert [(c["break_index"], c["swing_price"]) for c in chochs][:1] == [(20, "95")]
+
+
+@pytest.mark.asyncio
+async def test_an_internal_swing_inside_its_window_does_not_move_the_protected_low(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """§3.1 for the internal fallback: `_find_choch` protects the most recent
+    external higher low, and only when none is left does it fall back to the
+    internal ones -- which confirm after two candles, not five.
+
+    The external structure is the fixture's. Candle 20's close at 90 breaks
+    the 95 and candle 28's close at 84 breaks the 85, so both external higher
+    lows are consumed; neither shift gathers an origin, and the trend returns
+    to BULLISH each time. From then on the internal lows decide: 90 at 33,
+    100 at 38, 104 at 44. Candle 45 closes at 99.
+
+    On candle 45 the 104 is one candle old and confirms at 46, so it does not
+    exist: the protected low is the 100 and the CHoCH is through it, on 45.
+    Admitted early, the 104 would already be protected on candle 44, whose
+    close of 101 is under it -- a CHoCH a candle early, through a level that
+    had not confirmed.
+    """
+    base = candles()
+    step = timedelta(hours=1)
+
+    series = [
+        *base,
+        *(replace(base[-1], open_time=base[0].open_time + step * i) for i in range(len(base), 50)),
+    ]
+    series[28] = replace(
+        series[28], open=Decimal("101"), high=Decimal("102"), low=Decimal("83"), close=Decimal("84")
+    )
+    series[45] = replace(
+        series[45], open=Decimal("101"), high=Decimal("102"), low=Decimal("98"), close=Decimal("99")
+    )
+
+    def internal_low(index: int, price: str) -> SwingPoint:
+        return SwingPoint(
+            index, series[index].open_time, Decimal(price), SwingKind.LOW, SwingStrength.INTERNAL
+        )
+
+    monkeypatch.setattr(shift_module, "detect_external_swings", lambda _: external_swings(base))
+    monkeypatch.setattr(
+        shift_module,
+        "detect_internal_swings",
+        lambda _: (internal_low(33, "90"), internal_low(38, "100"), internal_low(44, "104")),
+    )
+
+    events = FakeEventRepository()
+
+    service = StructureShiftReplayService(
+        FakeCandleRepository(series),
+        events,
+        FakeEvidenceRepository(()),
+        FakeClock(),
+        EngineStateManager(InMemoryEngineStateStore(), namespace=SHIFT_NAMESPACE),
+    )
+
+    await service.run("BTCUSDT", Timeframe.H1, series[0].open_time, series[-1].close_time)
+
+    chochs = [
+        json.loads(event.payload)
+        for event in sorted(events.events.values(), key=lambda event: event.event_at)
+        if event.event_type.startswith("CHOCH_")
+    ]
+
+    assert [(c["break_index"], c["swing_price"], c["swing_strength"]) for c in chochs] == [
+        (20, "95", "EXTERNAL"),
+        (28, "85", "EXTERNAL"),
+        (45, "100", "INTERNAL"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_structure_shift_replay_is_idempotent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
