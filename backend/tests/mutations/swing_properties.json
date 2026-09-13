@@ -1,0 +1,54 @@
+{
+  "description": "Swing no-repaint properties (tests/property/test_no_repaint.py): one mutation aimed at each property. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/swing_properties.json",
+  "pytest": [
+    "tests/property/test_no_repaint.py"
+  ],
+  "mutations": [
+    {
+      "name": "a swing high is judged against every later candle, not its window",
+      "file": "backend/src/scanner/domain/structure/swings.py",
+      "old": "    right = candles[index + 1 : index + k + 1]\n\n    # Nothing in the complete window may be materially higher.",
+      "new": "    right = candles[index + 1 :]\n\n    # Nothing in the complete window may be materially higher.",
+      "expect_failing": [
+        "test_a_confirmed_swing_is_never_revoked_by_later_candles"
+      ]
+    },
+    {
+      "name": "a swing low needs one candle more than its window to confirm",
+      "file": "backend/src/scanner/domain/structure/swings.py",
+      "old": "    right = candles[index + 1 : index + k + 1]\n\n    if any(candle.low < candidate - epsilon for candle in (*left, *right)):",
+      "new": "    right = candles[index + 1 : index + k + 2]\n\n    if any(candle.low < candidate - epsilon for candle in (*left, *right)):",
+      "expect_failing": [
+        "test_every_swing_verdict_is_decided_inside_its_own_window",
+        "test_a_swing_depends_only_on_its_own_confirmation_window"
+      ]
+    },
+    {
+      "name": "detection changes from one call to the next",
+      "file": "backend/src/scanner/domain/structure/swings.py",
+      "old": "    k = swing_window(strength)\n\n    if len(candles) < (2 * k) + 1:",
+      "new": "    detect_swings.calls = getattr(detect_swings, \"calls\", 0) + 1\n    k = swing_window(strength) + detect_swings.calls % 2\n\n    if len(candles) < (2 * k) + 1:",
+      "expect_failing": [
+        "test_detection_is_deterministic_across_runs"
+      ]
+    },
+    {
+      "name": "a label is assigned against the next same-kind swing instead of the previous",
+      "file": "backend/src/scanner/domain/structure/classification.py",
+      "old": "    for swing in sorted(\n        swings,\n        key=lambda item: (",
+      "new": "    for swing in sorted(\n        swings,\n        reverse=True,\n        key=lambda item: (",
+      "expect_failing": [
+        "test_an_assigned_label_is_immutable"
+      ]
+    },
+    {
+      "name": "an external swing high may have equal highs on its right, an internal one may not",
+      "file": "backend/src/scanner/domain/structure/swings.py",
+      "old": "    if any(candle.high >= candidate - epsilon for candle in right):\n        return False",
+      "new": "    if k != _EXTERNAL_K and any(candle.high >= candidate - epsilon for candle in right):\n        return False",
+      "expect_failing": [
+        "test_every_external_swing_is_also_an_internal_swing"
+      ]
+    }
+  ]
+}

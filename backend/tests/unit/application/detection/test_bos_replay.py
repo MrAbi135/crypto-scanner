@@ -33,7 +33,7 @@ from tests.unit.application.detection.test_structure_replay import (
 
 from scanner.application.detection.state import EngineStateManager
 from scanner.application.detection.structure_replay import StructureReplayService
-from scanner.domain.common import Candle, CandleSource
+from scanner.domain.common import TOLERANCE_ATR, Candle, CandleSource, wilder_atr_series
 from scanner.domain.structure import SwingKind, SwingPoint, SwingStrength, TrendStateMachine
 from scanner.shared import Timeframe
 
@@ -133,6 +133,100 @@ async def test_a_close_through_a_swing_high_is_a_bos_once_trend_is_bullish() -> 
     assert len(bos) == 1
     assert bos[0].event_type == "BOS_UP"
     assert bos[0].event_at == candles[21].open_time
+
+
+@pytest.mark.asyncio
+async def test_a_swing_still_inside_its_window_does_not_shadow_the_confirmed_level() -> None:
+    """§3.1: *"the swing never existed for the engine before its confirmation
+    moment"* -- including as the level a break is measured against.
+
+    The same break as above, plus a newer swing high at 140 on candle 19. It
+    confirms at candle 24, after the break. Candle 21 closes at 135: through
+    the confirmed 130, short of the 140 that does not exist yet.
+
+    `_replay_bos` only ever tries the most recent unconsumed level. If the
+    unconfirmed 140 were admitted as that level, it would hide the 130 and the
+    break would silently not happen. No property over replays caught that: the
+    look-ahead reads the next five candles, which a prefix run has just as the
+    full run does, so both published the same wrong answer -- a mutation
+    battery ran it three times and it survived all three.
+    """
+    candles = [candle(i, "125") for i in range(21)] + [candle(21, "135")]
+    events = FakeEventRepository()
+
+    inserted, _ = await build_service(events, candles)._replay_bos(
+        symbol=SYMBOL,
+        timeframe=Timeframe.H1,
+        candles=candles,
+        external_swings=(*UPTREND, swing(19, "140", SwingKind.HIGH)),
+        trend=TrendStateMachine(),
+    )
+
+    assert inserted == 1
+
+    bos = [e for e in events.events.values() if e.event_type.startswith("BOS_")]
+
+    assert [json.loads(e.payload)["swing_price"] for e in bos] == ["130"]
+    assert bos[0].event_at == candles[21].open_time
+
+
+@pytest.mark.asyncio
+async def test_a_break_is_measured_against_the_tolerance_of_its_own_candle() -> None:
+    """§3.5 edge case (2): a close within `tolerance_atr x ATR` of the level is
+    not a break -- the ATR of the candle that closed, not of the newest one.
+
+    Twenty-one wide candles (range 40) put ATR near 40 at candle 21, so its
+    tolerance is about 2 and a close one point over the 130 is noise. Forty
+    quiet candles (range 2) follow and ATR decays under 4, so by the last
+    candle the tolerance is under 0.2 and a close three points over breaks.
+
+    Taken from the window's newest candle instead, candle 21's tolerance would
+    be under 0.2 too: it would break a candle early, consume the level, and
+    the real break at the end would never be recorded.
+    """
+    wide = [
+        Candle(
+            symbol=SYMBOL,
+            timeframe=Timeframe.H1,
+            open_time=T0 + timedelta(hours=i),
+            open=Decimal("125"),
+            high=Decimal("145"),
+            low=Decimal("105"),
+            close=Decimal("125"),
+            volume=Decimal("100"),
+            quote_volume=Decimal("10000"),
+            taker_buy_volume=Decimal("50"),
+            trade_count=10,
+            source=CandleSource.BACKFILL,
+        )
+        for i in range(21)
+    ]
+    candles = [
+        *wide,
+        candle(21, "131"),
+        *(candle(i, "125") for i in range(22, 62)),
+        candle(62, "133"),
+    ]
+
+    atrs = wilder_atr_series(candles)
+    # The premise, asserted rather than assumed.
+    assert TOLERANCE_ATR * atrs[21] > Decimal("1")
+    assert TOLERANCE_ATR * atrs[62] < Decimal("1")
+
+    events = FakeEventRepository()
+
+    inserted, _ = await build_service(events, candles)._replay_bos(
+        symbol=SYMBOL,
+        timeframe=Timeframe.H1,
+        candles=candles,
+        external_swings=tuple(UPTREND),
+        trend=TrendStateMachine(),
+    )
+
+    bos = [e for e in events.events.values() if e.event_type.startswith("BOS_")]
+
+    assert inserted == 1
+    assert [e.event_at for e in bos] == [candles[62].open_time]
 
 
 @pytest.mark.asyncio

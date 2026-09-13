@@ -1,0 +1,46 @@
+{
+  "description": "Replay look-ahead: each mutation lets a replay decide an event with a number or a swing not yet available at that candle. The replay no-repaint properties cannot see a bounded look-ahead -- it reads candles a prefix run has as well, so both runs publish the same wrong answer (measured 2026-09-13: even a cut at every candle caught these in 0-4 of 20 series, and three isolated battery runs caught 0/4). Each mutation is therefore pinned by a deterministic regression test; the properties run alongside. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/replay_properties.json",
+  "pytest": [
+    "tests/property/test_no_repaint_replays.py",
+    "tests/unit/application/detection/test_bos_replay.py",
+    "tests/unit/application/detection/test_structure_shift_replay.py"
+  ],
+  "mutations": [
+    {
+      "name": "structure: BOS epsilon taken from the window's last ATR",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "atrs[candle_index] if candle_index < len(atrs) else None",
+      "new": "atrs[-1] if atrs else None",
+      "expect_failing": [
+        "test_a_break_is_measured_against_the_tolerance_of_its_own_candle"
+      ]
+    },
+    {
+      "name": "structure: BOS may break a swing not yet confirmed at that candle",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "swing.index + confirmation_window <= candle_index",
+      "new": "swing.index <= candle_index",
+      "expect_failing": [
+        "test_a_swing_still_inside_its_window_does_not_shadow_the_confirmed_level"
+      ]
+    },
+    {
+      "name": "shift: CHoCH/MSS decided on external swings not yet confirmed",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "swing.index + external_window <= candle_index",
+      "new": "swing.index <= candle_index",
+      "expect_failing": [
+        "test_an_external_swing_inside_its_window_does_not_move_the_protected_low"
+      ]
+    },
+    {
+      "name": "shift: internal swings used before they confirm",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "swing.index + internal_window <= candle_index",
+      "new": "swing.index <= candle_index",
+      "expect_failing": [
+        "test_an_internal_swing_inside_its_window_does_not_move_the_protected_low"
+      ]
+    }
+  ]
+}
