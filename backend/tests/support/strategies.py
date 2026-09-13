@@ -113,6 +113,179 @@ def equal_highs_series(
     ).map(build)
 
 
+def mss_then_reclaim_series(
+    *,
+    timeframe: Timeframe = Timeframe.H1,
+    symbol: str = "PROPMSS",
+    reclaim_delays: st.SearchStrategy[int | None] | None = None,
+) -> st.SearchStrategy[tuple[list[Candle], int | None]]:
+    """A series that confirms a bearish MSS and then, maybe, takes it back.
+
+    Built for §3.6's invalidation: *"within 10 candles of an MSS, a close back
+    beyond the pre-MSS extreme demotes the new trend to RANGING and marks the
+    MSS low_quality"*. The general strategies almost never reach it. Measured
+    on 400 `walking_candle_series`: 647 MSS, **21** invalidations -- so a
+    25-example replay property usually never saw one inside a prefix. Live, it
+    is not rare (16 of 193 MSS on the VM); only the generator was thin.
+
+    Returns the candles and the drawn reclaim delay: the number of candles
+    after the MSS on which a close first lands above the pre-MSS extreme, or
+    ``None`` when price never comes back. Doctrine therefore expects an
+    invalidation exactly when the delay is 1 to 10.
+
+    The shape, each bar spanning 4.0 around its level like `equal_highs_series`:
+
+    * 300 flat candles, so §1.9's warm floor is cleared and ATR settles at 4.0;
+    * four pyramid up-legs -- a 9 to 12 candle rise at 1.5 per candle, a 7
+      candle pullback -- so every top and valley confirms as an external swing
+      and the valleys rise, printing the HH/HL pairs §3.4 needs for BULLISH;
+    * a 5 or 6 candle failure rally that tops out under the last high: a lower
+      high, §3.6 origin 2(b), whose price becomes the pre-MSS extreme (the
+      structure-shift harness has no liquidity evidence, so a sweep origin is
+      unreachable here by design);
+    * five falling candles, then one wide bearish candle closing 3 to 8 under
+      the protected higher low -- the CHoCH and its displacement -- and a close
+      under that candle's low 1 to 3 candles later: the MSS;
+    * then the drawn reclaim, and a flat tail.
+
+    Measured before the property was written, 150 draws: the planned CHoCH and
+    MSS published in 150, an invalidation in 75, and in all 150 the engine's
+    answer matched the 10-candle rule.
+
+    **The window's edges are not left to chance.** A rule that is wrong by one
+    candle -- the window nine or eleven long, or the candle straight after the
+    MSS refused -- differs from the right one at a single reclaim delay: 1, 10
+    or 11. Drawn uniformly over 1-14 with a coin-flip reclaim, each turned up
+    in about 3.6% of examples, and a mutation battery showed the cost: across
+    three isolated runs of 40 examples, "window of nine" and "not on the first
+    candle" each survived once. Leaning the draws onto those delays still left
+    11 at 7.5%, and "window of eleven" survived one run of three. So
+    ``reclaim_delays`` lets a test pin the delay -- ``None`` is "never comes
+    back" -- and the edges get a test of their own; left unset, the draws still
+    lean on the edges but range over the whole window.
+    """
+
+    step = Decimal("1.5")
+    pullback = 7
+
+    def bar(index: int, *, open_: Decimal, high: Decimal, low: Decimal, close: Decimal) -> Candle:
+        return Candle(
+            symbol=symbol,
+            timeframe=timeframe,
+            open_time=_SERIES_ORIGIN + timeframe.duration * index,
+            open=open_,
+            high=high,
+            low=low,
+            close=close,
+            volume=Decimal(100),
+            quote_volume=Decimal(10_000),
+            taker_buy_volume=Decimal(50),
+            trade_count=10,
+            source=CandleSource.BACKFILL,
+        )
+
+    def build(
+        drawn: tuple[int, int, int, int, int | None, int],
+    ) -> tuple[list[Candle], int | None]:
+        rise, failure_rally, drop, followthrough_after, reclaim_delay, overshoot = drawn
+        candles: list[Candle] = []
+
+        def level_bar(level: Decimal) -> None:
+            candles.append(
+                bar(
+                    len(candles),
+                    open_=level - Decimal("0.25"),
+                    high=level + 2,
+                    low=level - 2,
+                    close=level + Decimal("0.25"),
+                )
+            )
+
+        def flat_bar(level: Decimal) -> None:
+            candles.append(
+                bar(len(candles), open_=level, high=level + 1, low=level - 1, close=level)
+            )
+
+        level = Decimal(1000)
+
+        for _ in range(300):
+            level_bar(level)
+
+        for _ in range(4):
+            for _ in range(rise):
+                level += step
+                level_bar(level)
+            for _ in range(pullback):
+                level -= step
+                level_bar(level)
+
+        protected_low = level - 2
+
+        for _ in range(failure_rally):
+            level += step
+            level_bar(level)
+
+        pre_mss_extreme = level + 2
+
+        for _ in range(5):
+            level -= 1
+            level_bar(level)
+
+        choch_close = protected_low - drop
+        choch_low = choch_close - 1
+        candles.append(
+            bar(len(candles), open_=level, high=level + 1, low=choch_low, close=choch_close)
+        )
+
+        for _ in range(followthrough_after - 1):
+            candles.append(
+                bar(
+                    len(candles),
+                    open_=choch_close,
+                    high=choch_close + 1,
+                    low=choch_low + Decimal("0.5"),
+                    close=choch_close,
+                )
+            )
+
+        base = choch_low - 3
+        candles.append(
+            bar(len(candles), open_=choch_close, high=choch_close, low=base - 1, close=base)
+        )
+
+        for since in range(1, 15):
+            if since == reclaim_delay:
+                target = pre_mss_extreme + overshoot
+                candles.append(
+                    bar(len(candles), open_=base, high=target + 1, low=base - 1, close=target)
+                )
+                base = target
+            else:
+                flat_bar(base)
+
+        for _ in range(8):
+            flat_bar(base)
+
+        return candles, reclaim_delay
+
+    if reclaim_delays is None:
+        # Leaning on the edges, see the docstring; one draw in four never
+        # comes back.
+        reclaim_delays = st.tuples(
+            st.sampled_from([True, True, True, False]),
+            st.one_of(st.sampled_from([1, 10, 11]), st.integers(min_value=1, max_value=14)),
+        ).map(lambda drawn: drawn[1] if drawn[0] else None)
+
+    return st.tuples(
+        st.integers(min_value=9, max_value=12),
+        st.integers(min_value=5, max_value=6),
+        st.integers(min_value=3, max_value=8),
+        st.integers(min_value=1, max_value=3),
+        reclaim_delays,
+        st.integers(min_value=1, max_value=5),
+    ).map(build)
+
+
 def walking_candle_series(
     *,
     min_size: int = 20,
