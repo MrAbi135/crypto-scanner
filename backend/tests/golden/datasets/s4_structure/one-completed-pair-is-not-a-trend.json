@@ -8,7 +8,7 @@
     "3.4-one-pair-insufficient"
   ],
   "description": "The bullish zigzag stopped after its first completed HH/HL pair. One pair is not two, so the trend stays RANGING.",
-  "labelling_rationale": "s4-external-zigzag-turns-the-trend-bullish, cut short after its first completed pair, with nine candles added to the lead-in so the series is still 300 long.\n\nThat length matters and is not cosmetic. DETECTION_MIN_CANDLES is 300, and below it every structure engine returns nothing at all. A 291-candle version of this case reported RANGING with zero swings detected -- the right answer for the wrong reason, and a dataset that would have passed while asserting nothing. The filler count carries the difference, so the scenario itself is untouched.\n\n3.4 requires 'two consecutive completed bullish pairs (HH followed by HL, twice)' on external structure. Its parent has exactly two, and turns BULLISH. This one has exactly one, and must not.\n\n3.1 confirms an external swing five candles after its pivot, so what has confirmed by the end is: the trough at 267 (SEED), the peak at 273 (SEED), the trough at 279 (HL), the peak at 285 (HH) and the trough at 291 (HL). The next peak sits at 297 and would confirm at 302; the series ends at 299.\n\nSo the record holds HH at 285 followed by HL at 291 -- one completed bullish pair, and the second pair's HH is three candles short of existing. The trend is RANGING.\n\nThis is the case that separates 'two pairs' from 'a pair', and it is the one a detector written as 'the last pair was bullish' would fail. Its parent cannot catch that, because a detector needing one pair and a detector needing two both turn the parent BULLISH. Only stopping between them tells them apart.",
+  "labelling_rationale": "s4-external-zigzag-turns-the-trend-bullish, cut short after its first completed pair, with nine candles added to the lead-in so the series is still 300 long.\n\nThat length matters and is not cosmetic. DETECTION_MIN_CANDLES is 300, and below it every structure engine returns nothing at all. A 291-candle version of this case reported RANGING with zero swings detected -- the right answer for the wrong reason, and a dataset that would have passed while asserting nothing. The filler count carries the difference, so the scenario itself is untouched.\n\n3.4 requires 'two consecutive completed bullish pairs (HH followed by HL, twice)' on external structure. Its parent has exactly two, and turns BULLISH. This one has exactly one, and must not.\n\n3.1 confirms an external swing five candles after its pivot, so what has confirmed by the end is: the trough at 267 (SEED), the peak at 273 (SEED), the trough at 279 (HL), the peak at 285 (HH) and the trough at 291 (HL). The next peak sits at 297 and would confirm at 302; the series ends at 299.\n\nSo the record holds HH at 285 followed by HL at 291 -- one completed bullish pair, and the second pair's HH is three candles short of existing. The trend is RANGING.\n\nThis is the case that separates 'two pairs' from 'a pair', and it is the one a detector written as 'the last pair was bullish' would fail. Its parent cannot catch that, because a detector needing one pair and a detector needing two both turn the parent BULLISH. Only stopping between them tells them apart. | 2026-09-14 (a swing is stored once its strength is decided, structure s4-v10, owner ruling 2026-09-14): the pivot at index 297 confirms as an internal swing, but the series ends before its k=5 window does, so whether §3.1 stores it as internal or external is not yet decided and no SWING row is written for it. Its STRUCTURE_INTERNAL_HH label, written at its own confirmation, stays, and so does the internal_swings count. Appending flat candles shows why the old row was wrong rather than early: the pivot then confirms EXTERNAL. events_inserted drops by one; nothing else in this expectation moves.",
   "labelled_by": "drafted by Claude Opus 5 2026-08-23; VERIFIED by developer 2026-08-23 -- the rule each case turns on was confirmed in plain terms before signing, including the two that rest on a developer ruling of the same date (3.5 edge case (1) and 4.2(c)). Per-candle arithmetic rests on the generator's assertions and on the parent series each one extends.",
   "labelled_at": "2026-08-23",
   "algo_version": "s4-v6",
@@ -295,13 +295,13 @@
       "internal_swings": 6,
       "external_swings": 5,
       "classified_events": 11,
-      "events_inserted": 17,
+      "events_inserted": 16,
       "trend_state": "RANGING"
     },
     "events": [
       {
-        "event_type": "STRUCTURE_EXTERNAL_SEED",
         "event_at": "2026-02-17T00:00:00+00:00",
+        "event_type": "STRUCTURE_EXTERNAL_SEED",
         "payload": {
           "index": 267,
           "kind": "LOW",
@@ -311,8 +311,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_INTERNAL_SEED",
         "event_at": "2026-02-17T00:00:00+00:00",
+        "event_type": "STRUCTURE_INTERNAL_SEED",
         "payload": {
           "index": 267,
           "kind": "LOW",
@@ -322,8 +322,8 @@
         }
       },
       {
+        "event_at": "2026-02-17T00:00:00+00:00",
         "event_type": "SWING_EXTERNAL_LOW",
-        "event_at": "2026-02-17T00:00:00+00:00",
         "payload": {
           "index": 267,
           "kind": "LOW",
@@ -332,8 +332,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_EXTERNAL_SEED",
         "event_at": "2026-02-18T00:00:00+00:00",
+        "event_type": "STRUCTURE_EXTERNAL_SEED",
         "payload": {
           "index": 273,
           "kind": "HIGH",
@@ -343,8 +343,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_INTERNAL_SEED",
         "event_at": "2026-02-18T00:00:00+00:00",
+        "event_type": "STRUCTURE_INTERNAL_SEED",
         "payload": {
           "index": 273,
           "kind": "HIGH",
@@ -354,8 +354,8 @@
         }
       },
       {
+        "event_at": "2026-02-18T00:00:00+00:00",
         "event_type": "SWING_EXTERNAL_HIGH",
-        "event_at": "2026-02-18T00:00:00+00:00",
         "payload": {
           "index": 273,
           "kind": "HIGH",
@@ -364,8 +364,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_EXTERNAL_HL",
         "event_at": "2026-02-19T00:00:00+00:00",
+        "event_type": "STRUCTURE_EXTERNAL_HL",
         "payload": {
           "index": 279,
           "kind": "LOW",
@@ -375,8 +375,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_INTERNAL_HL",
         "event_at": "2026-02-19T00:00:00+00:00",
+        "event_type": "STRUCTURE_INTERNAL_HL",
         "payload": {
           "index": 279,
           "kind": "LOW",
@@ -386,8 +386,8 @@
         }
       },
       {
-        "event_type": "SWING_EXTERNAL_LOW",
         "event_at": "2026-02-19T00:00:00+00:00",
+        "event_type": "SWING_EXTERNAL_LOW",
         "payload": {
           "index": 279,
           "kind": "LOW",
@@ -396,8 +396,8 @@
         }
       },
       {
+        "event_at": "2026-02-20T00:00:00+00:00",
         "event_type": "STRUCTURE_EXTERNAL_HH",
-        "event_at": "2026-02-20T00:00:00+00:00",
         "payload": {
           "index": 285,
           "kind": "HIGH",
@@ -407,8 +407,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_INTERNAL_HH",
         "event_at": "2026-02-20T00:00:00+00:00",
+        "event_type": "STRUCTURE_INTERNAL_HH",
         "payload": {
           "index": 285,
           "kind": "HIGH",
@@ -418,8 +418,8 @@
         }
       },
       {
+        "event_at": "2026-02-20T00:00:00+00:00",
         "event_type": "SWING_EXTERNAL_HIGH",
-        "event_at": "2026-02-20T00:00:00+00:00",
         "payload": {
           "index": 285,
           "kind": "HIGH",
@@ -428,8 +428,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_EXTERNAL_HL",
         "event_at": "2026-02-21T00:00:00+00:00",
+        "event_type": "STRUCTURE_EXTERNAL_HL",
         "payload": {
           "index": 291,
           "kind": "LOW",
@@ -439,8 +439,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_INTERNAL_HL",
         "event_at": "2026-02-21T00:00:00+00:00",
+        "event_type": "STRUCTURE_INTERNAL_HL",
         "payload": {
           "index": 291,
           "kind": "LOW",
@@ -450,8 +450,8 @@
         }
       },
       {
-        "event_type": "SWING_EXTERNAL_LOW",
         "event_at": "2026-02-21T00:00:00+00:00",
+        "event_type": "SWING_EXTERNAL_LOW",
         "payload": {
           "index": 291,
           "kind": "LOW",
@@ -460,22 +460,12 @@
         }
       },
       {
-        "event_type": "STRUCTURE_INTERNAL_HH",
         "event_at": "2026-02-22T00:00:00+00:00",
+        "event_type": "STRUCTURE_INTERNAL_HH",
         "payload": {
           "index": 297,
           "kind": "HIGH",
           "label": "HH",
-          "price": "67",
-          "strength": "INTERNAL"
-        }
-      },
-      {
-        "event_type": "SWING_INTERNAL_HIGH",
-        "event_at": "2026-02-22T00:00:00+00:00",
-        "payload": {
-          "index": 297,
-          "kind": "HIGH",
           "price": "67",
           "strength": "INTERNAL"
         }

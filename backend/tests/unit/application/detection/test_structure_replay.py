@@ -13,6 +13,7 @@ from scanner.application.detection.state import (
     EngineStateManager,
 )
 from scanner.application.detection.structure_replay import (
+    STRUCTURE_ALGO_VERSION,
     StructureReplayService,
     _idle_adjusted,
 )
@@ -252,7 +253,7 @@ async def test_replay_persists_structure_events_and_state() -> None:
     state = await states.load(
         "BTCUSDT",
         Timeframe.H1.value,
-        "s4-v9",
+        STRUCTURE_ALGO_VERSION,
     )
 
     assert state is not None
@@ -347,7 +348,7 @@ async def test_rebuild_state_replaces_old_snapshot() -> None:
     state = await states.load(
         "BTCUSDT",
         Timeframe.H1.value,
-        "s4-v9",
+        STRUCTURE_ALGO_VERSION,
     )
 
     assert state is not None

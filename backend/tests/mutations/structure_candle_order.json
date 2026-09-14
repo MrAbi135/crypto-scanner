@@ -1,0 +1,73 @@
+{
+  "description": "Structure s4-v10: facts decided in candle order (audit M1+M2, owner rulings 2026-09-14). Breaks are gated by the shift engine's trend at each candle, a pass writes only what it has not decided before, and SWING_INTERNAL is written at the k=5 promotion decision. Each mutation removes one part. The property test is derandomized, so one battery run is a verdict. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/structure_candle_order.json",
+  "pytest": [
+    "tests/property/test_structure_facts_in_candle_order.py",
+    "tests/unit/application/detection/test_structure_replay.py",
+    "tests/unit/application/detection/test_bos_replay.py"
+  ],
+  "mutations": [
+    {
+      "name": "breaks are gated by the shift engine's latest trend for the whole window again",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "            return trend_after(shift.detail, previous)",
+      "new": "            return TrendState(shift.trend_state)",
+      "expect_failing": [
+        "test_close_by_close_structure_writes_what_one_pass_writes"
+      ]
+    },
+    {
+      "name": "every pass decides the whole window again",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "            first_index = resumed.next_index\n",
+      "new": "            first_index = 0\n",
+      "expect_failing": [
+        "test_close_by_close_structure_writes_what_one_pass_writes"
+      ]
+    },
+    {
+      "name": "an internal swing is written before its promotion is decided",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "            if not first_index <= swing.index + external_window <= last:",
+      "new": "            if not first_index <= swing.index + swing_window(swing.strength) <= last:",
+      "expect_failing": [
+        "test_close_by_close_structure_writes_what_one_pass_writes"
+      ]
+    },
+    {
+      "name": "a resumed pass decides a break the shift engine has not reached",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "            stop_on_unknown=resumed is not None,",
+      "new": "            stop_on_unknown=False,",
+      "expect_failing": [
+        "test_close_by_close_structure_writes_what_one_pass_writes"
+      ]
+    },
+    {
+      "name": "window-start swings are re-detected instead of carried",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "            external_swings = _stitch(\n                resumed.swings, external_swings, candles, SwingStrength.EXTERNAL\n            )\n",
+      "new": "",
+      "expect_failing": [
+        "test_close_by_close_structure_writes_what_one_pass_writes"
+      ]
+    },
+    {
+      "name": "consumed levels are forgotten between passes",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "            consumed = resumed.consumed\n",
+      "new": "            consumed = set()\n",
+      "expect_failing": [
+        "test_close_by_close_structure_writes_what_one_pass_writes"
+      ]
+    },
+    {
+      "name": "a failed break near the newest candle is never re-checked",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "            if break_index + FAILED_BREAK_CANDLES > len(candles) - 1:\n                pending.append(watch)",
+      "new": "            if False:\n                pending.append(watch)",
+      "expect_failing": [
+        "test_close_by_close_structure_writes_what_one_pass_writes"
+      ]
+    }
+  ]
+}
