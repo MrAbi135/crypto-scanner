@@ -136,9 +136,14 @@ def _fading_series(count: int, last_volume: str) -> list:
 class FakeCandleRepository:
     def __init__(self, series) -> None:
         self.series = list(series)
+        # (open_time, volume) of the candles before the window.
+        self.history: list = []
 
     async def fetch_series(self, symbol, timeframe, start, end):
         return self.series
+
+    async def fetch_volumes(self, symbol, timeframe, start, end):
+        return [(at, volume) for at, volume in self.history if start <= at < end]
 
 
 class FakeEventRepository:
@@ -1678,6 +1683,23 @@ async def test_a_context_too_short_to_measure_is_refused_by_g1() -> None:
 
     assert not up.gates_passed
     assert "G1" in up.failed_gates
+
+
+@pytest.mark.asyncio
+async def test_g1_reads_the_rvol_baseline_from_before_the_window() -> None:
+    """Audit M8 (owner ruling 2026-09-14): §2.11's baseline is the prior 20
+    candles (20 days intraday), not the window. The same short window the test
+    above refuses is measurable once the candles before it exist -- and on M15
+    and M5 no 500-candle window held its own baseline, so G1 refused every one.
+    """
+    svc, _ = service(**bullish_setup(), candles=make_series(15))
+    svc._candles.history = [(BASE - TF.duration * (20 - i), Decimal(50)) for i in range(20)]
+
+    report = await run(svc, "BULLISH")
+
+    up = next(c for c in report.candidates if c.direction == "UP")
+
+    assert "G1" not in up.failed_gates
 
 
 @pytest.mark.asyncio

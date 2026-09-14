@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import bindparam, func, select, text
@@ -582,6 +583,31 @@ class PgCandleRepository:
             ).scalars()
 
             return [_to_candle(row) for row in rows]
+
+    async def fetch_volumes(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> Sequence[tuple[datetime, Decimal]]:
+        async with self._sessions() as session:
+            rows = await session.execute(
+                select(CandleRow.open_time, CandleRow.volume)
+                .where(
+                    CandleRow.symbol == symbol,
+                    CandleRow.timeframe == timeframe.value,
+                    CandleRow.open_time >= bindparam("start"),
+                    CandleRow.open_time < bindparam("end"),
+                )
+                .order_by(CandleRow.open_time.asc()),
+                {
+                    "start": start,
+                    "end": end,
+                },
+            )
+
+            return [(open_time, volume) for open_time, volume in rows]
 
     async def count_series(
         self,

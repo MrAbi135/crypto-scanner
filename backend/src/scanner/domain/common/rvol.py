@@ -21,6 +21,7 @@ spike drags the baseline up and hides the next three.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import Enum
 
@@ -56,6 +57,21 @@ _ABNORMAL_AT = Decimal("5.0")
 
 def uses_seasonal_baseline(timeframe: Timeframe) -> bool:
     return timeframe in _SEASONAL
+
+
+def baseline_span(timeframe: Timeframe) -> timedelta:
+    """How far before a candle §2.11's baseline reaches.
+
+    Twenty days on the seasonal timeframes, twenty candles above them. A
+    detection window is not that history (audit M8): 500 H1 candles leave the
+    first 480 without twenty prior days, and 500 M15 or M5 candles leave all of
+    them. Read from this far before a window, every candle in it has its
+    baseline wherever the window starts.
+    """
+    if uses_seasonal_baseline(timeframe):
+        return timedelta(days=BASELINE_DAYS)
+
+    return timeframe.duration * BASELINE_CANDLES
 
 
 def median(values: Sequence[Decimal]) -> Decimal | None:
@@ -135,6 +151,63 @@ def relative_volume(
         return None
 
     return candles[index].volume / base
+
+
+def relative_volumes(
+    candles: Sequence[Candle],
+    history: Sequence[tuple[datetime, Decimal]] = (),
+) -> tuple[Decimal | None, ...]:
+    """RVOL for every candle, the baseline read through `history` first.
+
+    `history` is the ascending (open_time, volume) of the candles before
+    `candles[0]` -- `baseline_span` of them. Each value is `relative_volume`
+    over the history followed by the candles, so with no history the two agree
+    exactly, and one pass replaces a rescan of the window per candle.
+    """
+    if not candles:
+        return ()
+
+    seasonal = uses_seasonal_baseline(candles[0].timeframe)
+    needed = BASELINE_DAYS if seasonal else BASELINE_CANDLES
+
+    prior = [volume for _, volume in history]
+    slots: dict[tuple[int, int], list[Decimal]] = {}
+
+    if seasonal:
+        for open_time, volume in history:
+            slots.setdefault((open_time.hour, open_time.minute), []).append(volume)
+
+    values: list[Decimal | None] = []
+
+    for candle in candles:
+        if seasonal:
+            earlier = slots.setdefault((candle.open_time.hour, candle.open_time.minute), [])
+        else:
+            earlier = prior
+
+        sample = earlier[-needed:]
+        earlier.append(candle.volume)
+
+        base = median(sample) if len(sample) >= needed else None
+
+        values.append(candle.volume / base if base is not None and base > 0 else None)
+
+    return tuple(values)
+
+
+def rvol_at(
+    candles: Sequence[Candle],
+    index: int,
+    rvols: Sequence[Decimal | None] | None,
+) -> Decimal | None:
+    """RVOL at `index`, taken from a `relative_volumes` series when supplied.
+
+    `None` keeps the window-only reading, for callers that hold no history.
+    """
+    if rvols is not None:
+        return rvols[index]
+
+    return relative_volume(candles, index)
 
 
 def classify(rvol: Decimal | None) -> RvolClass | None:

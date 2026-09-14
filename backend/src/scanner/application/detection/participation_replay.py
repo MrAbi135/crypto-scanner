@@ -33,7 +33,7 @@ from scanner.application.ports.detection import (
     EngineEventRepository,
 )
 from scanner.domain.common import Candle, wilder_atr_series
-from scanner.domain.common.rvol import classify, relative_volume
+from scanner.domain.common.rvol import baseline_span, classify, relative_volumes
 from scanner.domain.momentum import (
     detect_compression,
     detect_range_expansion,
@@ -55,7 +55,14 @@ from scanner.shared import Timeframe
 # wrote RANGE_EXPANSION 473-486 candles late (BNBUSDT H1 5 of 5 and DOGEUSDT
 # M15 samples, all WINDOW_START). A pass now evaluates only candles after the
 # last one it decided; with no record of that, the whole window as before.
-PARTICIPATION_ALGO_VERSION = "s7-participation-v3"
+# v4: RVOL's baseline is read from before the window (audit M8, owner ruling
+# 2026-09-14). §2.11 measures a candle against the same slot over the prior
+# 20 days, and the baseline read only the window: a 500-candle H1 window had
+# RVOL for its newest ~21 candles and M15/M5 windows for none, so momentum
+# participation read 0 or 25 depending on where the window started
+# (MOMENTUM_ACCELERATING / EXHAUSTION_WATCH attribution 3/3 WINDOW_START),
+# and §6's volume facts could never fire below H1.
+PARTICIPATION_ALGO_VERSION = "s7-participation-v4"
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +123,15 @@ class ParticipationReplayService:
         if not series:
             return report.finish(symbol, timeframe, 0)
 
+        # §2.11's baseline is history, not this window (audit M8).
+        history = await self._candles.fetch_volumes(
+            symbol,
+            timeframe,
+            series[0].open_time - baseline_span(timeframe),
+            series[0].open_time,
+        )
+        rvols = relative_volumes(series, history)
+
         # Every detector here reads the series up to its candle and nothing
         # after, so a candle decided on the pass where it was newest has its
         # answer; deciding it again later only changes the ATR it is measured
@@ -126,8 +142,10 @@ class ParticipationReplayService:
 
         for index in range(first_index, len(series)):
             candle = series[index]
-            await self._record_volume(symbol, timeframe, series, index, candle, report, atrs)
-            await self._record_momentum(symbol, timeframe, series, index, candle, report, atrs)
+            await self._record_volume(symbol, timeframe, series, index, candle, report, atrs, rvols)
+            await self._record_momentum(
+                symbol, timeframe, series, index, candle, report, atrs, rvols
+            )
 
         await mark_decided(self._state, symbol, timeframe, self._algo_version, series)
 
@@ -142,6 +160,7 @@ class ParticipationReplayService:
         candle: Candle,
         report: _Counters,
         atrs: Sequence[Decimal | None],
+        rvols: Sequence[Decimal | None],
     ) -> None:
         # §6.4 keys on the ABNORMAL *class*, not on a spike. `detect_volume_spike`
         # additionally requires §6.2's absolute quote floor, so an abnormal candle
@@ -156,6 +175,7 @@ class ParticipationReplayService:
             # it arrives with §6.6, which needs it for its own depth test.
             depth=None,
             median_depth_7d=None,
+            rvols=rvols,
         )
 
         if check is not None and check.suspect:
@@ -167,7 +187,7 @@ class ParticipationReplayService:
                 "VOLUME_SUSPECT",
                 candle,
                 {
-                    "rvol": str(relative_volume(series, index)),
+                    "rvol": str(rvols[index]),
                     "participants_ok": check.participants_ok,
                     "depth_ok": check.depth_ok,
                     # False whenever a test could not be run. §6.4 gates the
@@ -179,7 +199,7 @@ class ParticipationReplayService:
                 report,
             )
 
-        spike = detect_volume_spike(series, index)
+        spike = detect_volume_spike(series, index, rvols=rvols)
 
         if spike is not None:
             report.volume_spikes += 1
@@ -200,18 +220,23 @@ class ParticipationReplayService:
                 report,
             )
 
-        if detect_expansion(series, index, atrs=atrs):
+        if detect_expansion(series, index, atrs=atrs, rvols=rvols):
             report.expansions += 1
 
             await self._emit(
-                symbol, timeframe, "VOLUME_EXPANSION", candle, self._rvol(series, index), report
+                symbol, timeframe, "VOLUME_EXPANSION", candle, self._rvol(rvols[index]), report
             )
 
-        if detect_contraction(series, index, atrs=atrs):
+        if detect_contraction(series, index, atrs=atrs, rvols=rvols):
             report.contractions += 1
 
             await self._emit(
-                symbol, timeframe, "VOLUME_CONTRACTION", candle, self._rvol(series, index), report
+                symbol,
+                timeframe,
+                "VOLUME_CONTRACTION",
+                candle,
+                self._rvol(rvols[index]),
+                report,
             )
 
     async def _record_momentum(
@@ -223,6 +248,7 @@ class ParticipationReplayService:
         candle: Candle,
         report: _Counters,
         atrs: Sequence[Decimal | None],
+        rvols: Sequence[Decimal | None],
     ) -> None:
         if detect_range_expansion(series, index, atrs=atrs):
             report.range_expansions += 1
@@ -234,12 +260,12 @@ class ParticipationReplayService:
 
             await self._emit(symbol, timeframe, "COMPRESSION", candle, {}, report)
 
-        phase = momentum_phase(series, index, atrs=atrs)
+        phase = momentum_phase(series, index, atrs=atrs, rvols=rvols)
 
         if phase is None:
             return
 
-        score = momentum_score(series, index, atrs=atrs)
+        score = momentum_score(series, index, atrs=atrs, rvols=rvols)
 
         # Only phase changes are recorded, not every reading. A score on every
         # candle is a series, and a series belongs in a chart query rather than
@@ -275,8 +301,7 @@ class ParticipationReplayService:
                 report,
             )
 
-    def _rvol(self, series: list[Candle], index: int) -> dict[str, object]:
-        value = relative_volume(series, index)
+    def _rvol(self, value: Decimal | None) -> dict[str, object]:
         band = classify(value)
 
         return {

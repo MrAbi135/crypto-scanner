@@ -42,10 +42,11 @@ def momentum_phase(
     index: int,
     *,
     atrs: Sequence[Decimal | None] | None = None,
+    rvols: Sequence[Decimal | None] | None = None,
 ) -> MomentumPhase | None:
     """§7.2. Three-candle score differential, plus the exhaustion tag."""
-    now = momentum_score(candles, index, atrs=atrs)
-    then = momentum_score(candles, index - ACCEL_LOOKBACK, atrs=atrs)
+    now = momentum_score(candles, index, atrs=atrs, rvols=rvols)
+    then = momentum_score(candles, index - ACCEL_LOOKBACK, atrs=atrs, rvols=rvols)
 
     if now is None or then is None:
         return None
