@@ -75,6 +75,32 @@ async def test_bulk_insert_is_idempotent_and_counts(engine) -> None:
     assert fetched[0].open == series[0].open  # Decimal survives storage exactly
 
 
+async def test_fetch_volumes_reads_open_time_and_volume_in_range(engine) -> None:
+    """The RVOL baseline before a detection window (§2.11, audit M8): ascending
+    (open_time, volume) pairs in [start, end), volumes exact."""
+    from tests.support.builders import make_candle
+
+    sessions = build_session_factory(engine)
+    repo = PgCandleRepository(sessions, FakeClock(BASE_TIME + timedelta(days=10)))
+    series = [
+        make_candle(
+            symbol="VOLUSDT",
+            timeframe=Timeframe.M15,
+            open_time=BASE_TIME + Timeframe.M15.duration * index,
+            volume=Decimal(index + 1) / 4,
+        )
+        for index in range(12)
+    ]
+
+    assert await repo.bulk_insert(series) == 12
+
+    volumes = await repo.fetch_volumes(
+        "VOLUSDT", Timeframe.M15, series[2].open_time, series[7].open_time
+    )
+
+    assert list(volumes) == [(candle.open_time, candle.volume) for candle in series[2:7]]
+
+
 async def test_check_constraint_rejects_insane_row(engine) -> None:
     """The DDD §18 storage tripwire: even if every code layer failed, the
     database refuses impossible market data."""
