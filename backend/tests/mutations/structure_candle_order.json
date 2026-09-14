@@ -3,7 +3,8 @@
   "pytest": [
     "tests/property/test_structure_facts_in_candle_order.py",
     "tests/unit/application/detection/test_structure_replay.py",
-    "tests/unit/application/detection/test_bos_replay.py"
+    "tests/unit/application/detection/test_bos_replay.py",
+    "tests/unit/application/detection/test_structure_resume.py"
   ],
   "mutations": [
     {
@@ -21,7 +22,7 @@
       "old": "            first_index = resumed.next_index\n",
       "new": "            first_index = 0\n",
       "expect_failing": [
-        "test_close_by_close_structure_writes_what_one_pass_writes"
+        "test_a_pass_does_not_decide_a_candle_the_shift_engine_has_not_reached"
       ]
     },
     {
@@ -39,7 +40,7 @@
       "old": "            stop_on_unknown=resumed is not None,",
       "new": "            stop_on_unknown=False,",
       "expect_failing": [
-        "test_close_by_close_structure_writes_what_one_pass_writes"
+        "test_a_pass_does_not_decide_a_candle_the_shift_engine_has_not_reached"
       ]
     },
     {
@@ -48,7 +49,7 @@
       "old": "            external_swings = _stitch(\n                resumed.swings, external_swings, candles, SwingStrength.EXTERNAL\n            )\n",
       "new": "",
       "expect_failing": [
-        "test_close_by_close_structure_writes_what_one_pass_writes"
+        "test_a_level_from_before_the_window_is_still_a_break_level"
       ]
     },
     {
