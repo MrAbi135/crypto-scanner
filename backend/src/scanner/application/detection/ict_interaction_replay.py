@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
+from scanner.application.detection.window_time import rebased_indices
 from scanner.application.ports import CandleRepository
 from scanner.application.ports.ict_zone_interactions import (
     IctZoneInteractionContextRepository,
@@ -40,7 +41,15 @@ from scanner.shared import Timeframe
 
 # v4: swing walk-back fix (Sec 3.1) -- the flat pause in a descent or
 # ascent no longer mints a pivot, so which swings exist changes.
-ICT_INTERACTION_ALGO_VERSION = "s6-interaction-v4"
+# v5: the walk is positioned in TIME. It started at the zone's stored
+# `confirmed_index + 1` and stopped at a terminal transition's stored
+# `candle_index`, both offsets inside whichever window wrote them. Zones are
+# born at the window's tail, so on the live host every FVG, IFVG, BPR,
+# BREAKER and most OBs carried 500 and started at 501 -- past the end of a
+# 501-candle window -- and never received a single interaction (FVG 0 of
+# 1,928; A2 matched 0 of 473 setups). OTE, born at 490-495, re-walked only
+# its last few candles.
+ICT_INTERACTION_ALGO_VERSION = "s6-interaction-v5"
 
 _ATR_PERIOD = 14
 _CONFIRMATION_MAX_LTF_CANDLES = 5
@@ -154,11 +163,16 @@ class IctZoneInteractionReplayService:
 
             transitions = transitions_by_zone.get(record.zone_id, ())
 
-            terminal_index = _terminal_index(transitions)
+            terminal_index = _terminal_index(transitions, candles, timeframe)
+
+            # Rebased by created_at, as every lifecycle already is -- see
+            # window_time.py. The stored index names a candle of the window
+            # that recorded the zone, not of this one.
+            _, confirmed = rebased_indices(record, candles, timeframe)
 
             start_index = max(
                 0,
-                record.confirmed_index + 1,
+                confirmed + 1,
             )
 
             if start_index >= len(candles):
@@ -444,17 +458,28 @@ def _find_ltf_confirmation(
 
 def _terminal_index(
     transitions: tuple[IctZoneTransitionRecord, ...],
+    candles: Sequence[Candle],
+    timeframe: Timeframe,
 ) -> int | None:
+    """The terminal transition's candle as a position in THIS window.
+
+    From `transitioned_at` -- the lifecycles stamp it with the transitioning
+    candle's close -- not from `candle_index`, which froze in the window that
+    wrote the transition. A position below zero means the zone died before the
+    window starts, and the caller's `stop < start` check skips it.
+    """
     terminal = [
-        transition.candle_index
+        transition.transitioned_at
         for transition in transitions
         if transition.to_state in _TERMINAL_STATES
     ]
 
-    if not terminal:
+    if not terminal or not candles:
         return None
 
-    return min(terminal)
+    duration = timeframe.duration
+
+    return int((min(terminal) - duration - candles[0].open_time) / duration)
 
 
 def _lower_timeframe(
