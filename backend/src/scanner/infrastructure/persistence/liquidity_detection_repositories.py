@@ -59,6 +59,9 @@ class PgLiquidityPoolRepository:
             ],
             set_={
                 "liquidity_class": stmt.excluded.liquidity_class,
+                # A cluster merging into a swing pool turns it into a cluster
+                # pool (SLS 4.2 "merge into one pool with combined evidence").
+                "source": stmt.excluded.source,
                 "price": stmt.excluded.price,
                 "band_low": stmt.excluded.band_low,
                 "band_high": stmt.excluded.band_high,

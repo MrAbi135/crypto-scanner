@@ -260,6 +260,94 @@ async def test_only_this_versions_sweeps_mature(version: str, matures: bool) -> 
 
 
 @pytest.mark.asyncio
+async def test_a_level_held_from_before_the_window_absorbs_a_swing_inside_it() -> None:
+    """The window may have cut a pool's pivot off, but the pool still holds its
+    level: the map walk reads this version's pools from before the window back
+    from persistence, so a swing at the same price inside it is not a second
+    pool on one level (§4.2)."""
+
+    candles = pad_for_warmup(
+        [
+            bar(0, open_="98", high="99", low="97", close="98"),
+            bar(1, open_="99", high="100", low="98", close="99"),
+            bar(2, open_="100", high="101", low="99", close="100"),
+            bar(3, open_="99.5", high="100", low="98.5", close="99"),
+            bar(4, open_="99", high="99.5", low="98", close="98.5"),
+        ]
+    )
+    stores = Stores()
+
+    await stores.pools.upsert(
+        pool(
+            "p-held",
+            version=LIQUIDITY_ALGO_VERSION,
+            created_at=candles[0].close_time - TF.duration,
+            price="101",
+        )
+    )
+
+    await run(stores, candles)
+
+    at_level = [
+        record.pool_id for record in stores.pools.pools.values() if record.price == Decimal("101")
+    ]
+
+    assert at_level == ["p-held"]
+
+
+@pytest.mark.asyncio
+async def test_a_consumed_level_does_not_absorb_a_later_swing_at_its_price() -> None:
+    """A pool swept before a new swing confirms at its price no longer holds
+    the level: the swing is new liquidity and becomes a pool of its own. Held
+    against the pools alive now instead of on the swing's candle, whichever
+    pass ran first decided it (audit M10)."""
+
+    candles = pad_for_warmup(
+        [
+            bar(0, open_="98", high="99", low="97", close="98"),
+            bar(1, open_="99", high="100", low="98", close="99"),
+            bar(2, open_="100", high="101", low="99", close="100"),
+            bar(3, open_="99.5", high="100", low="98.5", close="99"),
+            bar(4, open_="99", high="99.5", low="98", close="98.5"),
+        ]
+    )
+    stores = Stores()
+    swept_at = candles[-20].close_time
+
+    await stores.pools.upsert(
+        pool(
+            "p-taken",
+            version=LIQUIDITY_ALGO_VERSION,
+            created_at=candles[0].close_time - TF.duration,
+            price="101",
+            state="SWEPT",
+        )
+    )
+    await stores.transitions.append(
+        LiquidityTransitionRecord(
+            transition_id="t-taken",
+            pool_id="p-taken",
+            symbol=SYMBOL,
+            timeframe=TF,
+            from_state="ACTIVE",
+            to_state="SWEPT",
+            reason="liquidity_sweep",
+            transitioned_at=swept_at,
+            candle_index=len(candles) - 20,
+            evidence="{}",
+        )
+    )
+
+    await run(stores, candles)
+
+    at_level = sorted(
+        record.pool_id for record in stores.pools.pools.values() if record.price == Decimal("101")
+    )
+
+    assert len(at_level) == 2 and "p-taken" in at_level, at_level
+
+
+@pytest.mark.asyncio
 async def test_a_level_held_by_another_version_does_not_absorb_this_versions_pool() -> None:
     """§4.2's dedup asks whether a level is already this map's. A previous
     version's pool at the same price is not: absorbed into it, this version
@@ -278,8 +366,16 @@ async def test_a_level_held_by_another_version_does_not_absorb_this_versions_poo
     )
     stores = Stores()
 
+    # Held since before this window, so the map walk reads it back from
+    # persistence -- the read the version pin is on. (A pool confirmed inside
+    # the window is rebuilt by the walk and never read back at all.)
     await stores.pools.upsert(
-        pool("p-previous", version=PREVIOUS, created_at=candles[-6].close_time, price="101")
+        pool(
+            "p-previous",
+            version=PREVIOUS,
+            created_at=candles[0].close_time - TF.duration,
+            price="101",
+        )
     )
 
     await run(stores, candles)

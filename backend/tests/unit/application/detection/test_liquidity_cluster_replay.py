@@ -279,6 +279,57 @@ async def test_the_cluster_replaces_its_members_own_swing_pools() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_cluster_found_on_a_later_pass_leaves_the_map_a_single_pass_builds() -> None:
+    """Candle order alone decides the map (owner ruling 2026-09-14, audit M10).
+
+    The engine replays one close at a time, and on the close that confirms peak
+    A there is no peak B yet, so peak A becomes a swing pool. When B confirms
+    the level is a cluster -- and that pass used to meet A's persisted pool,
+    which is not what a single pass over the same candles meets. On the host,
+    32 of 32 cluster pools sharing a level with an older swing pool had that
+    swing as a member, and 29 were both ACTIVE at the cluster's birth.
+    """
+    candles = equal_highs_series()
+
+    fresh_service, fresh = build(candles)
+    await run(fresh_service, candles)
+
+    pools = CollectingPools()
+    transitions = FakeTransitions()
+    events = FakeEvents()
+
+    def on(series: list[Candle]) -> LiquidityReplayService:
+        return LiquidityReplayService(
+            FakeCandles(series),
+            pools,
+            transitions,
+            events,
+            FakeSnapshots(),
+            FakeEvidence(transitions),
+            FakeClock(),
+        )
+
+    # Every close from peak A's confirmation to peak B's, as the engine sees them.
+    for end in range(LEAD + 5, len(candles) + 1):
+        await run(on(candles[:end]), candles[:end])
+
+        if end == LEAD + 9:
+            # The premise: before B confirms, A is a swing pool and nothing clusters.
+            assert [p for p in pools.items.values() if p.source == "SWING" and p.price == PEAK_A]
+            assert not [p for p in pools.items.values() if p.source == "CLUSTER"]
+
+    def level(store: CollectingPools) -> list[tuple[str, Decimal, Decimal, Decimal, int]]:
+        return sorted(
+            (p.source, p.price, p.band_low, p.band_high, p.member_count)
+            for p in store.items.values()
+            if p.side == "BSL" and p.band_low <= PEAK_B and p.band_high >= PEAK_A
+        )
+
+    assert len(level(fresh)) == 1
+    assert level(pools) == level(fresh)
+
+
+@pytest.mark.asyncio
 async def test_cluster_membership_moves_the_strength_score() -> None:
     """The point of the whole exercise.
 

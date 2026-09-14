@@ -613,12 +613,21 @@ async def test_active_pool_upsert_updates_in_place(engine) -> None:
     repo = PgLiquidityPoolRepository(build_session_factory(engine))
     await repo.upsert(pool("p-live", symbol="PLIVE"))
 
-    await repo.upsert(pool("p-live", symbol="PLIVE", strength=Decimal("90"), evidence='{"v":2}'))
+    await repo.upsert(
+        replace(
+            pool("p-live", symbol="PLIVE", strength=Decimal("90"), evidence='{"v":2}'),
+            source="CLUSTER",
+            member_count=2,
+        )
+    )
 
     stored = await repo.get("p-live")
     assert stored is not None
     assert stored.strength == Decimal("90")
     assert stored.evidence == '{"v":2}'
+    # A cluster merging into a swing pool turns it into a cluster pool (s5-v13).
+    assert stored.source == "CLUSTER"
+    assert stored.member_count == 2
 
 
 @pytest.mark.parametrize("terminal", ["SWEPT", "BROKEN", "EXPIRED"])

@@ -13,30 +13,20 @@ row carries the class the window's *newest* extremes give it. Measured on 40
 generated series, 39 of 1,619 sweeps changed class between a prefix run and
 the full run, and 27 reclaim and displaced facts with them.
 
-**Two named exceptions, and only two.** The owner parked them as a separate
-engine finding (2026-09-13) rather than widening the class fix, so they are
-excluded here by mechanism, counted, and reported -- not silently tolerated:
-
-* **(b) dedup at the newest scale.** §4.2's "one price zone = one pool per side"
-  is applied with epsilon from the window's newest ATR, so a level that was its
-  own pool on the shorter window can be absorbed by a neighbour on the longer
-  one. The prefix's pool is then absent from the full run, and so is its sweep.
-* **(c) cluster membership.** A swing that joins an equal-level cluster later
-  is suppressed as a pool of its own in favour of the cluster pool.
-
-Either exception applies only when the prefix's pool does not exist in the full
-run at all. A pool that exists and was swept differently -- another class,
-another candle, another depth -- is a repaint, and fails.
-
-Measured before this was written, on the fixed engine, 40 series: (b) 8 sweeps,
-(c) 1, everything else identical.
+**No exceptions since s5-v13.** Two mechanisms used to be excluded here by
+name, parked by the owner on 2026-09-13: (b) §4.2's dedup applied with the
+newest candle's epsilon, so a level that was its own pool on the shorter window
+could be absorbed by a neighbour on the longer one; and (c) a swing that joined
+an equal-level cluster later being suppressed in favour of the cluster pool.
+Both took the prefix's pool, and its sweep, out of the full run. The owner's
+2026-09-14 ruling brought them into the fix -- the pool map is decided by
+candle order alone -- so every sweep and matured fact must now stand.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -47,10 +37,6 @@ from tests.golden.harness import runner
 from tests.golden.harness.canonical import canonicalise
 from tests.golden.harness.dataset import GoldenDataset
 from tests.support.strategies import walking_candle_series
-
-from scanner.domain.common import TOLERANCE_ATR, wilder_atr_series
-from scanner.domain.liquidity import detect_equal_level_clusters
-from scanner.domain.structure import SwingKind, detect_external_swings, detect_internal_swings
 
 pytestmark = pytest.mark.property
 
@@ -94,46 +80,6 @@ def _key(item: dict[str, Any]) -> str:
     return json.dumps(item, sort_keys=True)
 
 
-def _sweep_identity(item: dict[str, Any]) -> tuple[str, str, str]:
-    # The harness names a pool `pool:SIDE:created_index`, and two pools can
-    # share that name: an internal and an external swing may confirm on the
-    # same candle. The level separates them.
-    payload = item["payload"]
-    return item["event_at"], payload["pool_id"], payload["reference_level"]
-
-
-def _parked_cause(pool: dict[str, Any], series: list, later: dict[str, Any]) -> str | None:
-    """Which parked mechanism removed this prefix pool from the full run, if any."""
-
-    swings = [*detect_internal_swings(series), *detect_external_swings(series)]
-    atrs = wilder_atr_series(series)
-
-    side = pool["side"]
-    price = Decimal(pool["price"])
-    created = int(pool["created_index"])
-
-    clustered = {
-        (index, cluster.side.value)
-        for cluster in detect_equal_level_clusters(swings, atrs=atrs)
-        for index in cluster.member_indices
-    }
-
-    kind = SwingKind.HIGH if side == "BSL" else SwingKind.LOW
-    sources = [s for s in swings if s.kind is kind and s.price == price and s.index < created]
-
-    if any((s.index, side) in clustered for s in sources):
-        return "(c) its swing joined an equal-level cluster"
-
-    epsilon = TOLERANCE_ATR * (atrs[-1] or Decimal(0))
-
-    if any(
-        p["side"] == side and abs(Decimal(p["price"]) - price) <= epsilon for p in later["pools"]
-    ):
-        return "(b) absorbed by a pool within the newest epsilon"
-
-    return None
-
-
 @settings(
     max_examples=25,
     deadline=None,
@@ -156,54 +102,17 @@ def test_a_published_sweep_and_its_class_are_never_rewritten(
     later = _run(series)
 
     later_exact = {_key(item) for item in later["events"]}
-    later_pools = {(p["pool"], p["price"]) for p in later["pools"]}
-    early_pools = {(p["pool"], p["price"]): p for p in early["pools"]}
-
-    parked_pool_ids: set[str] = set()
 
     for item in early["events"]:
-        if item["event_type"] != "LIQUIDITY_SWEEP":
-            continue
-
-        event("prefix published a sweep")
-
-        if item["payload"]["liquidity_class"] == "EXTERNAL":
-            event("prefix published an EXTERNAL sweep")
-
-        if _key(item) in later_exact:
-            continue
-
-        alias, level = item["payload"]["pool_id"], item["payload"]["reference_level"]
-        pool = early_pools.get((alias, level))
-
-        assert pool is not None and (alias, level) not in later_pools, (
-            f"sweep of {alias} at {level} on {split} candles was rewritten once the series "
-            f"grew to {len(series)}: {item['payload']}"
-        )
-
-        cause = _parked_cause(pool, series, later)
-
-        assert cause is not None, (
-            f"sweep of {alias} at {level} on {split} candles vanished with its pool, and "
-            f"neither parked mechanism explains it: {item['payload']}"
-        )
-
-        event(f"excluded, parked {cause}")
-        parked_pool_ids.add(alias)
-
-    for item in early["events"]:
-        if item["event_type"] not in _MATURED:
+        if item["event_type"] != "LIQUIDITY_SWEEP" and item["event_type"] not in _MATURED:
             continue
 
         event(f"prefix published {item['event_type']}")
 
-        if _key(item) in later_exact:
-            continue
+        if item["payload"].get("liquidity_class") == "EXTERNAL":
+            event("prefix published an EXTERNAL fact")
 
-        payload = item["payload"]
-        alias = payload.get("pool_id") or payload.get("sweep_pool_id")
-
-        assert alias in parked_pool_ids, (
+        assert _key(item) in later_exact, (
             f"{item['event_type']} at {item['event_at']} on {split} candles was revoked or "
-            f"rewritten once the series grew to {len(series)}: {payload}"
+            f"rewritten once the series grew to {len(series)}: {item['payload']}"
         )
