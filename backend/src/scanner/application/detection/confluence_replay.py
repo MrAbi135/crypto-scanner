@@ -193,7 +193,13 @@ from scanner.shared import Timeframe
 # only failures are persisted, so inside the 3-candle window "no failure"
 # read identically to "window elapsed clean" and the 15 was paid on a break
 # still in jeopardy. failed_breaks=None (unread) until the window settles.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v29"
+# v30: §8.6 A2's three links are read off ONE breaker. `breaker_formed` asked
+# whether any matching zone was BRK_A while the first-retest Respect and the
+# entry-grade Confirmation were read from the best-ranked zone's history, so a
+# MITIGATED breaker (50) under a FRESH OB_A (65) could close A2 on the OB's
+# retest. Unreachable while tail-born zones had no interactions (fixed in
+# s6-interaction-v5); on the host 1 of 473 setups had exactly that stack.
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v30"
 
 # Import-time, not call-time: a zone type with no version entry is invisible
 # to scoring, and that must refuse to boot rather than run quietly blind.
@@ -932,6 +938,24 @@ class ConfluenceReplayService:
         # below are the ones genuinely readable, so those chains fail on the
         # link that is missing rather than on a fabricated one.
 
+        # §8.6 A2 is a chain about one breaker: it formed, ITS first retest was
+        # respected, and it is BRK_A or carries an entry-grade Confirmation.
+        # Ranked the way `best_zone` is, so when the breaker is the best zone
+        # its history is the one already read.
+        breakers = [z for z in matching_zones if z.grade == "BRK_A"]
+        breaker = (
+            max(breakers, key=lambda z: (_zone_score(z, len(matching_zones)), z.created_at))
+            if breakers
+            else None
+        )
+
+        if breaker is None:
+            breaker_history = _History(())
+        elif breaker.zone_id == best_zone.zone_id:
+            breaker_history = history
+        else:
+            breaker_history = _History(await self._interactions.list_for_zone(breaker.zone_id))
+
         match = explain_archetype(
             ArchetypeEvidence(
                 external_sweep=any(s.external for s in supporting),
@@ -941,10 +965,10 @@ class ConfluenceReplayService:
                 # records an MSS origin *is* the MSS-origin zone being retested.
                 mss_origin_zone_retested=_is_mss_origin(best_zone),
                 stop_hunt_confirmed=stop_hunt_key is not None,
-                breaker_formed=any(z.grade == "BRK_A" for z in matching_zones),
-                breaker_grade_a=best_zone.grade == "BRK_A",
-                breaker_first_retest_respected=history.first_retest_respected,
-                entry_grade_confirmation=history.confirmed,
+                breaker_formed=breaker is not None,
+                breaker_grade_a=breaker is not None and breaker.grade == "BRK_A",
+                breaker_first_retest_respected=breaker_history.first_retest_respected,
+                entry_grade_confirmation=breaker_history.confirmed,
                 trend_active=trend_following,
                 # §8.6 A3 wants a *displaced* BOS and the BOS event does not
                 # record displacement. The impulse leg it sits in does -- and
