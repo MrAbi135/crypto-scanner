@@ -176,6 +176,34 @@ class PgIctZoneRepository:
 
             return tuple(_zone_record(row) for row in rows)
 
+    async def list_open(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+    ) -> tuple[IctZoneRecord, ...]:
+        """Every non-terminal zone, every version, oldest first -- the lifecycles' read.
+
+        No `MAX_ZONES` limit and no version pin: the bound is on what §8
+        scores (`list_live`), and a lifecycle is the read that advances and
+        retires zones, old versions included (see `list_live`'s docstring).
+        """
+        async with self._sessions() as session:
+            result = await session.execute(
+                select(IctZoneRow)
+                .where(
+                    IctZoneRow.symbol == symbol,
+                    IctZoneRow.timeframe == timeframe.value,
+                    ~IctZoneRow.state.in_(_TERMINAL_STATES),
+                )
+                .order_by(
+                    IctZoneRow.created_at.asc(),
+                    IctZoneRow.zone_type.asc(),
+                    IctZoneRow.zone_id.asc(),
+                )
+            )
+
+            return tuple(_zone_record(row) for row in result.scalars().all())
+
     async def transition(
         self,
         zone_id: str,

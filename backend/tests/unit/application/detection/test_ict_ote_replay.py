@@ -85,6 +85,13 @@ class FakeZoneRepository:
             )
         )
 
+    async def list_open(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+    ) -> tuple[IctZoneRecord, ...]:
+        return await self.list_live(symbol, timeframe)
+
     async def transition(
         self,
         zone_id: str,

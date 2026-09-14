@@ -383,6 +383,26 @@ class InMemoryIctZoneRepository:
             )[:MAX_ZONES]
         )
 
+    async def list_open(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+    ) -> tuple[IctZoneRecord, ...]:
+        """Mirrors `PgIctZoneRepository.list_open`: non-terminal, every version,
+        oldest first, unbounded."""
+        return tuple(
+            sorted(
+                (
+                    zone
+                    for zone in self.zones.values()
+                    if zone.symbol == symbol
+                    and zone.timeframe is timeframe
+                    and zone.state not in _TERMINAL_ZONE_STATES
+                ),
+                key=lambda zone: (zone.created_at.timestamp(), zone.zone_type, zone.zone_id),
+            )
+        )
+
     async def transition(
         self,
         zone_id: str,

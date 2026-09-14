@@ -66,7 +66,10 @@ from scanner.shared import Timeframe
 # OB -- which raised IndexError 23 times across the 2026-09-07 soak and, when it
 # did not raise, silently read the wrong candle. Both now derive from the OB's
 # own created_at, so origin_swept and origin_failure_swing can change.
-ICT_OB_ALGO_VERSION = "s6-ob-v6"
+# v7: the OB, BREAKER and MITIGATION lifecycles walk every open zone
+# (`list_open`), not the newest 60 `list_live` returns for scoring (LINKUSDT M5
+# replay: a zone at position 64 of 69 back-wrote INVERTED 466 candles late).
+ICT_OB_ALGO_VERSION = "s6-ob-v7"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")
@@ -265,7 +268,7 @@ class IctOrderBlockReplayService:
 
             upserted += 1
 
-        live_before = await self._zones.list_live(
+        live_before = await self._zones.list_open(
             symbol,
             timeframe,
         )
@@ -293,7 +296,7 @@ class IctOrderBlockReplayService:
             breakers_created += created_breakers
             mitigations_created += created_mitigations
 
-        live_with_breakers = await self._zones.list_live(
+        live_with_breakers = await self._zones.list_open(
             symbol,
             timeframe,
         )
