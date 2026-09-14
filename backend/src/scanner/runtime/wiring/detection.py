@@ -25,6 +25,11 @@ from scanner.application.detection.participation_replay import (
 from scanner.application.detection.pipeline import DetectionPipeline
 from scanner.application.detection.signal_monitor import SignalMonitorService
 from scanner.application.detection.state import (
+    ICT_NAMESPACE,
+    ICT_OB_NAMESPACE,
+    ICT_OTE_NAMESPACE,
+    LIQUIDITY_NAMESPACE,
+    PARTICIPATION_NAMESPACE,
     SHIFT_NAMESPACE,
     EngineStateManager,
 )
@@ -136,6 +141,11 @@ def build_detection_pipeline(
             RedisLiquidityStateStore(redis_client),
             evidence,
             clock,
+            # Each candle decided once (audit M3): no pool is born on a candle
+            # an earlier pass already decided.
+            state=EngineStateManager(
+                RedisEngineStateStore(redis_client), namespace=LIQUIDITY_NAMESPACE
+            ),
         ),
         structure_shift=StructureShiftReplayService(
             candles,
@@ -153,12 +163,18 @@ def build_detection_pipeline(
             zone_transitions,
             zone_state,
             clock,
+            # Each candle decided once (audit M3): gaps are created only after
+            # the last candle a pass decided.
+            state=EngineStateManager(RedisEngineStateStore(redis_client), namespace=ICT_NAMESPACE),
         ),
         ict_ote=IctOteReplayService(
             candles,
             zones,
             zone_transitions,
             clock,
+            state=EngineStateManager(
+                RedisEngineStateStore(redis_client), namespace=ICT_OTE_NAMESPACE
+            ),
         ),
         ict_ob=IctOrderBlockReplayService(
             candles,
@@ -167,6 +183,9 @@ def build_detection_pipeline(
             zone_state,
             evidence,
             clock,
+            state=EngineStateManager(
+                RedisEngineStateStore(redis_client), namespace=ICT_OB_NAMESPACE
+            ),
         ),
         ict_interaction=IctZoneInteractionReplayService(
             candles,
@@ -177,6 +196,11 @@ def build_detection_pipeline(
             candles,
             events,
             clock,
+            # Each candle decided once: the next pass starts after the last one.
+            state=EngineStateManager(
+                RedisEngineStateStore(redis_client),
+                namespace=PARTICIPATION_NAMESPACE,
+            ),
         ),
         confluence=ConfluenceReplayService(
             candles,

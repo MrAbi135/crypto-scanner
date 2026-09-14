@@ -11,6 +11,11 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from functools import partial
 
+from scanner.application.detection.state import (
+    EngineStateManager,
+    first_undecided_index,
+    mark_decided,
+)
 from scanner.application.ports import (
     CandleRepository,
     Clock,
@@ -116,7 +121,13 @@ from scanner.shared import Timeframe
 # the pool holding its first member (SLS 4.2 "combined evidence"), a pool's
 # level is recorded in stages so every candle meets it as it stood then, and a
 # pivot's pool is born at its first confirmation.
-LIQUIDITY_ALGO_VERSION = "s5-v13"
+# v14: a pool is born only on a candle no earlier pass has decided (audit M3,
+# owner ruling 2026-09-14). Wilder ATR has no value in a window's first ~14
+# candles, so epsilon there is zero and a level another pool held while it
+# sat deeper in the window became its own pool once its confirmation reached
+# them -- and that pass wrote its old sweep or break 477-486 candles late
+# (DOGEUSDT M15: five pools, each born at window index 12 with epsilon 0).
+LIQUIDITY_ALGO_VERSION = "s5-v14"
 
 _ATR_PERIOD = 14
 _SWEEP_SCAN_ATR = Decimal("3")
@@ -175,6 +186,7 @@ class LiquidityReplayService:
         clock: Clock,
         *,
         algo_version: str = LIQUIDITY_ALGO_VERSION,
+        state: EngineStateManager | None = None,
     ) -> None:
         self._candles = candles
         self._pools = pools
@@ -184,6 +196,8 @@ class LiquidityReplayService:
         self._evidence = evidence
         self._clock = clock
         self._algo_version = algo_version
+        # The last candle a pass decided (audit M3); absent, the whole window.
+        self._state = state
 
     async def run(
         self,
@@ -250,16 +264,25 @@ class LiquidityReplayService:
         # ACTIVE now, with the newest candle's epsilon, in loop order -- so the
         # same candles gave a different map depending on which passes had run.
         # The walk judges every level on the candle that confirms it instead.
+        seeds, known = await self._seed_levels(symbol, timeframe, candles)
+
         walk = _PoolMapWalk(
             candles,
             atrs,
-            seeds=await self._seed_levels(symbol, timeframe, candles),
+            seeds=seeds,
             pool_id=partial(
                 _build_pool_id,
                 symbol=symbol,
                 timeframe=timeframe,
                 algo_version=self._algo_version,
             ),
+            # A level confirmed on a candle an earlier pass decided, with no
+            # row, never became a pool when that candle was newest; it is not
+            # born now (audit M3).
+            decided_before=await first_undecided_index(
+                self._state, symbol, timeframe, self._algo_version, candles
+            ),
+            known=known,
         )
 
         levels = walk.run(internal_swings, external_swings, clusters)
@@ -388,6 +411,8 @@ class LiquidityReplayService:
             active,
         )
 
+        await mark_decided(self._state, symbol, timeframe, self._algo_version, candles)
+
         return LiquidityReplayReport(
             symbol=symbol,
             timeframe=timeframe,
@@ -410,8 +435,9 @@ class LiquidityReplayService:
         symbol: str,
         timeframe: Timeframe,
         candles: Sequence[Candle],
-    ) -> tuple[_Level, ...]:
-        """This version's pools the window may no longer be able to rebuild.
+    ) -> tuple[tuple[_Level, ...], frozenset[str]]:
+        """This version's pools the window may no longer be able to rebuild,
+        and the ids of every pool of this version the window can see a row for.
 
         A pool confirmed within `_SEED_HORIZON` candles of the window start may
         rest on a pivot the window has cut off; it still holds its level, and
@@ -444,10 +470,14 @@ class LiquidityReplayService:
                 if record is not None and record.created_at < horizon:
                     records[row.pool_id] = record
 
-        return tuple(
+        known = frozenset({pool.pool_id for pool in active} | {row.pool_id for row in ledger})
+
+        seeds = tuple(
             _Level.from_record(record, ended_at=ended.get(record.pool_id))
             for record in sorted(records.values(), key=lambda item: (item.created_at, item.pool_id))
         )
+
+        return seeds, known
 
     async def _persist_level(
         self,
@@ -1740,12 +1770,16 @@ class _PoolMapWalk:
         *,
         seeds: Sequence[_Level],
         pool_id: Callable[..., str],
+        decided_before: int = 0,
+        known: frozenset[str] = frozenset(),
     ) -> None:
         self._candles = candles
         self._atrs = atrs
         self._pool_id = pool_id
         self._levels: dict[str, _Level] = {level.pool_id: level for level in seeds}
         self._holders: dict[tuple[int, SwingKind], str] = {}
+        self._decided_before = decided_before
+        self._known = known
 
     def run(
         self,
@@ -1826,6 +1860,12 @@ class _PoolMapWalk:
 
         if holder is not None:
             self._holders[key] = holder.pool_id
+            return
+
+        # Audit M3: an earlier pass decided this candle and wrote no pool for
+        # it, so none was born then. Deciding it again could only differ by the
+        # ATR a later window start seeds -- zero on its first candles.
+        if confirmed < self._decided_before and pool_id not in self._known:
             return
 
         self._levels[pool_id] = _Level(

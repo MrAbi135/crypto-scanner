@@ -148,6 +148,52 @@ async def test_a_replay_is_idempotent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_candle_already_decided_is_not_decided_again() -> None:
+    """Audit M3 (owner ruling 2026-09-14): the engine replays a sliding window,
+    and ATR seeded at a later window start could turn an old candle's reading
+    into a new fact hundreds of candles after it closed. A pass decides only the
+    candles after the last one it decided."""
+    from tests.golden.harness.memory import InMemoryEngineStateStore
+
+    from scanner.application.detection.participation_replay import PARTICIPATION_ALGO_VERSION
+    from scanner.application.detection.state import (
+        PARTICIPATION_NAMESPACE,
+        EngineStateManager,
+        StructureEngineState,
+    )
+
+    series = [candle(i) for i in range(20)] + [candle(20, volume="30")]
+    state = EngineStateManager(InMemoryEngineStateStore(), namespace=PARTICIPATION_NAMESPACE)
+    repo = FakeEventRepository()
+    svc = ParticipationReplayService(FakeCandleRepository(series), repo, FakeClock(), state=state)
+
+    # A previous pass already decided every candle up to the spike.
+    await state.save(
+        StructureEngineState(
+            symbol="BTCUSDT",
+            timeframe=Timeframe.H4.value,
+            algo_version=PARTICIPATION_ALGO_VERSION,
+            last_processed_open_time=series[-1].open_time.isoformat(),
+        )
+    )
+
+    assert (await run(svc)).volume_spikes == 0
+    assert repo.events == {}
+
+    # With nothing decided yet, the same window records the spike, and the pass
+    # leaves its newest candle as decided.
+    fresh = EngineStateManager(InMemoryEngineStateStore(), namespace=PARTICIPATION_NAMESPACE)
+    first = ParticipationReplayService(FakeCandleRepository(series), repo, FakeClock(), state=fresh)
+
+    assert (await run(first)).volume_spikes == 1
+
+    saved = await fresh.load("BTCUSDT", Timeframe.H4.value, PARTICIPATION_ALGO_VERSION)
+
+    assert saved is not None
+    assert saved.last_processed_open_time == series[-1].open_time.isoformat()
+
+
+@pytest.mark.asyncio
 async def test_an_inverted_window_is_refused() -> None:
     svc, _ = service([candle(0)])
 

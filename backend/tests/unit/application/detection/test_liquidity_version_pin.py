@@ -348,6 +348,60 @@ async def test_a_consumed_level_does_not_absorb_a_later_swing_at_its_price() -> 
 
 
 @pytest.mark.asyncio
+async def test_no_pool_is_born_on_a_candle_an_earlier_pass_decided() -> None:
+    """Audit M3 (owner ruling 2026-09-14): epsilon is zero on a window's first
+    candles (Wilder ATR has no value there), so a level another pool held while
+    it sat deeper in the window became its own pool once it reached them, and
+    that pass wrote its old sweep. A pass births no pool on a candle an earlier
+    pass decided and wrote no row for; the same window undecided births it."""
+    from tests.golden.harness.memory import InMemoryCandleRepository, InMemoryEngineStateStore
+
+    from scanner.application.detection.state import (
+        LIQUIDITY_NAMESPACE,
+        EngineStateManager,
+        StructureEngineState,
+    )
+
+    candles = pad_for_warmup(
+        [
+            bar(0, open_="98", high="99", low="97", close="98"),
+            bar(1, open_="99", high="100", low="98", close="99"),
+            bar(2, open_="100", high="101", low="99", close="100"),
+            bar(3, open_="99.5", high="100", low="98.5", close="99"),
+            bar(4, open_="99", high="99.5", low="98", close="98.5"),
+        ]
+    )
+
+    async def pools_at_101(state: EngineStateManager | None) -> list[str]:
+        stores = Stores()
+        await LiquidityReplayService(
+            InMemoryCandleRepository(candles),
+            stores.pools,
+            stores.transitions,
+            stores.events,
+            stores.snapshots,
+            stores.evidence,
+            FixedClock(),
+            state=state,
+        ).run(SYMBOL, TF, candles[0].open_time, candles[-1].open_time + TF.duration)
+        return [p.pool_id for p in stores.pools.pools.values() if p.price == Decimal("101")]
+
+    decided = EngineStateManager(InMemoryEngineStateStore(), namespace=LIQUIDITY_NAMESPACE)
+    await decided.save(
+        StructureEngineState(
+            symbol=SYMBOL,
+            timeframe=TF.value,
+            algo_version=LIQUIDITY_ALGO_VERSION,
+            last_processed_open_time=candles[-1].open_time.isoformat(),
+        )
+    )
+
+    # The premise: undecided, the window births the pool at the 101 swing high.
+    assert await pools_at_101(None)
+    assert await pools_at_101(decided) == []
+
+
+@pytest.mark.asyncio
 async def test_a_level_held_by_another_version_does_not_absorb_this_versions_pool() -> None:
     """§4.2's dedup asks whether a level is already this map's. A previous
     version's pool at the same price is not: absorbed into it, this version

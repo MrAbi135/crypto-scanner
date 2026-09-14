@@ -10,6 +10,11 @@ from datetime import datetime
 from decimal import Decimal
 
 from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
+from scanner.application.detection.state import (
+    EngineStateManager,
+    first_undecided_index,
+    mark_decided,
+)
 from scanner.application.detection.window_time import rebased_indices
 from scanner.application.ports import (
     CandleRepository,
@@ -69,7 +74,14 @@ from scanner.shared import Timeframe
 # v7: the OB, BREAKER and MITIGATION lifecycles walk every open zone
 # (`list_open`), not the newest 60 `list_live` returns for scoring (LINKUSDT M5
 # replay: a zone at position 64 of 69 back-wrote INVERTED 466 candles late).
-ICT_OB_ALGO_VERSION = "s6-ob-v7"
+# v8: an order block is created only for a displacement no earlier pass has
+# decided (audit M3, owner ruling 2026-09-14). Displacement and the qualifying
+# FVG are measured against ATR, which at a window's first candles depends on
+# where the window starts, so an OB about an old candle could appear on a later
+# pass and be walked from there (zone tests and invalidations 447-460 candles
+# late, WINDOW_START). Its FVG test reads the candle after the displacement, so
+# a displacement is decided once that candle has closed.
+ICT_OB_ALGO_VERSION = "s6-ob-v8"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")
@@ -139,6 +151,7 @@ class IctOrderBlockReplayService:
         clock: Clock,
         *,
         algo_version: str = ICT_OB_ALGO_VERSION,
+        state: EngineStateManager | None = None,
     ) -> None:
         self._candles = candles
         self._zones = zones
@@ -147,6 +160,8 @@ class IctOrderBlockReplayService:
         self._evidence = evidence
         self._clock = clock
         self._algo_version = algo_version
+        # The last candle a pass decided (audit M3); absent, the whole window.
+        self._state = state
 
     async def run(
         self,
@@ -230,10 +245,19 @@ class IctOrderBlockReplayService:
 
         displacements = _detect_displacements(candles, atrs)
 
+        first_index = await first_undecided_index(
+            self._state, symbol, timeframe, self._algo_version, candles
+        )
+
         detected = 0
         upserted = 0
 
         for displacement in displacements:
+            # The FVG test reads the candle after the displacement, so the pass
+            # on which that candle was newest decided it.
+            if displacement.candle_index + 1 < first_index:
+                continue
+
             ob = self._detect_order_block(
                 candles=candles,
                 swings=swings,
@@ -323,6 +347,8 @@ class IctOrderBlockReplayService:
             timeframe,
             live_after,
         )
+
+        await mark_decided(self._state, symbol, timeframe, self._algo_version, candles)
 
         live_ob_count = sum(1 for zone in live_after if zone.zone_type == "OB")
 

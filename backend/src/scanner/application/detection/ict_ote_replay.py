@@ -9,6 +9,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
+from scanner.application.detection.state import (
+    EngineStateManager,
+    first_undecided_index,
+    mark_decided,
+)
 from scanner.application.detection.window_time import rebased_indices
 from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.ict_zones import (
@@ -48,7 +53,10 @@ from scanner.shared import Timeframe
 # ascent no longer mints a pivot, so which swings exist changes.
 # v5: the OTE lifecycle walks every open zone (`list_open`), not the newest 60
 # `list_live` returns for scoring -- older OTEs were never advanced or expired.
-ICT_OTE_ALGO_VERSION = "s6-ote-v5"
+# v6: an OTE is created only on a candle no earlier pass has decided (audit M3,
+# owner ruling 2026-09-14): `detect_ote` sizes the band against ATR, which at a
+# window's first candles depends on where the window starts.
+ICT_OTE_ALGO_VERSION = "s6-ote-v6"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")
@@ -77,12 +85,15 @@ class IctOteReplayService:
         clock: Clock,
         *,
         algo_version: str = ICT_OTE_ALGO_VERSION,
+        state: EngineStateManager | None = None,
     ) -> None:
         self._candles = candles
         self._zones = zones
         self._transitions = transitions
         self._clock = clock
         self._algo_version = algo_version
+        # The last candle a pass decided (audit M3); absent, the whole window.
+        self._state = state
 
     async def run(
         self,
@@ -125,7 +136,11 @@ class IctOteReplayService:
         otes_detected = 0
         zones_upserted = 0
 
-        for index in range(len(candles)):
+        first_index = await first_undecided_index(
+            self._state, symbol, timeframe, self._algo_version, candles
+        )
+
+        for index in range(first_index, len(candles)):
             atr = _atr_at(atrs, index)
 
             if atr <= _ZERO:
@@ -198,6 +213,8 @@ class IctOteReplayService:
             symbol,
             timeframe,
         )
+
+        await mark_decided(self._state, symbol, timeframe, self._algo_version, candles)
 
         live_otes = sum(1 for record in live_after if record.zone_type == "OTE")
 
