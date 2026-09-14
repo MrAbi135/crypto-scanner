@@ -9,7 +9,7 @@
     "3.5-surpassed-levels-consumed-silently"
   ],
   "description": "The break from the previous case, undone one candle later. The BOS stands, the failure is recorded beside it, and no second break is invented.",
-  "labelling_rationale": "s4-close-through-breaks-structure-a-wick-does-not, with one candle added. Its BOS at index 301 broke the external high at 288, whose level is 67, on a close of 68.\n\nIndex 302 closes at 66 -- back below the level, one candle after the break. \u00a73.5's invalidation rule: 'BOS is a fact once confirmed. A failed break is recorded (fact, not deletion) if within P.structure.failed_break_candles = 3 closed candles price closes back beyond the broken level in the opposite direction.'\n\nTwo things are asserted, and the second is the quieter one.\n\nFirst, the BOS at 301 is still there. \u00a73.5 says the break is a fact once confirmed and the failure is recorded rather than the break deleted, so a dataset that showed the BOS disappearing would be showing a defect. Both events stand, with elapsed_candles = 1 on the failure.\n\nSecond, and this is what the case exists to hold: index 302 emits *no second BOS*. Before this series was written the engine emitted one. Breaking the level at 288 consumed it, which made the next-oldest external high -- the one at 276, level 49 -- the most recent unconsumed level; price had closed above 49 seventeen candles earlier, so the close of 66 'broke' it here. That dated a break to a candle that did not make it, and it repeated on every following candle, marching backwards through history. On the VM, 93 of 186 recorded breaks were of that shape. A level under the close has been surpassed and is now consumed silently, which is bookkeeping rather than a structural event, and the absence of a BOS_UP at 302 is how this dataset pins that.",
+  "labelling_rationale": "s4-close-through-breaks-structure-a-wick-does-not, with one candle added. Its BOS at index 301 broke the external high at 288, whose level is 67, on a close of 68.\n\nIndex 302 closes at 66 -- back below the level, one candle after the break. §3.5's invalidation rule: 'BOS is a fact once confirmed. A failed break is recorded (fact, not deletion) if within P.structure.failed_break_candles = 3 closed candles price closes back beyond the broken level in the opposite direction.'\n\nTwo things are asserted, and the second is the quieter one.\n\nFirst, the BOS at 301 is still there. §3.5 says the break is a fact once confirmed and the failure is recorded rather than the break deleted, so a dataset that showed the BOS disappearing would be showing a defect. Both events stand, with elapsed_candles = 1 on the failure.\n\nSecond, and this is what the case exists to hold: index 302 emits *no second BOS*. Before this series was written the engine emitted one. Breaking the level at 288 consumed it, which made the next-oldest external high -- the one at 276, level 49 -- the most recent unconsumed level; price had closed above 49 seventeen candles earlier, so the close of 66 'broke' it here. That dated a break to a candle that did not make it, and it repeated on every following candle, marching backwards through history. On the VM, 93 of 186 recorded breaks were of that shape. A level under the close has been surpassed and is now consumed silently, which is bookkeeping rather than a structural event, and the absence of a BOS_UP at 302 is how this dataset pins that. | 2026-09-14 (a swing is stored once its strength is decided, structure s4-v10, owner ruling 2026-09-14): the pivot at index 300 confirms as an internal swing, but the series ends before its k=5 window does, so whether §3.1 stores it as internal or external is not yet decided and no SWING row is written for it. Its STRUCTURE_INTERNAL_HH label, written at its own confirmation, stays, and so does the internal_swings count. Appending flat candles shows why the old row was wrong rather than early: the pivot then confirms EXTERNAL. events_inserted drops by one; nothing else in this expectation moves.",
   "labelled_by": "drafted by Claude Opus 5 2026-08-23 from SLS 3.5; VERIFIED by developer 2026-08-23 -- confirmed both halves of the case in plain terms: the BOS at 301 survives the failure rather than being erased, and index 302 records no second break. Per-candle arithmetic rests on the generator's assertions and on the parent series this one extends, as with its four siblings.",
   "labelled_at": "2026-08-23",
   "algo_version": "s4-v5",
@@ -380,13 +380,13 @@
       "internal_swings": 8,
       "external_swings": 7,
       "classified_events": 15,
-      "events_inserted": 25,
+      "events_inserted": 24,
       "trend_state": "BULLISH"
     },
     "events": [
       {
+        "event_at": "2026-02-17T00:00:00+00:00",
         "event_type": "STRUCTURE_EXTERNAL_SEED",
-        "event_at": "2026-02-17T00:00:00+00:00",
         "payload": {
           "index": 258,
           "kind": "LOW",
@@ -396,8 +396,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_INTERNAL_SEED",
         "event_at": "2026-02-17T00:00:00+00:00",
+        "event_type": "STRUCTURE_INTERNAL_SEED",
         "payload": {
           "index": 258,
           "kind": "LOW",
@@ -407,8 +407,8 @@
         }
       },
       {
-        "event_type": "SWING_EXTERNAL_LOW",
         "event_at": "2026-02-17T00:00:00+00:00",
+        "event_type": "SWING_EXTERNAL_LOW",
         "payload": {
           "index": 258,
           "kind": "LOW",
@@ -417,8 +417,8 @@
         }
       },
       {
+        "event_at": "2026-02-18T00:00:00+00:00",
         "event_type": "STRUCTURE_EXTERNAL_SEED",
-        "event_at": "2026-02-18T00:00:00+00:00",
         "payload": {
           "index": 264,
           "kind": "HIGH",
@@ -428,8 +428,8 @@
         }
       },
       {
+        "event_at": "2026-02-18T00:00:00+00:00",
         "event_type": "STRUCTURE_INTERNAL_SEED",
-        "event_at": "2026-02-18T00:00:00+00:00",
         "payload": {
           "index": 264,
           "kind": "HIGH",
@@ -439,8 +439,8 @@
         }
       },
       {
-        "event_type": "SWING_EXTERNAL_HIGH",
         "event_at": "2026-02-18T00:00:00+00:00",
+        "event_type": "SWING_EXTERNAL_HIGH",
         "payload": {
           "index": 264,
           "kind": "HIGH",
@@ -449,8 +449,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_EXTERNAL_HL",
         "event_at": "2026-02-19T00:00:00+00:00",
+        "event_type": "STRUCTURE_EXTERNAL_HL",
         "payload": {
           "index": 270,
           "kind": "LOW",
@@ -460,8 +460,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_INTERNAL_HL",
         "event_at": "2026-02-19T00:00:00+00:00",
+        "event_type": "STRUCTURE_INTERNAL_HL",
         "payload": {
           "index": 270,
           "kind": "LOW",
@@ -471,8 +471,8 @@
         }
       },
       {
-        "event_type": "SWING_EXTERNAL_LOW",
         "event_at": "2026-02-19T00:00:00+00:00",
+        "event_type": "SWING_EXTERNAL_LOW",
         "payload": {
           "index": 270,
           "kind": "LOW",
@@ -481,8 +481,8 @@
         }
       },
       {
+        "event_at": "2026-02-20T00:00:00+00:00",
         "event_type": "STRUCTURE_EXTERNAL_HH",
-        "event_at": "2026-02-20T00:00:00+00:00",
         "payload": {
           "index": 276,
           "kind": "HIGH",
@@ -492,8 +492,8 @@
         }
       },
       {
+        "event_at": "2026-02-20T00:00:00+00:00",
         "event_type": "STRUCTURE_INTERNAL_HH",
-        "event_at": "2026-02-20T00:00:00+00:00",
         "payload": {
           "index": 276,
           "kind": "HIGH",
@@ -503,8 +503,8 @@
         }
       },
       {
-        "event_type": "SWING_EXTERNAL_HIGH",
         "event_at": "2026-02-20T00:00:00+00:00",
+        "event_type": "SWING_EXTERNAL_HIGH",
         "payload": {
           "index": 276,
           "kind": "HIGH",
@@ -513,8 +513,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_EXTERNAL_HL",
         "event_at": "2026-02-21T00:00:00+00:00",
+        "event_type": "STRUCTURE_EXTERNAL_HL",
         "payload": {
           "index": 282,
           "kind": "LOW",
@@ -524,8 +524,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_INTERNAL_HL",
         "event_at": "2026-02-21T00:00:00+00:00",
+        "event_type": "STRUCTURE_INTERNAL_HL",
         "payload": {
           "index": 282,
           "kind": "LOW",
@@ -535,8 +535,8 @@
         }
       },
       {
-        "event_type": "SWING_EXTERNAL_LOW",
         "event_at": "2026-02-21T00:00:00+00:00",
+        "event_type": "SWING_EXTERNAL_LOW",
         "payload": {
           "index": 282,
           "kind": "LOW",
@@ -545,8 +545,8 @@
         }
       },
       {
+        "event_at": "2026-02-22T00:00:00+00:00",
         "event_type": "STRUCTURE_EXTERNAL_HH",
-        "event_at": "2026-02-22T00:00:00+00:00",
         "payload": {
           "index": 288,
           "kind": "HIGH",
@@ -556,8 +556,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_INTERNAL_HH",
         "event_at": "2026-02-22T00:00:00+00:00",
+        "event_type": "STRUCTURE_INTERNAL_HH",
         "payload": {
           "index": 288,
           "kind": "HIGH",
@@ -567,8 +567,8 @@
         }
       },
       {
+        "event_at": "2026-02-22T00:00:00+00:00",
         "event_type": "SWING_EXTERNAL_HIGH",
-        "event_at": "2026-02-22T00:00:00+00:00",
         "payload": {
           "index": 288,
           "kind": "HIGH",
@@ -577,8 +577,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_EXTERNAL_HL",
         "event_at": "2026-02-23T00:00:00+00:00",
+        "event_type": "STRUCTURE_EXTERNAL_HL",
         "payload": {
           "index": 294,
           "kind": "LOW",
@@ -588,8 +588,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_INTERNAL_HL",
         "event_at": "2026-02-23T00:00:00+00:00",
+        "event_type": "STRUCTURE_INTERNAL_HL",
         "payload": {
           "index": 294,
           "kind": "LOW",
@@ -599,8 +599,8 @@
         }
       },
       {
-        "event_type": "SWING_EXTERNAL_LOW",
         "event_at": "2026-02-23T00:00:00+00:00",
+        "event_type": "SWING_EXTERNAL_LOW",
         "payload": {
           "index": 294,
           "kind": "LOW",
@@ -609,8 +609,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_INTERNAL_HH",
         "event_at": "2026-02-24T00:00:00+00:00",
+        "event_type": "STRUCTURE_INTERNAL_HH",
         "payload": {
           "index": 300,
           "kind": "HIGH",
@@ -620,18 +620,8 @@
         }
       },
       {
-        "event_type": "SWING_INTERNAL_HIGH",
-        "event_at": "2026-02-24T00:00:00+00:00",
-        "payload": {
-          "index": 300,
-          "kind": "HIGH",
-          "price": "70",
-          "strength": "INTERNAL"
-        }
-      },
-      {
-        "event_type": "BOS_UP",
         "event_at": "2026-02-24T04:00:00+00:00",
+        "event_type": "BOS_UP",
         "payload": {
           "break_index": 301,
           "break_price": "67",
@@ -645,8 +635,8 @@
         }
       },
       {
-        "event_type": "STRUCTURE_FAILED_BREAK_UP",
         "event_at": "2026-02-24T08:00:00+00:00",
+        "event_type": "STRUCTURE_FAILED_BREAK_UP",
         "payload": {
           "break_index": 301,
           "broken_level": "67",
