@@ -6,6 +6,7 @@ import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from functools import partial
 
 import pytest
 from tests.support.builders import pad_for_warmup
@@ -16,7 +17,10 @@ from scanner.application.detection.liquidity_replay import (
     _build_pool_id,
     _Extremes,
     _extremes_of,
-    _LevelMap,
+    _Level,
+    _PoolMapWalk,
+    _Stage,
+    _within,
 )
 from scanner.application.ports.detection import (
     EngineEventRecord,
@@ -33,7 +37,7 @@ from scanner.domain.common import (
     CandleSource,
     wilder_atr_series,
 )
-from scanner.domain.liquidity import LiquidityClass
+from scanner.domain.liquidity import LiquidityClass, LiquiditySide, PoolSource
 from scanner.domain.structure import SwingKind, SwingPoint, SwingStrength
 from scanner.infrastructure.redis.liquidity_state import (
     RestingLiquiditySnapshot,
@@ -1034,8 +1038,47 @@ def test_one_level_is_one_pool_however_the_swing_is_classified() -> None:
     assert len(ids) == 1
 
 
-def _record_at(price: str, *, pool_id: str, side: str = "BSL") -> LiquidityPoolRecord:
-    return replace(make_pool(), pool_id=pool_id, side=side, price=Decimal(price))
+def _stage_at(price: str) -> _Stage:
+    level = Decimal(price)
+
+    return _Stage(
+        starts=datetime(2026, 8, 15, 10, 5, tzinfo=UTC),
+        source=PoolSource.SWING,
+        strength=SwingStrength.EXTERNAL,
+        price=level,
+        band_low=level,
+        band_high=level,
+        member_count=1,
+    )
+
+
+def _walk_over_a_held_level(pool_id: str = "pool-1") -> tuple[_PoolMapWalk, list[Candle]]:
+    """A window whose map already holds a BSL level at 100 from before it."""
+    candles = pad_for_warmup(
+        [
+            make_candle(0, open_="98", high="99", low="97", close="98"),
+            make_candle(1, open_="98", high="99", low="97", close="98"),
+        ]
+    )
+    seed = replace(
+        make_pool(),
+        pool_id=pool_id,
+        created_at=candles[0].close_time - timedelta(minutes=5),
+    )
+
+    walk = _PoolMapWalk(
+        candles,
+        wilder_atr_series(candles),
+        seeds=[_Level.from_record(seed, ended_at=None)],
+        pool_id=partial(
+            _build_pool_id,
+            symbol="BTCUSDT",
+            timeframe=Timeframe.M5,
+            algo_version=LIQUIDITY_ALGO_VERSION,
+        ),
+    )
+
+    return walk, candles
 
 
 def test_a_second_level_inside_epsilon_is_absorbed() -> None:
@@ -1044,34 +1087,45 @@ def test_a_second_level_inside_epsilon_is_absorbed() -> None:
     §4.3's clustering only groups the swings handed to one pass, so two swings
     that are not the same swing can still be the same zone.
     """
-    levels = _LevelMap([_record_at("100.00", pool_id="a")])
-
-    assert levels.absorbs("BSL", Decimal("100.04"), "b", Decimal("0.05"))
+    assert _within(_stage_at("100.00"), Decimal("100.04"), Decimal("100.04"), Decimal("0.05"))
 
 
 def test_a_level_outside_epsilon_is_its_own_pool() -> None:
-    levels = _LevelMap([_record_at("100.00", pool_id="a")])
-
-    assert not levels.absorbs("BSL", Decimal("100.06"), "b", Decimal("0.05"))
+    assert not _within(_stage_at("100.00"), Decimal("100.06"), Decimal("100.06"), Decimal("0.05"))
 
 
 def test_the_other_side_of_the_book_is_never_absorbed() -> None:
     """BSL and SSL at one price are two pools: §4.2 bounds it "per side"."""
-    levels = _LevelMap([_record_at("100.00", pool_id="a", side="BSL")])
+    walk, candles = _walk_over_a_held_level()
+    newest = len(candles) - 1
 
-    assert not levels.absorbs("SSL", Decimal("100.00"), "b", Decimal("0.05"))
+    assert walk._holder(LiquiditySide.BSL, Decimal("100"), Decimal("100"), newest) is not None
+    assert walk._holder(LiquiditySide.SSL, Decimal("100"), Decimal("100"), newest) is None
 
 
-def test_a_pool_does_not_absorb_itself_on_the_next_pass() -> None:
-    """The same pool is re-detected every pass and must keep upserting.
+def test_a_pivot_whose_pool_was_read_back_is_not_built_again() -> None:
+    """A pool confirmed near the window start is read back from persistence,
+    and the window may still show its pivot. That pivot is the pool's own, so
+    it must not become a second pool beside the row it already has."""
+    walk, candles = _walk_over_a_held_level()
+    swing = SwingPoint(
+        index=5,
+        open_time=candles[5].open_time,
+        price=Decimal("100"),
+        kind=SwingKind.HIGH,
+        strength=SwingStrength.INTERNAL,
+    )
+    pool_id = _build_pool_id(
+        symbol="BTCUSDT",
+        timeframe=Timeframe.M5,
+        swing=swing,
+        algo_version=LIQUIDITY_ALGO_VERSION,
+    )
+    walk, _ = _walk_over_a_held_level(pool_id)
 
-    Comparing price alone, a pool would collide with its own claimed level and
-    stop being rewritten -- and its strength and age would stop maturing,
-    which is a subtler failure than the duplication this rule exists to stop.
-    """
-    levels = _LevelMap([_record_at("100.00", pool_id="a")])
+    levels = walk.run([swing], [], [])
 
-    assert not levels.absorbs("BSL", Decimal("100.00"), "a", Decimal("0.05"))
+    assert [level.pool_id for level in levels] == [pool_id]
 
 
 def _swing(index: int, price: str, kind: SwingKind) -> SwingPoint:

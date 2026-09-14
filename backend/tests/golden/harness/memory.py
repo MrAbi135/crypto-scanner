@@ -215,6 +215,7 @@ class InMemoryLiquidityPoolRepository:
         self.pools[pool.pool_id] = replace(
             existing,
             liquidity_class=pool.liquidity_class,
+            source=pool.source,
             price=pool.price,
             band_low=pool.band_low,
             band_high=pool.band_high,

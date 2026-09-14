@@ -6,7 +6,7 @@
   ],
   "mutations": [
     {
-      "name": "single-candle sweep copies the pool row's window-end class",
+      "name": "a sweep copies the pool row's window-end class (single- and two-candle sweeps share this call since s5-v13)",
       "file": "backend/src/scanner/application/detection/liquidity_replay.py",
       "old": "_classified_when_swept(sweep, record, external_swings)",
       "new": "sweep",
@@ -15,19 +15,10 @@
       ]
     },
     {
-      "name": "two-candle sweep copies the pool row's window-end class",
-      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
-      "old": "_classified_when_swept(two_candle_sweep, record, external_swings)",
-      "new": "two_candle_sweep",
-      "expect_failing": [
-        "test_a_published_sweep_and_its_class_are_never_rewritten"
-      ]
-    },
-    {
       "name": "with no bracket yet, the sweep takes the row's current class instead of its birth class",
       "file": "backend/src/scanner/application/detection/liquidity_replay.py",
-      "old": "classify(record.price, _class_at_birth(record))",
-      "new": "classify(record.price, LiquidityClass(record.liquidity_class))",
+      "old": "classify(sweep.reference_level, fallback)",
+      "new": "classify(sweep.reference_level, LiquidityClass(record.liquidity_class))",
       "expect_failing": [
         "test_a_swing_confirming_after_the_sweep_does_not_classify_it"
       ]

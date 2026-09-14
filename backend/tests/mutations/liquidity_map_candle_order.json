@@ -1,0 +1,76 @@
+{
+  "description": "Liquidity s5-v13: the pool map is decided by candle order alone (audit M5/M10 and the parked cluster finding, owner ruling 2026-09-14). Each mutation brings back one way the map could depend on which passes ran. The property tests are derandomized, so one battery run is a verdict. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/liquidity_map_candle_order.json",
+  "pytest": [
+    "tests/property/test_liquidity_map_is_pass_independent.py",
+    "tests/unit/application/detection/test_liquidity_cluster_replay.py",
+    "tests/unit/application/detection/test_liquidity_version_pin.py",
+    "tests/unit/application/detection/test_liquidity_replay.py"
+  ],
+  "mutations": [
+    {
+      "name": "the dedup epsilon is the newest candle's again (M5)",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "epsilon = TOLERANCE_ATR * _atr_at(self._atrs, index)",
+      "new": "epsilon = TOLERANCE_ATR * _atr_at(self._atrs, len(self._atrs) - 1)",
+      "expect_failing": [
+        "test_close_by_close_leaves_the_map_one_pass_builds"
+      ]
+    },
+    {
+      "name": "a consumed pool still holds its level",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "            and self._alive(level, index)\n",
+      "new": "            and True\n",
+      "expect_failing": [
+        "test_close_by_close_leaves_the_map_one_pass_builds"
+      ]
+    },
+    {
+      "name": "a pivot's pool is born at its last confirmation, as a single pass used to stamp it",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "first = min(by_strength.values(), key=_confirmation_of)",
+      "new": "first = max(by_strength.values(), key=_confirmation_of)",
+      "expect_failing": [
+        "test_close_by_close_leaves_the_map_one_pass_builds"
+      ]
+    },
+    {
+      "name": "a cluster no longer merges into the pool holding its first member",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "        if level is None or not self._alive(level, joined):\n            return\n",
+      "new": "        if True:\n            return\n",
+      "expect_failing": [
+        "test_a_cluster_found_on_a_later_pass_leaves_the_map_a_single_pass_builds",
+        "test_two_equal_highs_become_one_cluster_pool"
+      ]
+    },
+    {
+      "name": "a stage applies to the candle that confirmed it",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "return max(bisect_left(stages, close_time, key=lambda stage: stage.starts) - 1, 0)",
+      "new": "return max(bisect_right(stages, close_time, key=lambda stage: stage.starts) - 1, 0)",
+      "expect_failing": [
+        "test_close_by_close_leaves_the_map_one_pass_builds"
+      ]
+    },
+    {
+      "name": "pools from before the window are not read back",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "records = {pool.pool_id: pool for pool in active if pool.created_at < horizon}",
+      "new": "records = {pool.pool_id: pool for pool in active if False}",
+      "expect_failing": [
+        "test_a_level_held_from_before_the_window_absorbs_a_swing_inside_it",
+        "test_a_level_held_by_another_version_does_not_absorb_this_versions_pool"
+      ]
+    },
+    {
+      "name": "the lifecycle judges every candle against the newest stage",
+      "file": "backend/src/scanner/application/detection/liquidity_replay.py",
+      "old": "        return pools[_stage_index(stages, candle.close_time)]\n",
+      "new": "        return pools[-1]\n",
+      "expect_failing": [
+        "test_close_by_close_leaves_the_map_one_pass_builds"
+      ]
+    }
+  ]
+}
