@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
 
+from scanner.application.detection.event_versions import CURRENT_EVENT_VERSIONS
 from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
 from scanner.application.detection.state import (
     EngineStateManager,
@@ -210,11 +211,14 @@ class IctOrderBlockReplayService:
                 last_processed_open_time=None,
             )
 
+        # The running structure and shift generations only (event_versions.py):
+        # a bump leaves the old generation's swings and MSS beside the new.
         structure_records = await self._evidence.list_structure(
             symbol,
             timeframe,
             start,
             end,
+            only_versions=CURRENT_EVENT_VERSIONS,
         )
 
         shift_records = await self._evidence.list_shifts(
@@ -222,6 +226,7 @@ class IctOrderBlockReplayService:
             timeframe,
             start,
             end,
+            only_versions=CURRENT_EVENT_VERSIONS,
         )
 
         mss_spans = _mss_spans(shift_records, timeframe)

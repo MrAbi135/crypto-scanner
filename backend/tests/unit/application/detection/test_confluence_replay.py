@@ -163,7 +163,8 @@ class FakeEventRepository:
     async def exists(self, event_key: str) -> bool:
         return event_key in self.appended
 
-    async def list_events(self, symbol, timeframe, start, end):
+    async def list_events(self, symbol, timeframe, start, end, *, only_versions=None):
+        self.asked_versions = only_versions
         return tuple(self.seeded)
 
 
@@ -1726,6 +1727,20 @@ async def test_the_algo_version_is_stamped_on_the_record() -> None:
     await run(svc)
 
     assert next(iter(repo.appended.values())).algo_version == CONFLUENCE_ALGO_VERSION
+
+
+@pytest.mark.asyncio
+async def test_the_event_log_is_read_for_the_running_engine_versions_only() -> None:
+    """Audit class C: after a bump the new engines re-derive the window under
+    their own labels while the old rows stay, so an unpinned read scores one
+    BOS, MSS or sweep fact twice."""
+    from scanner.application.detection.event_versions import CURRENT_EVENT_VERSIONS
+
+    svc, repo = service(**bullish_setup())
+
+    await run(svc)
+
+    assert repo.asked_versions == CURRENT_EVENT_VERSIONS
 
 
 @pytest.mark.asyncio

@@ -43,6 +43,8 @@ class EngineEventRepository(Protocol):
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_versions: frozenset[str] | None = None,
     ) -> tuple[EngineEventRecord, ...]: ...
 
 

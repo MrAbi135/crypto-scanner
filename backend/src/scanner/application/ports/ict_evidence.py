@@ -68,6 +68,8 @@ class IctEvidenceRepository(Protocol):
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_versions: frozenset[str] | None = None,
     ) -> tuple[StructureEvidenceRecord, ...]: ...
 
     # §5.1's Inputs name "BOS/MSS events", and `list_structure` cannot supply
@@ -79,6 +81,8 @@ class IctEvidenceRepository(Protocol):
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_versions: frozenset[str] | None = None,
     ) -> tuple[ShiftEvidenceRecord, ...]: ...
 
     async def list_liquidity(

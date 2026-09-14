@@ -204,15 +204,23 @@ class SuspectVolumeCounter:
         self,
         events: EngineEventRepository,
         timeframes: tuple[Timeframe, ...],
+        *,
+        only_versions: frozenset[str] | None = None,
     ) -> None:
         self._events = events
         self._timeframes = timeframes
+        # The running participation version. A bump re-derives a day of
+        # VOLUME_SUSPECT under the new label, and counting both generations
+        # doubles the count §6.6 compares against five.
+        self._only_versions = only_versions
 
     async def count(self, symbol: str, start: datetime, end: datetime) -> int:
         total = 0
 
         for timeframe in self._timeframes:
-            records = await self._events.list_events(symbol, timeframe, start, end)
+            records = await self._events.list_events(
+                symbol, timeframe, start, end, only_versions=self._only_versions
+            )
 
             total += sum(1 for record in records if record.event_type == "VOLUME_SUSPECT")
 

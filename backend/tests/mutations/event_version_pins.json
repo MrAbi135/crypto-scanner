@@ -1,0 +1,76 @@
+{
+  "description": "Engine-event reads pinned to the running versions (audit class C): confluence list_events, order-block list_structure + list_shifts, the signal monitor's MSS-invalidation read, the chart's structure read and the suspect-volume count. Each mutation unpins one reader or drops a generation from CURRENT_EVENT_VERSIONS. The Pg filters are covered by tests/integration/test_detection_persistence_pg.py in CI. Deterministic tests, so one battery run is a verdict. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/event_version_pins.json",
+  "pytest": [
+    "tests/unit/application/detection/test_confluence_replay.py",
+    "tests/unit/application/detection/test_ict_replay_coverage.py",
+    "tests/unit/application/detection/test_signal_monitor.py",
+    "tests/unit/interfaces/api/test_coins_endpoints.py",
+    "tests/unit/application/marketdata/test_suspect_volume_counter.py"
+  ],
+  "mutations": [
+    {
+      "name": "confluence reads every generation of the event log",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "            symbol, timeframe, start, end, only_versions=CURRENT_EVENT_VERSIONS",
+      "new": "            symbol, timeframe, start, end",
+      "expect_failing": [
+        "test_the_event_log_is_read_for_the_running_engine_versions_only"
+      ]
+    },
+    {
+      "name": "order blocks read every structure generation",
+      "file": "backend/src/scanner/application/detection/ict_ob_replay.py",
+      "old": "            only_versions=CURRENT_EVENT_VERSIONS,\n        )\n\n        shift_records",
+      "new": "            only_versions=None,\n        )\n\n        shift_records",
+      "expect_failing": [
+        "test_order_blocks_read_the_running_structure_and_shift_generations_only"
+      ]
+    },
+    {
+      "name": "order blocks read every shift generation",
+      "file": "backend/src/scanner/application/detection/ict_ob_replay.py",
+      "old": "            only_versions=CURRENT_EVENT_VERSIONS,\n        )\n\n        mss_spans",
+      "new": "            only_versions=None,\n        )\n\n        mss_spans",
+      "expect_failing": [
+        "test_order_blocks_read_the_running_structure_and_shift_generations_only"
+      ]
+    },
+    {
+      "name": "an older shift generation demotes a signal",
+      "file": "backend/src/scanner/application/detection/signal_monitor.py",
+      "old": "                only_versions=CURRENT_EVENT_VERSIONS,",
+      "new": "                only_versions=None,",
+      "expect_failing": [
+        "test_an_older_shift_generation_does_not_demote_the_signal"
+      ]
+    },
+    {
+      "name": "the chart draws every structure generation",
+      "file": "backend/src/scanner/interfaces/api/coins.py",
+      "old": "        symbol, parsed, start, end, only_versions=CURRENT_EVENT_VERSIONS",
+      "new": "        symbol, parsed, start, end, only_versions=None",
+      "expect_failing": [
+        "test_the_chart_draws_the_running_structure_generations_only"
+      ]
+    },
+    {
+      "name": "the suspect-volume count reads every generation",
+      "file": "backend/src/scanner/application/marketdata/fake_volume_job.py",
+      "old": "only_versions=self._only_versions",
+      "new": "only_versions=None",
+      "expect_failing": [
+        "test_a_suspect_candle_is_counted_once_across_a_version_bump"
+      ]
+    },
+    {
+      "name": "the running shift generation is not current",
+      "file": "backend/src/scanner/application/detection/event_versions.py",
+      "old": "        STRUCTURE_SHIFT_ALGO_VERSION,\n",
+      "new": "",
+      "expect_failing": [
+        "test_an_mss_demotion_invalidates_the_signal_early",
+        "test_a_down_signal_reads_its_own_directions_demotion"
+      ]
+    }
+  ]
+}

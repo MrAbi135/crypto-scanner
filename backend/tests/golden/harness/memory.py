@@ -154,6 +154,8 @@ class InMemoryEngineEventRepository:
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_versions: frozenset[str] | None = None,
     ) -> tuple[EngineEventRecord, ...]:
         """Every engine's output, which is what §8 reads.
 
@@ -170,6 +172,7 @@ class InMemoryEngineEventRepository:
                     if event.symbol == symbol
                     and event.timeframe == timeframe
                     and start <= event.event_at < end
+                    and (only_versions is None or event.algo_version in only_versions)
                 ),
                 key=lambda event: (event.event_at, event.event_type, event.event_key),
             )
@@ -538,6 +541,8 @@ class InMemoryIctEvidenceRepository:
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_versions: frozenset[str] | None = None,
     ) -> tuple[StructureEvidenceRecord, ...]:
         return tuple(
             StructureEvidenceRecord(
@@ -548,6 +553,7 @@ class InMemoryIctEvidenceRepository:
             )
             for event in self._in_window(symbol, timeframe, start, end)
             if event.event_type.startswith(("SWING_", "STRUCTURE_"))
+            and (only_versions is None or event.algo_version in only_versions)
         )
 
     async def list_shifts(
@@ -556,11 +562,16 @@ class InMemoryIctEvidenceRepository:
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_versions: frozenset[str] | None = None,
     ) -> tuple[ShiftEvidenceRecord, ...]:
         records: list[ShiftEvidenceRecord] = []
 
         for event in self._in_window(symbol, timeframe, start, end):
             if not event.event_type.startswith(("MSS_", "CHOCH_")):
+                continue
+
+            if only_versions is not None and event.algo_version not in only_versions:
                 continue
 
             payload = json.loads(event.payload)

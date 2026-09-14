@@ -751,6 +751,58 @@ async def test_evidence_reader_filters_structure_events_by_type_and_window(
     assert all(r.algo_version == "1.0.0" for r in found)
 
 
+async def test_event_reads_can_be_pinned_to_the_running_versions(engine) -> None:
+    """A version bump leaves the old generation's events beside the new one's
+    (audit class C). Pinned, `list_events`, `list_structure` and `list_shifts`
+    return only the named versions; unpinned, both generations."""
+    sessions = build_session_factory(engine)
+    events = PgEngineEventRepository(sessions)
+    reader = PgIctEvidenceRepository(sessions)
+    symbol = "ZPINEV"
+
+    for key, event_type, version, minutes in (
+        ("pin-bos-old", "BOS_UP", "s4-old", 10),
+        ("pin-bos-new", "BOS_UP", "s4-new", 10),
+        ("pin-swing-old", "SWING_EXTERNAL_HIGH", "s4-old", 20),
+        ("pin-swing-new", "SWING_EXTERNAL_HIGH", "s4-new", 20),
+        ("pin-mss-old", "MSS_UP", "shift-old", 30),
+        ("pin-mss-new", "MSS_UP", "shift-new", 30),
+    ):
+        await events.append(
+            EngineEventRecord(
+                event_key=key,
+                symbol=symbol,
+                timeframe=TF,
+                event_type=event_type,
+                event_at=T0 + timedelta(minutes=minutes),
+                algo_version=version,
+                payload='{"choch_index":1,"direction":"UP"}',
+                created_at=T0,
+            )
+        )
+
+    end = T0 + timedelta(minutes=100)
+    current = frozenset({"s4-new", "shift-new"})
+
+    assert len(await events.list_events(symbol, TF, T0, end)) == 6
+    assert {
+        record.event_key
+        for record in await events.list_events(symbol, TF, T0, end, only_versions=current)
+    } == {"pin-bos-new", "pin-swing-new", "pin-mss-new"}
+
+    assert {r.algo_version for r in await reader.list_structure(symbol, TF, T0, end)} == {
+        "s4-old",
+        "s4-new",
+    }
+    assert {
+        r.algo_version
+        for r in await reader.list_structure(symbol, TF, T0, end, only_versions=current)
+    } == {"s4-new"}
+
+    assert len(await reader.list_shifts(symbol, TF, T0, end)) == 2
+    assert len(await reader.list_shifts(symbol, TF, T0, end, only_versions=current)) == 1
+
+
 async def test_evidence_reader_returns_liquidity_transitions_in_candle_order(
     engine,
 ) -> None:

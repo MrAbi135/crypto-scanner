@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, true
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -44,6 +44,8 @@ class PgIctEvidenceRepository(IctEvidenceRepository):
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_versions: frozenset[str] | None = None,
     ) -> tuple[StructureEvidenceRecord, ...]:
         async with self._sessions() as session:
             result = await session.execute(
@@ -55,6 +57,9 @@ class PgIctEvidenceRepository(IctEvidenceRepository):
                     EngineEventRow.event_at < end,
                     EngineEventRow.event_type.like("SWING_%")
                     | EngineEventRow.event_type.like("STRUCTURE_%"),
+                    EngineEventRow.algo_version.in_(only_versions)
+                    if only_versions is not None
+                    else true(),
                 )
                 .order_by(
                     EngineEventRow.event_at.asc(),
@@ -81,6 +86,8 @@ class PgIctEvidenceRepository(IctEvidenceRepository):
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_versions: frozenset[str] | None = None,
     ) -> tuple[ShiftEvidenceRecord, ...]:
         async with self._sessions() as session:
             result = await session.execute(
@@ -92,6 +99,9 @@ class PgIctEvidenceRepository(IctEvidenceRepository):
                     EngineEventRow.event_at < end,
                     EngineEventRow.event_type.like("MSS_%")
                     | EngineEventRow.event_type.like("CHOCH_%"),
+                    EngineEventRow.algo_version.in_(only_versions)
+                    if only_versions is not None
+                    else true(),
                 )
                 .order_by(
                     EngineEventRow.event_at.asc(),

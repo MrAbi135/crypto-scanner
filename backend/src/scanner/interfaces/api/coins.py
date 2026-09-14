@@ -19,6 +19,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 
+from scanner.application.detection.event_versions import CURRENT_EVENT_VERSIONS
 from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
 from scanner.application.detection.structure_shift_replay import (
     STRUCTURE_SHIFT_ALGO_VERSION,
@@ -72,7 +73,10 @@ async def get_structure(
 
     start, end = await _window(candles, symbol, parsed, clock, window)
 
-    events = await evidence.list_structure(symbol, parsed, start, end)
+    # The running generations only: a bump would draw every swing twice.
+    events = await evidence.list_structure(
+        symbol, parsed, start, end, only_versions=CURRENT_EVENT_VERSIONS
+    )
 
     rows = [
         {

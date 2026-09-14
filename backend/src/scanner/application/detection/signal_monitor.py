@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
+from scanner.application.detection.event_versions import CURRENT_EVENT_VERSIONS
 from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.detection import EngineEventRepository
 from scanner.application.ports.ict_evidence import IctEvidenceRepository
@@ -245,6 +246,9 @@ class SignalMonitorService:
                 timeframe,
                 signal.published_at,
                 at + timeframe.duration,
+                # A shift-engine bump re-derives the window's invalidations under
+                # the new label; only the running generation may demote.
+                only_versions=CURRENT_EVENT_VERSIONS,
             )
 
             for record in records:
