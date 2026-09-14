@@ -10,6 +10,11 @@ from datetime import datetime
 from decimal import Decimal
 from itertools import combinations
 
+from scanner.application.detection.state import (
+    EngineStateManager,
+    first_undecided_index,
+    mark_decided,
+)
 from scanner.application.detection.window_time import rebased_indices
 from scanner.application.ports import (
     CandleRepository,
@@ -54,7 +59,13 @@ from scanner.shared import Timeframe
 # the newest 60 `list_live` returns for scoring. Older zones were never
 # advanced or expired and back-wrote transitions hundreds of candles late when
 # they re-entered the top 60 (BTCUSDT H1 replay: an FVG at position 68 of 71).
-ICT_ALGO_VERSION = "s6-v5"
+# v6: a gap is created only on a candle no earlier pass has decided (audit M3,
+# owner ruling 2026-09-14). `detect_fvg` measures the gap against ATR, and ATR
+# at a window's first candles depends on where the window starts, so an FVG
+# about an old candle could appear on a later pass and be walked from there:
+# incremental replays wrote its fills and touches 447-483 candles late
+# (WINDOW_START). BPRs likewise compose only on an undecided candle.
+ICT_ALGO_VERSION = "s6-v6"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")
@@ -89,6 +100,7 @@ class IctReplayService:
         clock: Clock,
         *,
         algo_version: str = ICT_ALGO_VERSION,
+        state: EngineStateManager | None = None,
     ) -> None:
         self._candles = candles
         self._zones = zones
@@ -96,6 +108,8 @@ class IctReplayService:
         self._snapshots = snapshots
         self._clock = clock
         self._algo_version = algo_version
+        # The last candle a pass decided (audit M3); absent, the whole window.
+        self._state = state
 
     async def run(
         self,
@@ -143,6 +157,10 @@ class IctReplayService:
 
         displacement_indices = self._detect_displacements(candles, atrs)
 
+        first_index = await first_undecided_index(
+            self._state, symbol, timeframe, self._algo_version, candles
+        )
+
         detected_fvgs: list[FairValueGap] = []
 
         fvgs_detected = 0
@@ -173,6 +191,11 @@ class IctReplayService:
             detected_fvgs.append(fvg)
             fvgs_detected += 1
 
+            # Still detected, so a BPR on a new candle can pair with it; only
+            # created where no earlier pass decided the candle.
+            if index < first_index:
+                continue
+
             await self._zones.upsert(
                 _fvg_record(
                     symbol=symbol,
@@ -190,6 +213,7 @@ class IctReplayService:
             timeframe=timeframe,
             fvgs=detected_fvgs,
             candles=candles,
+            first_index=first_index,
         )
 
         zones_upserted += bprs_created
@@ -248,6 +272,8 @@ class IctReplayService:
             live_after,
         )
 
+        await mark_decided(self._state, symbol, timeframe, self._algo_version, candles)
+
         return IctReplayReport(
             symbol=symbol,
             timeframe=timeframe,
@@ -296,6 +322,7 @@ class IctReplayService:
         timeframe: Timeframe,
         fvgs: list[FairValueGap],
         candles: list[Candle],
+        first_index: int = 0,
     ) -> int:
         created = 0
 
@@ -308,7 +335,7 @@ class IctReplayService:
                 second.created_index,
             )
 
-            if current_index < 0 or current_index >= len(candles):
+            if current_index < max(first_index, 0) or current_index >= len(candles):
                 continue
 
             # §5.6: "Both parents must *still* be OPEN/TOUCHED at

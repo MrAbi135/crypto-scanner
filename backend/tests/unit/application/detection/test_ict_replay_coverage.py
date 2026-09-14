@@ -487,6 +487,85 @@ async def test_full_ob_replay_fixture_exercises_detection() -> None:
     )
 
 
+async def _decided_through(candles: list[Candle], namespace: str, version: str):
+    """A state manager recording every candle of `candles` as already decided."""
+    from tests.golden.harness.memory import InMemoryEngineStateStore
+
+    from scanner.application.detection.state import EngineStateManager, StructureEngineState
+
+    state = EngineStateManager(InMemoryEngineStateStore(), namespace=namespace)
+    await state.save(
+        StructureEngineState(
+            symbol="S6COVUSDT",
+            timeframe=Timeframe.M5.value,
+            algo_version=version,
+            last_processed_open_time=candles[-1].open_time.isoformat(),
+        )
+    )
+    return state
+
+
+@pytest.mark.asyncio
+async def test_a_gap_on_an_already_decided_candle_is_not_created_again() -> None:
+    """Audit M3 (owner ruling 2026-09-14): `detect_fvg` measures the gap against
+    ATR, which at a window's first candles depends on where the window starts,
+    so a later pass could create a gap about an old candle. A pass creates gaps
+    only on candles after the last one it decided; the same window with nothing
+    decided creates them (the fixture above)."""
+    from scanner.application.detection.ict_replay import ICT_ALGO_VERSION
+    from scanner.application.detection.state import ICT_NAMESPACE
+
+    candles = pad_for_warmup(fixture_series())
+    zones = FakeZoneRepository()
+
+    service = IctReplayService(
+        FakeCandleRepository(candles),
+        zones,
+        FakeTransitionRepository(),
+        FakeSnapshotStore(),
+        FakeClock(),
+        state=await _decided_through(candles, ICT_NAMESPACE, ICT_ALGO_VERSION),
+    )
+
+    report = await service.run(
+        "S6COVUSDT", Timeframe.M5, candles[0].open_time, candles[-1].close_time
+    )
+
+    assert report.fvgs_detected > 0
+    assert not [zone for zone in zones.zones.values() if zone.zone_type in {"FVG", "BPR"}]
+
+
+@pytest.mark.asyncio
+async def test_an_order_block_on_an_already_decided_candle_is_not_created_again() -> None:
+    """Audit M3: displacement and the qualifying FVG are measured against ATR
+    seeded at the window start, so an OB about an old candle could appear on a
+    later pass. A displacement is decided once the candle after it has closed."""
+    from scanner.application.detection.ict_ob_replay import ICT_OB_ALGO_VERSION
+    from scanner.application.detection.state import ICT_OB_NAMESPACE
+
+    candles = pad_for_warmup(fixture_series())
+
+    async def order_blocks(state) -> int:
+        zones = FakeZoneRepository()
+        await IctOrderBlockReplayService(
+            FakeCandleRepository(candles),
+            zones,
+            FakeTransitionRepository(),
+            FakeSnapshotStore(),
+            FakeEvidenceRepository(),
+            FakeClock(),
+            state=state,
+        ).run("S6COVUSDT", Timeframe.M5, candles[0].open_time, candles[-1].close_time)
+        return sum(1 for zone in zones.zones.values() if zone.zone_type == "OB")
+
+    # The premise: with nothing decided, this window does create order blocks.
+    assert await order_blocks(None) > 0
+    assert (
+        await order_blocks(await _decided_through(candles, ICT_OB_NAMESPACE, ICT_OB_ALGO_VERSION))
+        == 0
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("service_kind", ["ict", "ob"])
 async def test_replay_empty_and_invalid_ranges(service_kind: str) -> None:

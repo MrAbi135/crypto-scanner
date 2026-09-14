@@ -295,6 +295,44 @@ async def test_ote_replay_is_idempotent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_an_ote_on_an_already_decided_candle_is_not_created_again() -> None:
+    """Audit M3 (owner ruling 2026-09-14): `detect_ote` sizes the band against
+    ATR seeded at the window start, so a later pass could create an OTE about an
+    old candle. A pass creates OTEs only after the last candle it decided."""
+    from tests.golden.harness.memory import InMemoryEngineStateStore
+
+    from scanner.application.detection.ict_ote_replay import ICT_OTE_ALGO_VERSION
+    from scanner.application.detection.state import (
+        ICT_OTE_NAMESPACE,
+        EngineStateManager,
+        StructureEngineState,
+    )
+
+    candles = series()
+    zones = FakeZoneRepository()
+    state = EngineStateManager(InMemoryEngineStateStore(), namespace=ICT_OTE_NAMESPACE)
+    await state.save(
+        StructureEngineState(
+            symbol="OTEUSDT",
+            timeframe=Timeframe.M5.value,
+            algo_version=ICT_OTE_ALGO_VERSION,
+            last_processed_open_time=candles[-1].open_time.isoformat(),
+        )
+    )
+
+    report = await IctOteReplayService(
+        FakeCandleRepository(candles),
+        zones,
+        FakeTransitionRepository(),
+        FakeClock(),
+        state=state,
+    ).run("OTEUSDT", Timeframe.M5, candles[0].open_time, candles[-1].close_time)
+
+    assert report.otes_detected == 0
+    assert not [zone for zone in zones.zones.values() if zone.zone_type == "OTE"]
+
+
+@pytest.mark.asyncio
 async def test_empty_ote_history_is_safe() -> None:
     service = IctOteReplayService(
         FakeCandleRepository([]),

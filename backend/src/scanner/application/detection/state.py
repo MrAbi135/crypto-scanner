@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import Any
 
 from scanner.application.ports.detection import (
     EngineStateStore,
 )
+from scanner.domain.common import Candle
+from scanner.shared import Timeframe
 
 # Two engines keep a per-context snapshot and they are not the same quantity:
 # §3.4's trend inferred from external swing labels (structure), and §3.7's
@@ -16,6 +20,66 @@ from scanner.application.ports.detection import (
 # a single field two writers, and whichever ran last would win silently.
 STRUCTURE_NAMESPACE = "structure"
 SHIFT_NAMESPACE = "shift"
+# The last candle each engine decided (audit M3): a pass creates facts only
+# about candles after it. One namespace per engine, so no two share a marker.
+PARTICIPATION_NAMESPACE = "participation"
+ICT_NAMESPACE = "ict"
+ICT_OTE_NAMESPACE = "ict_ote"
+ICT_OB_NAMESPACE = "ict_ob"
+LIQUIDITY_NAMESPACE = "liquidity"
+
+
+async def first_undecided_index(
+    state: EngineStateManager | None,
+    symbol: str,
+    timeframe: Timeframe,
+    algo_version: str,
+    candles: Sequence[Candle],
+) -> int:
+    """The first candle of this window no earlier pass has decided (audit M3).
+
+    A candle a pass decided while it was newest keeps that answer: deciding it
+    again later only measures it against ATR seeded at a later window start.
+    With no record -- no manager wired (the golden harness, `engine run` over a
+    historical range), a version's first pass, or a last decided candle outside
+    this window -- the whole window is undecided, as every pass used to treat it.
+    """
+    if state is None:
+        return 0
+
+    saved = await state.load(symbol, timeframe.value, algo_version)
+
+    if saved is None or saved.last_processed_open_time is None:
+        return 0
+
+    decided = datetime.fromisoformat(saved.last_processed_open_time)
+
+    for index, candle in enumerate(candles):
+        if candle.open_time == decided:
+            return index + 1
+
+    return 0
+
+
+async def mark_decided(
+    state: EngineStateManager | None,
+    symbol: str,
+    timeframe: Timeframe,
+    algo_version: str,
+    candles: Sequence[Candle],
+) -> None:
+    """Record this window's newest candle as decided."""
+    if state is None or not candles:
+        return
+
+    await state.save(
+        StructureEngineState(
+            symbol=symbol,
+            timeframe=timeframe.value,
+            algo_version=algo_version,
+            last_processed_open_time=candles[-1].open_time.isoformat(),
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)

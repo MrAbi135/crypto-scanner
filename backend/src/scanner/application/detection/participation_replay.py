@@ -22,6 +22,11 @@ from datetime import datetime
 from decimal import Decimal
 
 from scanner.application.detection.orchestrator import build_event_key
+from scanner.application.detection.state import (
+    EngineStateManager,
+    first_undecided_index,
+    mark_decided,
+)
 from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.detection import (
     EngineEventRecord,
@@ -43,7 +48,14 @@ from scanner.domain.volume import (
 )
 from scanner.shared import Timeframe
 
-PARTICIPATION_ALGO_VERSION = "s7-participation-v2"
+# v3: each candle is decided once (audit M3, owner ruling 2026-09-14). The
+# window was re-decided on every pass with Wilder ATR seeded at its first
+# candle, so a range expansion or compression about a candle in the window's
+# first positions appeared or vanished as the start slid: incremental replays
+# wrote RANGE_EXPANSION 473-486 candles late (BNBUSDT H1 5 of 5 and DOGEUSDT
+# M15 samples, all WINDOW_START). A pass now evaluates only candles after the
+# last one it decided; with no record of that, the whole window as before.
+PARTICIPATION_ALGO_VERSION = "s7-participation-v3"
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,11 +84,15 @@ class ParticipationReplayService:
         clock: Clock,
         *,
         algo_version: str = PARTICIPATION_ALGO_VERSION,
+        state: EngineStateManager | None = None,
     ) -> None:
         self._candles = candles
         self._events = events
         self._clock = clock
         self._algo_version = algo_version
+        # The last candle a pass decided. Absent (the golden harness, `engine
+        # run` over a historical range), every pass decides its whole window.
+        self._state = state
 
     async def run(
         self,
@@ -100,9 +116,20 @@ class ParticipationReplayService:
         if not series:
             return report.finish(symbol, timeframe, 0)
 
-        for index, candle in enumerate(series):
+        # Every detector here reads the series up to its candle and nothing
+        # after, so a candle decided on the pass where it was newest has its
+        # answer; deciding it again later only changes the ATR it is measured
+        # against (seeded at a later window start), never the candles.
+        first_index = await first_undecided_index(
+            self._state, symbol, timeframe, self._algo_version, series
+        )
+
+        for index in range(first_index, len(series)):
+            candle = series[index]
             await self._record_volume(symbol, timeframe, series, index, candle, report, atrs)
             await self._record_momentum(symbol, timeframe, series, index, candle, report, atrs)
+
+        await mark_decided(self._state, symbol, timeframe, self._algo_version, series)
 
         return report.finish(symbol, timeframe, len(series))
 

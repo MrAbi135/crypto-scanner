@@ -214,3 +214,48 @@ def build_touched_candles() -> list[Candle]:
         )
         for index, (open_, high, low, close) in enumerate(TOUCHED_OHLC)
     ]
+
+
+async def test_a_bpr_composes_only_while_its_newer_gap_is_undecided() -> None:
+    """Audit M3 (owner ruling 2026-09-14): a BPR is registered on its newer
+    gap's candle, so it is decided with that candle.
+
+    The bearish gap confirms on the last candle. With every candle before it
+    decided, the pair still composes -- a new gap may pair with an older one --
+    and once the last candle is decided too, a later pass composes nothing.
+    """
+    from tests.golden.harness.memory import InMemoryEngineStateStore
+
+    from scanner.application.detection.ict_replay import ICT_ALGO_VERSION
+    from scanner.application.detection.state import (
+        ICT_NAMESPACE,
+        EngineStateManager,
+        StructureEngineState,
+    )
+
+    candles = pad_for_warmup(build_touched_candles())
+
+    async def bprs_with_decided_through(decided: Candle) -> int:
+        state = EngineStateManager(InMemoryEngineStateStore(), namespace=ICT_NAMESPACE)
+        await state.save(
+            StructureEngineState(
+                symbol=SYMBOL,
+                timeframe=TF.value,
+                algo_version=ICT_ALGO_VERSION,
+                last_processed_open_time=decided.open_time.isoformat(),
+            )
+        )
+        zones = InMemoryIctZoneRepository()
+        report = await IctReplayService(
+            InMemoryCandleRepository(candles),
+            zones,
+            InMemoryIctZoneTransitionRepository(),
+            InMemoryIctZoneStateStore(),
+            FixedClock(T0),
+            state=state,
+        ).run(SYMBOL, TF, candles[0].open_time, candles[-1].open_time + TF.duration)
+        assert report.fvgs_detected == 2  # type: ignore[attr-defined]
+        return sum(1 for zone in zones.zones.values() if zone.zone_type == "BPR")
+
+    assert await bprs_with_decided_through(candles[-2]) == 1
+    assert await bprs_with_decided_through(candles[-1]) == 0
