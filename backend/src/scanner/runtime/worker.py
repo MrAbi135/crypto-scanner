@@ -11,6 +11,7 @@ import httpx
 import structlog
 from starlette.applications import Starlette
 
+from scanner.application.detection.participation_replay import PARTICIPATION_ALGO_VERSION
 from scanner.application.marketdata.contexts import parse_timeframes
 from scanner.application.marketdata.daily_universe_job import (
     DailyUniverseJob,
@@ -238,6 +239,7 @@ def main() -> None:
                 SuspectVolumeCounter(
                     PgEngineEventRepository(sessions),
                     parse_timeframes(settings.ingest_timeframes),
+                    only_versions=frozenset({PARTICIPATION_ALGO_VERSION}),
                 ),
             )
 

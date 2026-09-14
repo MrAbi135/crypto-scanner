@@ -39,9 +39,11 @@ class FakeEvidence:
         self.liquidity = tuple(liquidity)
         self.windows: list[tuple[datetime, datetime]] = []
         self.asked_version: str | None = "never asked"
+        self.asked_event_versions: object = "never asked"
 
-    async def list_structure(self, symbol, timeframe, start, end):
+    async def list_structure(self, symbol, timeframe, start, end, *, only_versions=None):
         self.windows.append((start, end))
+        self.asked_event_versions = only_versions
         return self.structure
 
     async def list_liquidity(self, symbol, timeframe, start, end, *, only_version=None):
@@ -237,6 +239,18 @@ def test_the_structure_window_is_window_candles_back_from_the_anchor() -> None:
     # One step past the anchor so an event on the final bar is inside.
     assert end == NOW + Timeframe.H4.duration
     assert start == NOW - Timeframe.H4.duration * 100
+
+
+def test_the_chart_draws_the_running_structure_generations_only() -> None:
+    """Audit class C: after a bump the table holds both generations of every
+    swing, and an unpinned chart would draw each one twice."""
+    from scanner.application.detection.event_versions import CURRENT_EVENT_VERSIONS
+
+    client, evidence, _ = build()
+
+    client.get("/api/v1/coins/BTCUSDT/structure", params={"timeframe": "H1"}, headers=AUTH)
+
+    assert evidence.asked_event_versions == CURRENT_EVENT_VERSIONS
 
 
 def test_zones_returns_live_zones_with_prices_as_strings() -> None:

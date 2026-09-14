@@ -151,8 +151,13 @@ class FakeStructureEvidence:
     def __init__(self, records: tuple = ()) -> None:
         self.records = records
 
-    async def list_structure(self, symbol, timeframe, start, end):
-        return tuple(r for r in self.records if start <= r.event_at < end)
+    async def list_structure(self, symbol, timeframe, start, end, *, only_versions=None):
+        return tuple(
+            r
+            for r in self.records
+            if start <= r.event_at < end
+            and (only_versions is None or r.algo_version in only_versions)
+        )
 
 
 class FakeSetups:
@@ -401,15 +406,37 @@ def _zone_invalidated(zone_id: str, at: datetime):
     )
 
 
-def _mss_invalidated(direction: str, at: datetime):
+def _mss_invalidated(direction: str, at: datetime, version: str | None = None):
+    from scanner.application.detection.structure_shift_replay import (
+        STRUCTURE_SHIFT_ALGO_VERSION,
+    )
     from scanner.application.ports.ict_evidence import StructureEvidenceRecord
 
     return StructureEvidenceRecord(
         event_type=f"STRUCTURE_MSS_INVALIDATED_{direction}",
         event_at=at,
-        algo_version="s6-structure-shift-v3",
+        algo_version=version or STRUCTURE_SHIFT_ALGO_VERSION,
         payload="{}",
     )
+
+
+@pytest.mark.asyncio
+async def test_an_older_shift_generation_does_not_demote_the_signal() -> None:
+    """Audit class C: a shift-engine bump re-derives the window's invalidations
+    under the new label while the old generation's rows stay. Only the running
+    generation may demote; the same record stamped current does (the test
+    below)."""
+    svc, transitions = monitor(
+        candles=[candle(3, high="108", low="106", close="107")],
+        evidence=FakeStructureEvidence(
+            (_mss_invalidated("UP", T0 + timedelta(hours=2), version="s6-structure-shift-v3"),)
+        ),
+    )
+
+    report = await svc.run("BTCUSDT", TF, T0 + timedelta(hours=3))
+
+    assert report.transitions == 0
+    assert transitions.written == []
 
 
 @pytest.mark.asyncio

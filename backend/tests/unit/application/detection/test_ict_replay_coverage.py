@@ -180,6 +180,8 @@ class FakeEvidenceRepository:
         self.liquidity = liquidity
         self.shifts = shifts
         self.asked_version: str | None = "never asked"
+        self.asked_structure_versions: object = "never asked"
+        self.asked_shift_versions: object = "never asked"
 
     async def list_structure(
         self,
@@ -187,7 +189,10 @@ class FakeEvidenceRepository:
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_versions: frozenset[str] | None = None,
     ) -> tuple[StructureEvidenceRecord, ...]:
+        self.asked_structure_versions = only_versions
         return self.structure
 
     async def list_shifts(
@@ -196,7 +201,10 @@ class FakeEvidenceRepository:
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_versions: frozenset[str] | None = None,
     ) -> tuple[ShiftEvidenceRecord, ...]:
+        self.asked_shift_versions = only_versions
         return self.shifts
 
     async def list_liquidity(
@@ -1077,6 +1085,28 @@ async def test_transition_helpers_cover_success_and_failure() -> None:
     )
 
     assert not unchanged
+
+
+@pytest.mark.asyncio
+async def test_order_blocks_read_the_running_structure_and_shift_generations_only() -> None:
+    """Audit class C: a bump leaves the old generation's swings and MSS beside
+    the new one's, and §5.1's grade reads both."""
+    from scanner.application.detection.event_versions import CURRENT_EVENT_VERSIONS
+
+    candles = pad_for_warmup(fixture_series())
+    evidence = FakeEvidenceRepository()
+
+    await IctOrderBlockReplayService(
+        FakeCandleRepository(candles),
+        FakeZoneRepository(),
+        FakeTransitionRepository(),
+        FakeSnapshotStore(),
+        evidence,
+        FakeClock(),
+    ).run("S6COVUSDT", Timeframe.M5, candles[0].open_time, candles[-1].close_time)
+
+    assert evidence.asked_structure_versions == CURRENT_EVENT_VERSIONS
+    assert evidence.asked_shift_versions == CURRENT_EVENT_VERSIONS
 
 
 async def _ob_grades(shifts: tuple[ShiftEvidenceRecord, ...]) -> set[str]:

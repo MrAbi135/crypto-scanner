@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
+from scanner.application.detection.event_versions import CURRENT_EVENT_VERSIONS
 from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
 from scanner.application.detection.orchestrator import build_event_key
 from scanner.application.detection.signal_monitor import _transition_id
@@ -445,7 +446,12 @@ class ConfluenceReplayService:
         # directional check would read False and no candidate would ever pass
         # G2. A confluence engine that grades nothing looks exactly like a
         # market that offered nothing.
-        events = await self._events.list_events(symbol, timeframe, start, end)
+        # Pinned to the running engine versions (event_versions.py): after a
+        # bump the new engines re-derive the window under their own labels
+        # while the old rows stay, and both generations would be scored.
+        events = await self._events.list_events(
+            symbol, timeframe, start, end, only_versions=CURRENT_EVENT_VERSIONS
+        )
         # Pinned to the running liquidity version, like the zones below: a
         # version bump re-hashes every pool, and for one window the ledger holds
         # two generations of the same sweeps -- the old one still carrying the

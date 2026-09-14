@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, true
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -76,6 +76,8 @@ class PgEngineEventRepository:
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
+        *,
+        only_versions: frozenset[str] | None = None,
     ) -> tuple[EngineEventRecord, ...]:
         async with self._sessions() as session:
             result = await session.execute(
@@ -85,6 +87,9 @@ class PgEngineEventRepository:
                     EngineEventRow.timeframe == timeframe.value,
                     EngineEventRow.event_at >= start,
                     EngineEventRow.event_at < end,
+                    EngineEventRow.algo_version.in_(only_versions)
+                    if only_versions is not None
+                    else true(),
                 )
                 .order_by(
                     EngineEventRow.event_at.asc(),
