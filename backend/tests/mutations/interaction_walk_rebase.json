@@ -1,0 +1,26 @@
+{
+  "description": "SLS 5.9 interaction walk positioned in time (s6-interaction-v5, audit mechanism M12, 2026-09-14). The walk used to start at a zone's stored confirmed_index + 1 and stop at a terminal transition's stored candle_index -- offsets inside whichever window wrote them -- so every zone born at the window tail (all FVG/IFVG/BPR/BREAKER on the host) never received an interaction. Each mutation restores one frozen offset. Deterministic tests (no Hypothesis), so one battery run is a verdict. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/interaction_walk_rebase.json",
+  "pytest": [
+    "tests/unit/application/detection/test_ict_interaction_replay.py"
+  ],
+  "mutations": [
+    {
+      "name": "the walk starts at the zone's stored window-local offset again",
+      "file": "backend/src/scanner/application/detection/ict_interaction_replay.py",
+      "old": "            _, confirmed = rebased_indices(record, candles, timeframe)",
+      "new": "            confirmed = record.confirmed_index",
+      "expect_failing": [
+        "test_a_zone_born_at_the_window_tail_still_receives_later_interactions"
+      ]
+    },
+    {
+      "name": "the walk stops at the terminal transition's stored window-local offset again",
+      "file": "backend/src/scanner/application/detection/ict_interaction_replay.py",
+      "old": "    return int((min(terminal) - duration - candles[0].open_time) / duration)",
+      "new": "    return min(t.candle_index for t in transitions if t.to_state in _TERMINAL_STATES)",
+      "expect_failing": [
+        "test_the_walk_stops_at_the_terminal_candle_in_time_not_at_its_frozen_offset"
+      ]
+    }
+  ]
+}

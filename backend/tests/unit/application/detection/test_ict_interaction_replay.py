@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -494,6 +495,109 @@ async def test_respect_can_receive_ltf_confirmation(
     assert "RESPECT" in kinds
     assert "CONFIRMATION" in kinds
     assert report.confirmations >= 1
+
+
+def _tail_series(touch_at: list[int], *, length: int) -> list[Candle]:
+    """`length` flat candles above a 100-110 bullish zone; candles in
+    `touch_at` dip into the band and close back above it."""
+    series = []
+
+    for index in range(length):
+        low = "105" if index in touch_at else "114"
+        series.append(
+            make_candle(
+                symbol="TESTUSDT",
+                timeframe=Timeframe.M5,
+                index=index,
+                open_="115",
+                high="116",
+                low=low,
+                close="115",
+            )
+        )
+
+    return series
+
+
+def _replace_zone(record: IctZoneRecord, created_at: datetime, stored_index: int) -> IctZoneRecord:
+    """A zone recorded on an EARLIER pass: `created_at` names its real candle,
+    while its frozen indices are the offset that pass's window gave it."""
+    return replace(
+        record, created_index=stored_index, confirmed_index=stored_index, created_at=created_at
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_zone_born_at_the_window_tail_still_receives_later_interactions() -> None:
+    """The live engine creates zones on the newest candle, so a zone's stored
+    confirmed_index is the last offset of its birth window (500). The walk
+    started at that stored offset + 1, which on every later window is past the
+    end -- and the zone never received an interaction. On the host that was
+    every FVG, IFVG, BPR and BREAKER: FVG 0 of 1,928.
+
+    Here the zone is stored with the tail offset of an earlier 400-candle
+    window, and two touches follow in a window that has slid forward."""
+    candles = _tail_series([450, 460], length=520)
+    born_at = 399
+    record = _replace_zone(zone(Timeframe.M5), candles[born_at].close_time, stored_index=399)
+
+    interactions = FakeInteractionRepository()
+    service = IctZoneInteractionReplayService(
+        FakeCandleRepository(candles),
+        FakeContextRepository((record,)),
+        interactions,
+    )
+
+    # The window has slid: it starts 100 candles after the birth window did.
+    window = candles[100:]
+    await service.run("TESTUSDT", Timeframe.M5, window[0].open_time, window[-1].close_time)
+
+    touched = sorted(
+        item.observed_at for item in interactions.records.values() if item.kind == "TOUCH"
+    )
+
+    assert touched == [candles[450].close_time, candles[460].close_time]
+
+
+@pytest.mark.asyncio
+async def test_the_walk_stops_at_the_terminal_candle_in_time_not_at_its_frozen_offset() -> None:
+    """A terminal transition's `candle_index` froze in the window that wrote
+    it. Read as an offset of a later window it names a later candle, and the
+    walk kept recording interactions on a zone that was already dead."""
+    candles = _tail_series([450, 480], length=520)
+    record = _replace_zone(zone(Timeframe.M5), candles[400].close_time, stored_index=499)
+
+    death = IctZoneTransitionRecord(
+        transition_id="t-dead",
+        zone_id=record.zone_id,
+        symbol=record.symbol,
+        timeframe=record.timeframe,
+        zone_type=record.zone_type,
+        from_state="FRESH",
+        to_state="INVALIDATED",
+        reason="close_through",
+        transitioned_at=candles[470].close_time,
+        # Offset in the window that recorded the death -- far past 470 here.
+        candle_index=499,
+        evidence="{}",
+    )
+
+    interactions = FakeInteractionRepository()
+    service = IctZoneInteractionReplayService(
+        FakeCandleRepository(candles),
+        FakeContextRepository((record,), (death,)),
+        interactions,
+    )
+
+    window = candles[20:]
+    await service.run("TESTUSDT", Timeframe.M5, window[0].open_time, window[-1].close_time)
+
+    touched = sorted(
+        item.observed_at for item in interactions.records.values() if item.kind == "TOUCH"
+    )
+
+    # 450 is before the zone died; 480 is after and must not be recorded.
+    assert touched == [candles[450].close_time]
 
 
 @pytest.mark.asyncio
