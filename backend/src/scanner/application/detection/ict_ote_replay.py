@@ -46,7 +46,9 @@ from scanner.shared import Timeframe
 # negative index wrapping to the window's far end.
 # v4: swing walk-back fix (Sec 3.1) -- the flat pause in a descent or
 # ascent no longer mints a pivot, so which swings exist changes.
-ICT_OTE_ALGO_VERSION = "s6-ote-v4"
+# v5: the OTE lifecycle walks every open zone (`list_open`), not the newest 60
+# `list_live` returns for scoring -- older OTEs were never advanced or expired.
+ICT_OTE_ALGO_VERSION = "s6-ote-v5"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")
@@ -176,7 +178,7 @@ class IctOteReplayService:
 
         transition_count = 0
 
-        live = await self._zones.list_live(
+        live = await self._zones.list_open(
             symbol,
             timeframe,
         )

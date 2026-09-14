@@ -50,7 +50,11 @@ from scanner.shared import Timeframe
 # window_time.py). Tail-frozen zones could never age -- FVG's 200-candle
 # expiry was unreachable for them (21 of 909 ever expired on the host) and
 # the resume walk skipped whatever a restart missed.
-ICT_ALGO_VERSION = "s6-v4"
+# v5: the FVG, IFVG and BPR lifecycles walk every open zone (`list_open`), not
+# the newest 60 `list_live` returns for scoring. Older zones were never
+# advanced or expired and back-wrote transitions hundreds of candles late when
+# they re-entered the top 60 (BTCUSDT H1 replay: an FVG at position 68 of 71).
+ICT_ALGO_VERSION = "s6-v5"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")
@@ -190,7 +194,7 @@ class IctReplayService:
 
         zones_upserted += bprs_created
 
-        live_before = await self._zones.list_live(
+        live_before = await self._zones.list_open(
             symbol,
             timeframe,
         )
@@ -214,7 +218,7 @@ class IctReplayService:
             ifvgs_created += created_ifvgs
             zones_upserted += created_ifvgs
 
-        live_derivatives = await self._zones.list_live(
+        live_derivatives = await self._zones.list_open(
             symbol,
             timeframe,
         )

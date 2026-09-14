@@ -1,0 +1,53 @@
+{
+  "description": "Every open zone's lifecycle runs, not only the newest 60 (s6-v5, s6-ote-v5, s6-ob-v7; audit mechanism M9, owner ruling 2026-09-14). The lifecycles read the bounded list_live (newest MAX_ZONES for scoring), so older zones were never advanced or expired and back-wrote transitions hundreds of candles late. Each mutation points one lifecycle read back at list_live. Deterministic tests, so one battery run is a verdict. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/lifecycles_read_every_open_zone.json",
+  "pytest": [
+    "tests/unit/application/detection/test_lifecycles_read_every_open_zone.py"
+  ],
+  "mutations": [
+    {
+      "name": "the FVG lifecycle reads the scored 60 again",
+      "file": "backend/src/scanner/application/detection/ict_replay.py",
+      "old": "        live_before = await self._zones.list_open(",
+      "new": "        live_before = await self._zones.list_live(",
+      "expect_failing": [
+        "test_an_fvg_outside_the_scored_60_still_runs_its_lifecycle"
+      ]
+    },
+    {
+      "name": "the IFVG and BPR lifecycles read the scored 60 again",
+      "file": "backend/src/scanner/application/detection/ict_replay.py",
+      "old": "        live_derivatives = await self._zones.list_open(",
+      "new": "        live_derivatives = await self._zones.list_live(",
+      "expect_failing": [
+        "test_ifvg_and_bpr_outside_the_scored_60_still_run_their_lifecycles"
+      ]
+    },
+    {
+      "name": "the OTE lifecycle reads the scored 60 again",
+      "file": "backend/src/scanner/application/detection/ict_ote_replay.py",
+      "old": "        live = await self._zones.list_open(",
+      "new": "        live = await self._zones.list_live(",
+      "expect_failing": [
+        "test_an_ote_outside_the_scored_60_still_runs_its_lifecycle"
+      ]
+    },
+    {
+      "name": "the OB lifecycle reads the scored 60 again",
+      "file": "backend/src/scanner/application/detection/ict_ob_replay.py",
+      "old": "        live_before = await self._zones.list_open(",
+      "new": "        live_before = await self._zones.list_live(",
+      "expect_failing": [
+        "test_an_order_block_outside_the_scored_60_still_runs_its_lifecycle"
+      ]
+    },
+    {
+      "name": "the BREAKER and MITIGATION lifecycles read the scored 60 again",
+      "file": "backend/src/scanner/application/detection/ict_ob_replay.py",
+      "old": "        live_with_breakers = await self._zones.list_open(",
+      "new": "        live_with_breakers = await self._zones.list_live(",
+      "expect_failing": [
+        "test_breakers_and_mitigations_outside_the_scored_60_still_run"
+      ]
+    }
+  ]
+}

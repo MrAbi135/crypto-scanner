@@ -70,6 +70,22 @@ class IctZoneRepository(Protocol):
         only_versions: Mapping[str, str] | None = None,
     ) -> tuple[IctZoneRecord, ...]: ...
 
+    async def list_open(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+    ) -> tuple[IctZoneRecord, ...]:
+        """Every non-terminal zone of the context, every version, oldest first.
+
+        The lifecycles' read. `list_live` carries §5.1's bound of the newest
+        `MAX_ZONES`, which is the set §8 scores; a zone outside it still exists
+        and must still transition (domain/ict/state.py). Walking only the
+        newest 60 left older zones unadvanced and unexpired, and they
+        back-wrote their transitions hundreds of candles late whenever they
+        re-entered the top 60.
+        """
+        ...
+
     async def transition(
         self,
         zone_id: str,

@@ -359,6 +359,34 @@ async def test_list_live_is_bounded_at_max_zones(engine) -> None:
     assert live[-1].zone_id == "z-015"
 
 
+async def test_list_open_is_unbounded_excludes_terminal_and_runs_oldest_first(engine) -> None:
+    """The lifecycles' read (audit M9). §5.1's bound is on what §8 scores; a
+    zone outside the newest 60 must still be advanced and retired, so this read
+    returns every non-terminal zone -- more than `MAX_ZONES` -- oldest first."""
+    repo = PgIctZoneRepository(build_session_factory(engine))
+    symbol = "ZOPEN"
+
+    for i in range(MAX_ZONES + 15):
+        await repo.upsert(
+            zone(
+                f"o-{i:03d}",
+                symbol=symbol,
+                created_at=T0 + timedelta(hours=i),
+                zone_type="OB",
+            )
+        )
+
+    assert await repo.transition("o-007", from_state="FRESH", to_state="EXPIRED", updated_at=T0)
+
+    opened = await repo.list_open(symbol, TF)
+
+    assert len(opened) == MAX_ZONES + 14
+    assert [z.zone_id for z in opened[:2]] == ["o-000", "o-001"]
+    assert "o-007" not in {z.zone_id for z in opened}
+    # The bound still applies to the scored read.
+    assert len(await repo.list_live(symbol, TF)) == MAX_ZONES
+
+
 async def test_list_live_is_scoped_to_symbol_and_timeframe(engine) -> None:
     repo = PgIctZoneRepository(build_session_factory(engine))
     await repo.upsert(zone("z-scope", symbol="ZSCOPE"))
