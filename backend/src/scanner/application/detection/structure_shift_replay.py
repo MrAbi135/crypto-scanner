@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal
 
@@ -58,9 +58,22 @@ from scanner.shared.errors import DomainInvariantError
 # instead of a frozen recorded index against today's offsets.
 # v4: swing walk-back fix (Sec 3.1) -- the flat pause in a descent or
 # ascent no longer mints a pivot, so which swings exist changes.
-STRUCTURE_SHIFT_ALGO_VERSION = "s6-structure-shift-v4"
+# v5: the walk resumes where the previous pass stopped (audit M6). It rebuilt
+# the trend from RANGING at the window's first candle every pass, so the trend
+# path -- and every CHoCH and MSS on it -- depended on where the window started:
+# BTCUSDT H1 replayed 08-06..08-10 as BULLISH in one window and BEARISH in the
+# window one candle later; offline, a sliding 150-candle window and a window
+# anchored at the first candle disagreed on the trend in 59 of 300 passes. The
+# snapshot is keyed by candle time, and it records the trend after each candle
+# so structure's break gate can read the trend in force at a candle.
+STRUCTURE_SHIFT_ALGO_VERSION = "s6-structure-shift-v5"
 
 _ATR_PERIOD = 14
+
+# A swing within this many candles of the window start may have lost the left
+# side its detection needs (an external pivot needs five candles), so a resumed
+# walk takes those from the snapshot instead of re-detecting them.
+_SWING_HORIZON = 2 * swing_window(SwingStrength.EXTERNAL)
 _MSS_SWEEP_LOOKBACK = 10
 _MSS_FOLLOWTHROUGH_MAX = 5
 _ZERO = Decimal("0")
@@ -169,7 +182,7 @@ class StructureShiftReplayService:
 
         consumed_choch: set[
             tuple[
-                int,
+                datetime,
                 SwingStrength,
             ]
         ] = set()
@@ -185,17 +198,53 @@ class StructureShiftReplayService:
         internal_window = swing_window(SwingStrength.INTERNAL)
 
         mss_watch: _MssWatch | None = None
-        previous_external_count = 0
 
         # §3.4's entry rule reads the last two pairs of whatever history it
         # is shown. After §3.6 demotes to RANGING, the pre-demotion pairs are
         # exactly the structure the market just proved fake -- shown again,
         # they re-enter the trend on the next candle and the demotion edge
         # means nothing. The floor hides them: re-entry needs two pairs
-        # printed AFTER the demotion.
-        structure_floor = 0
+        # confirmed AFTER the demotion candle.
+        floor_index = -1
 
-        for candle_index, candle in enumerate(candles):
+        trend_path: list[tuple[datetime, TrendState]] = []
+        first_index = 0
+
+        # Resume where the previous pass stopped. A pass with no usable
+        # snapshot -- a version's first, a gap longer than the window, a
+        # golden run -- walks the whole window from RANGING, as every pass
+        # used to.
+        resumed = _resume(
+            await self._state.load(symbol, timeframe.value, self._algo_version),
+            candles,
+        )
+
+        if resumed is not None:
+            # The window's first candles cut swings off from their left side
+            # and from their predecessors, and §3.3 labels every swing against
+            # its predecessor -- a window holding one external low calls it
+            # SEED, and §3.4's entry rule then never sees two LL. Those swings
+            # come from the snapshot, which saw them with their history.
+            internal_swings = _stitch(
+                resumed.swings, internal_swings, candles, SwingStrength.INTERNAL
+            )
+            external_swings = _stitch(
+                resumed.swings, external_swings, candles, SwingStrength.EXTERNAL
+            )
+            machine = TrendStateMachine(state=resumed.trend)
+            consumed_choch = resumed.consumed_choch
+            candidate = resumed.candidate
+            mss_watch = resumed.mss_watch
+            floor_index = resumed.floor_index
+            trend_path = resumed.trend_path
+            first_index = resumed.next_index
+
+        for candle_index in range(first_index, len(candles)):
+            candle = candles[candle_index]
+
+            if candle_index > 0:
+                _mark(trend_path, candles[candle_index - 1].open_time, machine.state)
+
             confirmed_external = tuple(
                 swing for swing in external_swings if swing.index + external_window <= candle_index
             )
@@ -212,7 +261,13 @@ class StructureShiftReplayService:
             # returning a different type -- three implementations of one line
             # of doctrine, and the one the BOS gate consulted was the one that
             # did not persist.
-            machine.apply_structure(external_classified[structure_floor:])
+            machine.apply_structure(
+                [
+                    item
+                    for item in external_classified
+                    if item.swing.index + external_window > floor_index
+                ]
+            )
 
             # §3.4's recovery edge, checked on the swings that confirmed at
             # THIS close: a new HH during BULLISH_CAUTION restores the trend
@@ -221,11 +276,12 @@ class StructureShiftReplayService:
             # confirm an MSS from a warning the doctrine already withdrew.
             # §3.6 edge case (1) orders swing events first within a close,
             # which is why this runs before the candidate block.
-            for item in external_classified[previous_external_count:]:
+            for item in external_classified:
+                if item.swing.index + external_window != candle_index:
+                    continue
+
                 if machine.apply_recovery(item.label):
                     candidate = None
-
-            previous_external_count = len(external_classified)
 
             # §3.6's invalidation: within 10 candles of an MSS, a close back
             # beyond the pre-MSS extreme demotes the new trend to RANGING and
@@ -244,7 +300,7 @@ class StructureShiftReplayService:
                     candles_since_confirmation=since,
                 ):
                     machine.demote_to_ranging()
-                    structure_floor = len(external_classified)
+                    floor_index = candle_index
 
                     if await self._persist_mss_invalidation(
                         symbol=symbol,
@@ -360,7 +416,7 @@ class StructureShiftReplayService:
 
             consumed_choch.add(
                 (
-                    swing.index,
+                    swing.open_time,
                     swing.strength,
                 )
             )
@@ -418,11 +474,27 @@ class StructureShiftReplayService:
                 pre_mss_extreme=(sweep_level if sweep_level is not None else failure_extreme),
             )
 
+        _mark(trend_path, candles[-1].open_time, machine.state)
+
         # §3.7's state is what §8.2's G2 and §8.3's F6 both ask for, and F6
         # asks for it on the *timeframe above*. A value that exists only in a
         # return object cannot be read across contexts, so the ladder had no
         # way to see it and confluence scored a constant instead.
-        await self._save_state(symbol, timeframe, machine.state, candles[-1].open_time)
+        await self._save_state(
+            symbol,
+            timeframe,
+            machine.state,
+            candles[-1].open_time,
+            _snapshot(
+                candles,
+                consumed_choch=consumed_choch,
+                swings=(*internal_swings, *external_swings),
+                candidate=candidate,
+                mss_watch=mss_watch,
+                floor_index=floor_index,
+                trend_path=trend_path,
+            ),
+        )
 
         return StructureShiftReplayReport(
             symbol=symbol,
@@ -440,6 +512,7 @@ class StructureShiftReplayService:
         timeframe: Timeframe,
         trend: TrendState,
         last_open_time: datetime,
+        detail: str,
     ) -> None:
         await self._state.save(
             StructureEngineState(
@@ -448,6 +521,7 @@ class StructureShiftReplayService:
                 algo_version=self._algo_version,
                 last_processed_open_time=last_open_time.isoformat(),
                 trend_state=trend.value,
+                detail=detail,
             )
         )
 
@@ -602,13 +676,248 @@ class StructureShiftReplayService:
         )
 
 
+@dataclass(slots=True)
+class _Resumed:
+    """The walk's state after the last candle a previous pass processed,
+    re-addressed to this window's candle indices."""
+
+    trend: TrendState
+    next_index: int
+    consumed_choch: set[tuple[datetime, SwingStrength]] = field(default_factory=set)
+    swings: tuple[SwingPoint, ...] = ()
+    candidate: _MssCandidate | None = None
+    mss_watch: _MssWatch | None = None
+    floor_index: int = -1
+    trend_path: list[tuple[datetime, TrendState]] = field(default_factory=list)
+
+
+def _mark(path: list[tuple[datetime, TrendState]], open_time: datetime, state: TrendState) -> None:
+    """Record the trend after the candle opening at `open_time`, when it changed."""
+    if path and (path[-1][0] >= open_time or path[-1][1] is state):
+        return
+
+    path.append((open_time, state))
+
+
+def trend_after(detail: str | None, open_time: datetime) -> TrendState | None:
+    """The trend the shift engine held once the candle opening at `open_time`
+    had closed, from a saved snapshot's path, or None when the path does not
+    reach back that far (or forward: a candle the engine has not processed)."""
+    if detail is None:
+        return None
+
+    try:
+        path = [
+            (datetime.fromisoformat(str(at)), TrendState(str(state)))
+            for at, state in json.loads(detail)["trend_path"]
+        ]
+    except (KeyError, ValueError, TypeError):
+        return None
+
+    if not path or open_time < path[0][0]:
+        return None
+
+    found = path[0][1]
+
+    for at, state in path:
+        if at > open_time:
+            break
+
+        found = state
+
+    return found
+
+
+def _stitch(
+    carried: Sequence[SwingPoint],
+    detected: Sequence[SwingPoint],
+    candles: Sequence[Candle],
+    strength: SwingStrength,
+) -> tuple[SwingPoint, ...]:
+    """The swings a resumed walk reads: the snapshot's for the window's first
+    `_SWING_HORIZON` candles and before them, this window's detection after.
+
+    Carried swings are re-addressed to this window's offsets; the ones from
+    before the window get negative offsets, so they stay confirmed and keep
+    their place in the label sequence.
+    """
+    horizon = candles[min(_SWING_HORIZON, len(candles) - 1)].open_time
+    start = candles[0].open_time
+    step = candles[0].timeframe.duration
+    index_of = {candle.open_time: index for index, candle in enumerate(candles)}
+
+    early = [
+        replace(
+            swing,
+            index=index_of.get(swing.open_time, int((swing.open_time - start) // step)),
+        )
+        for swing in carried
+        if swing.strength is strength and swing.open_time < horizon
+    ]
+    late = [swing for swing in detected if swing.open_time >= horizon]
+
+    return tuple(sorted((*early, *late), key=lambda swing: (swing.index, swing.kind.value)))
+
+
+def _snapshot(
+    candles: Sequence[Candle],
+    *,
+    consumed_choch: set[tuple[datetime, SwingStrength]],
+    swings: Sequence[SwingPoint],
+    candidate: _MssCandidate | None,
+    mss_watch: _MssWatch | None,
+    floor_index: int,
+    trend_path: list[tuple[datetime, TrendState]],
+) -> str:
+    """The walk's state keyed by candle time, never by window offset."""
+
+    def at(index: int) -> str | None:
+        return candles[index].open_time.isoformat() if 0 <= index < len(candles) else None
+
+    start = candles[0].open_time
+    carry_from = start - candles[0].timeframe.duration * len(candles)
+    before = [entry for entry in trend_path if entry[0] < start]
+    path = [*before[-1:], *(entry for entry in trend_path if entry[0] >= start)]
+
+    return json.dumps(
+        {
+            "consumed_choch": sorted(
+                [opened.isoformat(), strength.value]
+                for opened, strength in consumed_choch
+                if opened >= carry_from
+            ),
+            # Confirmed swings back to one window before this one: enough for
+            # the next window's labels and entry rule, bounded in size.
+            "swings": sorted(
+                [
+                    swing.open_time.isoformat(),
+                    str(swing.price),
+                    swing.kind.value,
+                    swing.strength.value,
+                ]
+                for swing in swings
+                if swing.index + swing_window(swing.strength) <= len(candles) - 1
+                and swing.open_time >= carry_from
+            ),
+            "candidate": (
+                None
+                if candidate is None
+                else {
+                    "direction": candidate.direction.value,
+                    "choch_at": at(candidate.choch_index),
+                    "swing_at": at(candidate.swing_index),
+                    "break_extreme": str(candidate.break_extreme),
+                    "has_displacement": candidate.has_displacement,
+                    "has_external_sweep": candidate.has_external_sweep,
+                    "has_failure_swing": candidate.has_failure_swing,
+                    "pre_mss_extreme": (
+                        None
+                        if candidate.pre_mss_extreme is None
+                        else str(candidate.pre_mss_extreme)
+                    ),
+                }
+            ),
+            "mss_watch": (
+                None
+                if mss_watch is None
+                else {
+                    "direction": mss_watch.direction.value,
+                    "pre_mss_extreme": str(mss_watch.pre_mss_extreme),
+                    "confirmed_at": at(mss_watch.confirmed_index),
+                    "event_key": mss_watch.event_key,
+                }
+            ),
+            "floor_at": at(floor_index),
+            "trend_path": [[opened.isoformat(), state.value] for opened, state in path],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _resume(state: StructureEngineState | None, candles: Sequence[Candle]) -> _Resumed | None:
+    """Restore the walk from a snapshot whose last candle is in this window."""
+    if state is None or state.last_processed_open_time is None or state.detail is None:
+        return None
+
+    index_of = {candle.open_time: index for index, candle in enumerate(candles)}
+
+    def at(value: object) -> int | None:
+        return None if value is None else index_of.get(datetime.fromisoformat(str(value)))
+
+    try:
+        last = at(state.last_processed_open_time)
+
+        if last is None:
+            return None
+
+        detail = json.loads(state.detail)
+
+        resumed = _Resumed(trend=TrendState(state.trend_state), next_index=last + 1)
+
+        for opened, strength in detail["consumed_choch"]:
+            resumed.consumed_choch.add(
+                (datetime.fromisoformat(str(opened)), SwingStrength(strength))
+            )
+
+        resumed.swings = tuple(
+            SwingPoint(
+                index=0,
+                open_time=datetime.fromisoformat(str(opened)),
+                price=Decimal(str(price)),
+                kind=SwingKind(kind),
+                strength=SwingStrength(strength),
+            )
+            for opened, price, kind, strength in detail["swings"]
+        )
+
+        raw = detail["candidate"]
+
+        if raw is not None and (choch := at(raw["choch_at"])) is not None:
+            swing_at = at(raw["swing_at"])
+            resumed.candidate = _MssCandidate(
+                direction=BreakDirection(raw["direction"]),
+                choch_index=choch,
+                swing_index=-1 if swing_at is None else swing_at,
+                break_extreme=Decimal(raw["break_extreme"]),
+                has_displacement=bool(raw["has_displacement"]),
+                has_external_sweep=bool(raw["has_external_sweep"]),
+                has_failure_swing=bool(raw["has_failure_swing"]),
+                pre_mss_extreme=(
+                    None if raw["pre_mss_extreme"] is None else Decimal(raw["pre_mss_extreme"])
+                ),
+            )
+
+        watch = detail["mss_watch"]
+
+        if watch is not None and (confirmed := at(watch["confirmed_at"])) is not None:
+            resumed.mss_watch = _MssWatch(
+                direction=BreakDirection(watch["direction"]),
+                pre_mss_extreme=Decimal(watch["pre_mss_extreme"]),
+                confirmed_index=confirmed,
+                event_key=str(watch["event_key"]),
+            )
+
+        floor = at(detail["floor_at"])
+        resumed.floor_index = -1 if floor is None else floor
+
+        resumed.trend_path = [
+            (datetime.fromisoformat(str(opened)), TrendState(str(value)))
+            for opened, value in detail["trend_path"]
+        ]
+    except (KeyError, ValueError, TypeError, ArithmeticError):
+        return None
+
+    return resumed
+
+
 def _find_choch(
     *,
     candle: Candle,
     trend: TrendState,
     external_classified: tuple[ClassifiedSwing, ...],
     internal_classified: tuple[ClassifiedSwing, ...],
-    consumed: set[tuple[int, SwingStrength]],
+    consumed: set[tuple[datetime, SwingStrength]],
 ) -> (
     tuple[
         SwingPoint,
@@ -636,7 +945,7 @@ def _find_choch(
             item.label is target_label
             and item.swing.kind is target_kind
             and (
-                item.swing.index,
+                item.swing.open_time,
                 item.swing.strength,
             )
             not in consumed
@@ -650,7 +959,7 @@ def _find_choch(
             item.label is target_label
             and item.swing.kind is target_kind
             and (
-                item.swing.index,
+                item.swing.open_time,
                 item.swing.strength,
             )
             not in consumed

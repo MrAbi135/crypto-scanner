@@ -25,6 +25,11 @@ class StructureEngineState:
     algo_version: str
     last_processed_open_time: str | None = None
     trend_state: str = "RANGING"
+    # The shift engine's walk state as JSON text (consumed CHoCH swings, the
+    # MSS candidate and watch, the demotion floor, the trend path), keyed by
+    # candle time so the next pass can resume instead of restarting (audit M6).
+    # None for structure's own snapshot and for payloads written before it.
+    detail: str | None = None
 
 
 class EngineStateManager:
@@ -75,6 +80,7 @@ class EngineStateManager:
                     "RANGING",
                 )
             ),
+            detail=data.get("detail"),
         )
 
     async def save(
