@@ -199,6 +199,16 @@ class FakeEvents:
     ) -> bool:
         return any(item.event_key == event_key for item in self.items)
 
+    async def list_events(self, symbol, timeframe, start, end):
+        """Production's bounds: this context, `event_at` in [start, end)."""
+        return tuple(
+            item
+            for item in self.items
+            if item.symbol == symbol
+            and item.timeframe is timeframe
+            and start <= item.event_at < end
+        )
+
 
 class FakeEvidence:
     """`list_liquidity` over a FakeTransitions log, with production's bounds."""
@@ -722,6 +732,99 @@ async def test_a_sweep_recorded_last_pass_matures_on_this_one() -> None:
 
     assert payload["close"] == "100.5"
     assert payload["candles_since_confirmation"] == 2
+
+
+@pytest.mark.asyncio
+async def test_a_displacement_that_moves_to_a_later_candle_is_not_published_twice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Audit M11. The walk re-reads a sweep from its frozen evidence every pass,
+    and a fact's key carries the candle. When window-start ATR drift moves the
+    first qualifying displacement one candle later, the same fact about the same
+    sweep must not be written again -- the host held 9 pools with two stop hunts
+    and 10 with two displacements.
+
+    Pass 1 sees the reversal displacement on the candle after the sweep, pass 2
+    on the candle after that."""
+    import scanner.application.detection.liquidity_replay as liquidity_module
+    from scanner.domain.ict.displacement import Displacement, DisplacementDirection
+
+    candles = pad_for_warmup(
+        [
+            make_candle(0, open_="97", high="99", low="97", close="98"),
+            make_candle(1, open_="99", high="102", low="98", close="99"),
+            make_candle(2, open_="99", high="99", low="94", close="94.5"),
+            make_candle(3, open_="94.5", high="95", low="93.5", close="94"),
+        ]
+    )
+
+    pools = FakePools(make_pool())
+    service, transitions, events = _maturation_service(candles, pools)
+    sweep_index = len(candles) - 3
+
+    transitions.items.append(
+        LiquidityTransitionRecord(
+            transition_id="t-sweep",
+            pool_id="pool-1",
+            symbol="BTCUSDT",
+            timeframe=Timeframe.M5,
+            from_state="ACTIVE",
+            to_state="SWEPT",
+            reason="liquidity_sweep",
+            transitioned_at=candles[sweep_index].close_time,
+            candle_index=497,
+            evidence=json.dumps(
+                {
+                    "pool_id": "pool-1",
+                    "side": "BSL",
+                    "liquidity_class": "EXTERNAL",
+                    "reference_level": "100",
+                    "penetration_price": "102",
+                    "close_back_price": "99",
+                    "sweep_depth_atr": "1.2",
+                    "confirmation_window": 1,
+                    "gap_sweep": False,
+                    "reclaimed": False,
+                    "displaced_after": False,
+                    "setup_expiry_index": 512,
+                }
+            ),
+        )
+    )
+
+    qualifying = {"index": sweep_index + 1}
+
+    def moving_displacement(series, index, *, atr):
+        if index != qualifying["index"]:
+            return None
+
+        return Displacement(
+            candle_index=index,
+            direction=DisplacementDirection.BEARISH,
+            body=Decimal("4.5"),
+            candle_range=Decimal("5"),
+            mean_body_20=Decimal("1"),
+            atr=atr,
+            body_multiple=Decimal("4.5"),
+            range_multiple=Decimal("3"),
+            close_position=Decimal("0.1"),
+        )
+
+    monkeypatch.setattr(liquidity_module, "detect_displacement", moving_displacement)
+    atrs = wilder_atr_series(candles)
+
+    await service._mature_recent_sweeps("BTCUSDT", Timeframe.M5, candles, atrs)
+    qualifying["index"] = sweep_index + 2
+    await service._mature_recent_sweeps("BTCUSDT", Timeframe.M5, candles, atrs)
+
+    displaced = [e for e in events.items if e.event_type == "LIQUIDITY_SWEEP_DISPLACED"]
+    hunts = [e for e in events.items if e.event_type == "LIQUIDITY_STOP_HUNT"]
+
+    # The premise: pass 1 did publish both facts.
+    assert displaced and hunts
+    assert len(displaced) == 1, [e.event_at for e in displaced]
+    assert len(hunts) == 1, [e.event_at for e in hunts]
+    assert displaced[0].event_at == candles[sweep_index + 1].close_time
 
 
 @pytest.mark.asyncio
