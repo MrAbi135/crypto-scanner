@@ -1128,6 +1128,67 @@ def test_a_pivot_whose_pool_was_read_back_is_not_built_again() -> None:
     assert [level.pool_id for level in levels] == [pool_id]
 
 
+@pytest.mark.asyncio
+async def test_a_candle_meets_the_pool_as_it_stood_when_it_closed() -> None:
+    """§4.2 "combined evidence" without look-ahead.
+
+    A swing pool at 100 becomes a cluster pool banded [100, 101] on the close
+    of the candle that confirms the second member. That candle itself closed
+    against the swing pool: it wicked to 100.5 and closed at 99, a sweep of
+    100. Judged against the merged band -- the stage its own close created, or
+    whatever the newest stage is -- the same candle sweeps nothing.
+    """
+    candles = pad_for_warmup(
+        [
+            make_candle(0, open_="98", high="99", low="97", close="98"),
+            make_candle(1, open_="98", high="100.5", low="97.5", close="99"),
+        ]
+    )
+    created = candles[-2].close_time
+
+    swing = _Stage(
+        starts=created,
+        source=PoolSource.SWING,
+        strength=SwingStrength.EXTERNAL,
+        price=Decimal("100"),
+        band_low=Decimal("100"),
+        band_high=Decimal("100"),
+        member_count=1,
+    )
+    merged = replace(
+        swing,
+        starts=candles[-1].close_time,
+        source=PoolSource.CLUSTER,
+        strength=None,
+        price=Decimal("101"),
+        band_high=Decimal("101"),
+        member_count=2,
+    )
+
+    pools = FakePools(
+        replace(
+            make_pool(),
+            source="CLUSTER",
+            price=Decimal("101"),
+            band_low=Decimal("100"),
+            band_high=Decimal("101"),
+            member_count=2,
+            created_at=created,
+            evidence=json.dumps({"stages": [swing.to_json(), merged.to_json()]}),
+        )
+    )
+
+    result = await _service(candles, pools)._replay_pool_lifecycle(
+        pools.pool,
+        candles,
+        wilder_atr_series(candles),
+        (),
+    )
+
+    assert result == "SWEPT"
+    assert pools.pool.state == "SWEPT"
+
+
 def _swing(index: int, price: str, kind: SwingKind) -> SwingPoint:
     return SwingPoint(
         index=index,

@@ -22,7 +22,7 @@
       "old": "            and self._alive(level, index)\n",
       "new": "            and True\n",
       "expect_failing": [
-        "test_close_by_close_leaves_the_map_one_pass_builds"
+        "test_a_consumed_level_does_not_absorb_a_later_swing_at_its_price"
       ]
     },
     {
@@ -40,7 +40,6 @@
       "old": "        if level is None or not self._alive(level, joined):\n            return\n",
       "new": "        if True:\n            return\n",
       "expect_failing": [
-        "test_a_cluster_found_on_a_later_pass_leaves_the_map_a_single_pass_builds",
         "test_two_equal_highs_become_one_cluster_pool"
       ]
     },
@@ -50,7 +49,7 @@
       "old": "return max(bisect_left(stages, close_time, key=lambda stage: stage.starts) - 1, 0)",
       "new": "return max(bisect_right(stages, close_time, key=lambda stage: stage.starts) - 1, 0)",
       "expect_failing": [
-        "test_close_by_close_leaves_the_map_one_pass_builds"
+        "test_a_candle_meets_the_pool_as_it_stood_when_it_closed"
       ]
     },
     {
@@ -69,7 +68,7 @@
       "old": "        return pools[_stage_index(stages, candle.close_time)]\n",
       "new": "        return pools[-1]\n",
       "expect_failing": [
-        "test_close_by_close_leaves_the_map_one_pass_builds"
+        "test_a_candle_meets_the_pool_as_it_stood_when_it_closed"
       ]
     }
   ]
