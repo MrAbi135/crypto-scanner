@@ -168,6 +168,15 @@ class FakeEvents:
     async def exists(self, event_key: str) -> bool:
         return any(item.event_key == event_key for item in self.items)
 
+    async def list_events(self, symbol, timeframe, start, end):
+        return tuple(
+            item
+            for item in self.items
+            if item.symbol == symbol
+            and item.timeframe is timeframe
+            and start <= item.event_at < end
+        )
+
 
 class FakeEvidence:
     def __init__(self, transitions: FakeTransitions) -> None:

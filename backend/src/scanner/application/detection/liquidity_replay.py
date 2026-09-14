@@ -98,10 +98,27 @@ from scanner.shared import Timeframe
 # longer sweeps, absorbs or matures the previous generation's pools -- measured
 # after the s5-v11 deploy, it had re-matured 124 stop hunts and 1,596 reclaims of
 # s5-v10 sweeps under its own label -- and only retires them by age.
-LIQUIDITY_ALGO_VERSION = "s5-v11"
+# v12: each maturing fact is published once per sweep. The walk re-reads a sweep
+# from its frozen evidence (`displaced_after`/`reclaimed` false) every pass, and
+# the fact's key carries the candle, so when a later pass found a different first
+# qualifying candle (window-start ATR drift) the same fact about the same sweep
+# was written again: on the host 9 s5-v10 pools carry two stop hunts and 10 two
+# displacements; replayed LINKUSDT M5 wrote a pool's pair at 08:20 and again at
+# 08:25, 479 candles later.
+LIQUIDITY_ALGO_VERSION = "s5-v12"
 
 _ATR_PERIOD = 14
 _SWEEP_SCAN_ATR = Decimal("3")
+
+# The facts a sweep matures into, each published at most once per sweep.
+_SWEEP_FACTS = frozenset(
+    {
+        "LIQUIDITY_SWEEP_RECLAIMED",
+        "LIQUIDITY_SWEEP_DISPLACED",
+        "LIQUIDITY_STOP_HUNT",
+        "LIQUIDITY_STOP_HUNT_FAILED",
+    }
+)
 # §4.7's stophunt_window is enforced inside `detect_stop_hunt` and
 # `mark_displaced_after`; no application-layer copy of the bound exists.
 
@@ -921,6 +938,16 @@ class LiquidityReplayService:
             only_version=self._algo_version,
         )
 
+        # What this version already published, by (fact, sweep). The walk below
+        # starts from the frozen evidence every pass, so without this a fact
+        # whose first qualifying candle moved between passes was written again.
+        published = await self._published_sweep_facts(
+            symbol,
+            timeframe,
+            candles[0].open_time,
+            candles[-1].close_time + duration,
+        )
+
         for row in rows:
             if row.to_state != "SWEPT" or row.reason != "liquidity_sweep":
                 continue
@@ -939,7 +966,29 @@ class LiquidityReplayService:
                 sweep,
                 candles,
                 atrs,
+                published,
             )
+
+    async def _published_sweep_facts(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> set[tuple[str, str]]:
+        facts: set[tuple[str, str]] = set()
+
+        for event in await self._events.list_events(symbol, timeframe, start, end):
+            if event.algo_version != self._algo_version or event.event_type not in _SWEEP_FACTS:
+                continue
+
+            payload = json.loads(event.payload)
+            pool_id = payload.get("pool_id") or payload.get("sweep_pool_id")
+
+            if isinstance(pool_id, str):
+                facts.add((event.event_type, pool_id))
+
+        return facts
 
     async def _walk_sweep_maturation(
         self,
@@ -948,6 +997,7 @@ class LiquidityReplayService:
         sweep: SweepEvent,
         candles: Sequence[Candle],
         atrs: Sequence[Decimal | None],
+        published: set[tuple[str, str]],
     ) -> None:
         reversal = (
             DisplacementDirection.BEARISH
@@ -972,7 +1022,8 @@ class LiquidityReplayService:
             sweep = sweep_reclaimed(sweep, candle, candle_index=index)
 
             if sweep.reclaimed and not was_reclaimed:
-                await self._append_sweep_fact(
+                await self._append_sweep_fact_once(
+                    published,
                     "LIQUIDITY_SWEEP_RECLAIMED",
                     symbol,
                     timeframe,
@@ -1004,7 +1055,8 @@ class LiquidityReplayService:
                     )
 
                     if sweep.displaced_after and not was_displaced:
-                        await self._append_sweep_fact(
+                        await self._append_sweep_fact_once(
+                            published,
                             "LIQUIDITY_SWEEP_DISPLACED",
                             symbol,
                             timeframe,
@@ -1026,6 +1078,7 @@ class LiquidityReplayService:
                             timeframe,
                             sweep,
                             candles,
+                            published,
                             displacement_index=index,
                             displacement_direction=(
                                 "DOWN"
@@ -1046,7 +1099,8 @@ class LiquidityReplayService:
                 )
 
                 if hunt.failed and not was_failed:
-                    await self._append_sweep_fact(
+                    await self._append_sweep_fact_once(
+                        published,
                         "LIQUIDITY_STOP_HUNT_FAILED",
                         symbol,
                         timeframe,
@@ -1067,6 +1121,7 @@ class LiquidityReplayService:
         timeframe: Timeframe,
         sweep: SweepEvent,
         candles: Sequence[Candle],
+        published: set[tuple[str, str]],
         *,
         displacement_index: int,
         displacement_direction: str,
@@ -1105,7 +1160,10 @@ class LiquidityReplayService:
         if hunt is None:
             return None
 
-        await self._append_sweep_fact(
+        # Published once per sweep; the hunt is still returned so its failure can
+        # be tracked on this pass.
+        await self._append_sweep_fact_once(
+            published,
             "LIQUIDITY_STOP_HUNT",
             symbol,
             timeframe,
@@ -1127,6 +1185,33 @@ class LiquidityReplayService:
         )
 
         return hunt
+
+    async def _append_sweep_fact_once(
+        self,
+        published: set[tuple[str, str]],
+        event_type: str,
+        symbol: str,
+        timeframe: Timeframe,
+        *,
+        object_id: str,
+        event_at: datetime,
+        payload: Mapping[str, object],
+    ) -> None:
+        """At most one row of each maturing fact per sweep, whichever candle a
+        pass first finds qualifying."""
+        if (event_type, object_id) in published:
+            return
+
+        published.add((event_type, object_id))
+
+        await self._append_sweep_fact(
+            event_type,
+            symbol,
+            timeframe,
+            object_id=object_id,
+            event_at=event_at,
+            payload=payload,
+        )
 
     async def _append_sweep_fact(
         self,
