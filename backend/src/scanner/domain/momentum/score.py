@@ -17,7 +17,7 @@ from enum import Enum
 
 from scanner.domain.common import Candle
 from scanner.domain.common.atr import atr_at
-from scanner.domain.common.rvol import relative_volume
+from scanner.domain.common.rvol import rvol_at
 
 WINDOW = 10
 ROC_PERIOD = 10
@@ -102,6 +102,7 @@ def momentum_score(
     index: int,
     *,
     atrs: Sequence[Decimal | None] | None = None,
+    rvols: Sequence[Decimal | None] | None = None,
 ) -> MomentumScore | None:
     """§7.1. Returns None until the 30-candle warm-up is satisfied.
 
@@ -152,7 +153,7 @@ def momentum_score(
     )
 
     participation_component = _linear(
-        _participation_ratio(candles, index, dominant, counter),
+        _participation_ratio(candles, index, dominant, counter, rvols),
         PARTICIPATION_FULL,
     )
 
@@ -225,6 +226,7 @@ def _participation_ratio(
     index: int,
     dominant: Sequence[Candle],
     counter: Sequence[Candle],
+    rvols: Sequence[Decimal | None] | None = None,
 ) -> Decimal:
     """Mean RVOL of dominant candles over mean RVOL of counter candles.
 
@@ -244,7 +246,7 @@ def _participation_ratio(
             if candle not in subset:
                 continue
 
-            value = relative_volume(candles, start + offset)
+            value = rvol_at(candles, start + offset, rvols)
 
             if value is None:
                 return None

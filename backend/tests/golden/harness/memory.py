@@ -16,6 +16,7 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
+from decimal import Decimal
 
 from scanner.application.ports.detection import EngineEventRecord
 from scanner.application.ports.ict_evidence import (
@@ -93,6 +94,18 @@ class InMemoryCandleRepository:
     ) -> Sequence[Candle]:
         return tuple(
             candle for candle in self._series(symbol, timeframe) if start <= candle.open_time < end
+        )
+
+    async def fetch_volumes(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> Sequence[tuple[datetime, Decimal]]:
+        return tuple(
+            (candle.open_time, candle.volume)
+            for candle in await self.fetch_series(symbol, timeframe, start, end)
         )
 
     async def count_series(

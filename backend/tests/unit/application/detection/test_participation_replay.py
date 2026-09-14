@@ -28,6 +28,9 @@ class FakeCandleRepository:
     async def fetch_series(self, symbol, timeframe, start, end):
         return self.series
 
+    async def fetch_volumes(self, symbol, timeframe, start, end):
+        return ()
+
 
 class FakeEventRepository:
     def __init__(self) -> None:
@@ -191,6 +194,44 @@ async def test_a_candle_already_decided_is_not_decided_again() -> None:
 
     assert saved is not None
     assert saved.last_processed_open_time == series[-1].open_time.isoformat()
+
+
+class HistoryCandleRepository(FakeCandleRepository):
+    """Serves the window, and the volumes of the candles before it."""
+
+    def __init__(self, series, history) -> None:
+        super().__init__(series)
+        self.history = list(history)
+        self.asked: tuple[datetime, datetime] | None = None
+
+    async def fetch_volumes(self, symbol, timeframe, start, end):
+        self.asked = (start, end)
+        return [(at, volume) for at, volume in self.history if start <= at < end]
+
+
+@pytest.mark.asyncio
+async def test_the_rvol_baseline_is_read_from_before_the_window() -> None:
+    """Audit M8 (owner ruling 2026-09-14): §2.11 measures a candle against the
+    prior 20 candles (20 days intraday), not against whatever the window holds.
+    A spike whose whole baseline lies before the window is still a spike."""
+    before = [candle(i) for i in range(20)]
+    window = [candle(20, volume="30")]
+
+    # The premise: the window alone holds no baseline.
+    svc, _ = service(window)
+    assert (await run(svc)).volume_spikes == 0
+
+    candles = HistoryCandleRepository(window, [(c.open_time, c.volume) for c in before])
+    repo = FakeEventRepository()
+
+    report = await run(ParticipationReplayService(candles, repo, FakeClock()))
+
+    assert report.volume_spikes == 1
+    assert candles.asked == (window[0].open_time - Timeframe.H4.duration * 20, window[0].open_time)
+
+    spike = next(r for r in repo.events.values() if r.event_type == "VOLUME_SPIKE")  # type: ignore[attr-defined]
+
+    assert json.loads(spike.payload)["rvol"] == "3"  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio

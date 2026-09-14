@@ -79,7 +79,7 @@ from scanner.domain.common import (
     wilder_atr,
     wilder_atr_series,
 )
-from scanner.domain.common.rvol import median, relative_volume
+from scanner.domain.common.rvol import baseline_span, median, relative_volumes, rvol_at
 from scanner.domain.confluence import (
     Adjustment,
     ArchetypeEvidence,
@@ -199,7 +199,12 @@ from scanner.shared import Timeframe
 # MITIGATED breaker (50) under a FRESH OB_A (65) could close A2 on the OB's
 # retest. Unreachable while tail-born zones had no interactions (fixed in
 # s6-interaction-v5); on the host 1 of 473 setups had exactly that stack.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v30"
+# v31: §6/§7's reading at the newest candle measures RVOL against history
+# before the window (audit M8), as the participation engine now does. The
+# window-only baseline left M15/M5 with no RVOL at all -- G1's data_ready
+# false on every candle -- and H1 momentum participation depending on the
+# window start.
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v31"
 
 # Import-time, not call-time: a zone type with no version entry is invisible
 # to scoring, and that must refuse to boot rather than run quietly blind.
@@ -502,7 +507,15 @@ class ConfluenceReplayService:
             newest.open_time + timeframe.duration,
         )
 
-        reading = _read_participation(series, minutes, timeframe)
+        # §2.11's baseline is history, not this window (audit M8).
+        history = await self._candles.fetch_volumes(
+            symbol,
+            timeframe,
+            series[0].open_time - baseline_span(timeframe),
+            series[0].open_time,
+        )
+
+        reading = _read_participation(series, minutes, timeframe, relative_volumes(series, history))
 
         # §6.7 caps on either tag: "hard cap 50 if `wash_risk` or
         # `suspect_volume`". §6.4's is per candle and this one is the
@@ -2590,6 +2603,7 @@ def _read_participation(
     series: list[Candle],
     minutes: Sequence[TradeAggregate] = (),
     timeframe: Timeframe | None = None,
+    rvols: Sequence[Decimal | None] | None = None,
 ) -> _Reading:
     """§6 and §7 at the newest candle, recomputed rather than read back.
 
@@ -2611,16 +2625,16 @@ def _read_participation(
     """
     last = len(series) - 1
 
-    score = momentum_score(series, last)
-    phase = momentum_phase(series, last)
+    score = momentum_score(series, last, rvols=rvols)
+    phase = momentum_phase(series, last, rvols=rvols)
     p90, median_p90 = _size_skew(series, minutes, timeframe)
 
-    spike = detect_volume_spike(series, last)
-    expansion = detect_expansion(series, last)
-    check = cross_validate_abnormal_volume(series, last)
+    spike = detect_volume_spike(series, last, rvols=rvols)
+    expansion = detect_expansion(series, last, rvols=rvols)
+    check = cross_validate_abnormal_volume(series, last, rvols=rvols)
 
     return _Reading(
-        rvol=relative_volume(series, last),
+        rvol=rvol_at(series, last, rvols),
         score=score.score if score else Decimal(0),
         direction=score.direction.value if score else None,
         phase_measured=phase is not None,
@@ -2635,7 +2649,7 @@ def _read_participation(
         # recomputation cannot disagree with the engine that owns them.
         spike_direction=spike.direction if spike else None,
         expansion_direction=expansion.direction if expansion else None,
-        contracting=detect_contraction(series, last),
+        contracting=detect_contraction(series, last, rvols=rvols),
         # The depth half of §6.4 is unread here for the same reason it is
         # unread in the engine -- `market.liquidity_history` is empty -- so
         # both reach the same verdict from the same evidence.

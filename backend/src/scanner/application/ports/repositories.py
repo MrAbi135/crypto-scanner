@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Protocol
 
 from scanner.domain.common import Candle, Symbol, TradeAggregate
@@ -186,6 +187,21 @@ class CandleRepository(Protocol):
         end: datetime,
     ) -> Sequence[Candle]:
         """Return ascending candles in [start, end)."""
+        ...
+
+    async def fetch_volumes(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+    ) -> Sequence[tuple[datetime, Decimal]]:
+        """Return ascending (open_time, volume) in [start, end).
+
+        The RVOL baseline before a detection window (§2.11, audit M8) reads two
+        columns of up to twenty days -- 5,760 candles on M5 -- so it does not
+        build whole candles.
+        """
         ...
 
     async def count_series(

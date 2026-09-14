@@ -1,0 +1,143 @@
+{
+  "description": "RVOL baseline from history (audit M8, owner ruling 2026-09-14): participation s7-participation-v4 and confluence s8-confluence-v31 read the volumes of the baseline_span before the window, and every RVOL reader takes the precomputed series. Each mutation cuts the history out of one path. Deterministic tests, so one battery run is a verdict. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/rvol_from_history.json",
+  "pytest": [
+    "tests/unit/domain/common/test_rvol_history.py",
+    "tests/unit/application/detection/test_participation_replay.py",
+    "tests/unit/application/detection/test_confluence_replay.py"
+  ],
+  "mutations": [
+    {
+      "name": "participation reads RVOL from the window only",
+      "file": "backend/src/scanner/application/detection/participation_replay.py",
+      "old": "        rvols = relative_volumes(series, history)",
+      "new": "        rvols = relative_volumes(series)",
+      "expect_failing": [
+        "test_the_rvol_baseline_is_read_from_before_the_window"
+      ]
+    },
+    {
+      "name": "participation reads one candle of history",
+      "file": "backend/src/scanner/application/detection/participation_replay.py",
+      "old": "            series[0].open_time - baseline_span(timeframe),",
+      "new": "            series[0].open_time - timeframe.duration,",
+      "expect_failing": [
+        "test_the_rvol_baseline_is_read_from_before_the_window"
+      ]
+    },
+    {
+      "name": "confluence reads RVOL from the window only",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "relative_volumes(series, history))",
+      "new": "relative_volumes(series))",
+      "expect_failing": [
+        "test_g1_reads_the_rvol_baseline_from_before_the_window"
+      ]
+    },
+    {
+      "name": "history never reaches the slot baselines",
+      "file": "backend/src/scanner/domain/common/rvol.py",
+      "old": "            slots.setdefault((open_time.hour, open_time.minute), []).append(volume)",
+      "new": "            slots.setdefault((open_time.hour, open_time.minute), [])",
+      "expect_failing": [
+        "test_a_candle_reads_the_same_rvol_wherever_the_window_starts",
+        "test_momentum_participation_reads_the_baseline_before_the_window"
+      ]
+    },
+    {
+      "name": "a candle is part of its own baseline",
+      "file": "backend/src/scanner/domain/common/rvol.py",
+      "old": "        sample = earlier[-needed:]\n        earlier.append(candle.volume)",
+      "new": "        earlier.append(candle.volume)\n        sample = earlier[-needed:]",
+      "expect_failing": [
+        "test_without_history_every_value_is_the_window_only_reading"
+      ]
+    },
+    {
+      "name": "the intraday history is one day short",
+      "file": "backend/src/scanner/domain/common/rvol.py",
+      "old": "        return timedelta(days=BASELINE_DAYS)",
+      "new": "        return timedelta(days=BASELINE_DAYS - 1)",
+      "expect_failing": [
+        "test_a_candle_reads_the_same_rvol_wherever_the_window_starts"
+      ]
+    },
+    {
+      "name": "the rolling history is one candle short",
+      "file": "backend/src/scanner/domain/common/rvol.py",
+      "old": "    return timeframe.duration * BASELINE_CANDLES",
+      "new": "    return timeframe.duration * (BASELINE_CANDLES - 1)",
+      "expect_failing": [
+        "test_the_rvol_baseline_is_read_from_before_the_window"
+      ]
+    },
+    {
+      "name": "the supplied series is ignored",
+      "file": "backend/src/scanner/domain/common/rvol.py",
+      "old": "    if rvols is not None:\n        return rvols[index]",
+      "new": "    if False:\n        return rvols[index]",
+      "expect_failing": [
+        "test_the_rvol_baseline_is_read_from_before_the_window",
+        "test_g1_reads_the_rvol_baseline_from_before_the_window",
+        "test_momentum_participation_reads_the_baseline_before_the_window",
+        "test_the_momentum_phase_reads_the_supplied_baseline",
+        "test_each_volume_detector_reads_the_supplied_baseline"
+      ]
+    },
+    {
+      "name": "the spike detector reads the window only",
+      "file": "backend/src/scanner/domain/volume/detectors.py",
+      "old": "    rvol = rvol_at(candles, index, rvols)",
+      "new": "    rvol = rvol_at(candles, index, None)",
+      "expect_failing": [
+        "test_each_volume_detector_reads_the_supplied_baseline",
+        "test_the_rvol_baseline_is_read_from_before_the_window"
+      ]
+    },
+    {
+      "name": "expansion reads the window only",
+      "file": "backend/src/scanner/domain/volume/detectors.py",
+      "old": "    readings = [rvol_at(candles, i, rvols) for i in (index - 2, index - 1, index)]",
+      "new": "    readings = [rvol_at(candles, i, None) for i in (index - 2, index - 1, index)]",
+      "expect_failing": [
+        "test_each_volume_detector_reads_the_supplied_baseline"
+      ]
+    },
+    {
+      "name": "contraction reads the window only",
+      "file": "backend/src/scanner/domain/volume/detectors.py",
+      "old": "    readings = [rvol_at(candles, i, rvols) for i in window]",
+      "new": "    readings = [rvol_at(candles, i, None) for i in window]",
+      "expect_failing": [
+        "test_each_volume_detector_reads_the_supplied_baseline"
+      ]
+    },
+    {
+      "name": "the abnormal-volume check reads the window only",
+      "file": "backend/src/scanner/domain/volume/detectors.py",
+      "old": "    if classify(rvol_at(candles, index, rvols)) is not RvolClass.ABNORMAL:",
+      "new": "    if classify(rvol_at(candles, index, None)) is not RvolClass.ABNORMAL:",
+      "expect_failing": [
+        "test_each_volume_detector_reads_the_supplied_baseline"
+      ]
+    },
+    {
+      "name": "momentum participation reads the window only",
+      "file": "backend/src/scanner/domain/momentum/score.py",
+      "old": "        _participation_ratio(candles, index, dominant, counter, rvols),",
+      "new": "        _participation_ratio(candles, index, dominant, counter),",
+      "expect_failing": [
+        "test_momentum_participation_reads_the_baseline_before_the_window",
+        "test_the_momentum_phase_reads_the_supplied_baseline"
+      ]
+    },
+    {
+      "name": "the momentum phase reads the window only",
+      "file": "backend/src/scanner/domain/momentum/phases.py",
+      "old": "    now = momentum_score(candles, index, atrs=atrs, rvols=rvols)",
+      "new": "    now = momentum_score(candles, index, atrs=atrs)",
+      "expect_failing": [
+        "test_the_momentum_phase_reads_the_supplied_baseline"
+      ]
+    }
+  ]
+}

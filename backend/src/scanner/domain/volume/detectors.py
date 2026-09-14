@@ -15,7 +15,7 @@ from enum import Enum
 
 from scanner.domain.common import Candle, TradeAggregate
 from scanner.domain.common.atr import atr_at
-from scanner.domain.common.rvol import RvolClass, classify, median, relative_volume
+from scanner.domain.common.rvol import RvolClass, classify, median, rvol_at
 
 # P.volume.spike_floor -- an absolute quote-volume floor so a micro-cap's $8k
 # "spike" cannot score merely by being 5x its own tiny baseline (§6.2).
@@ -61,9 +61,11 @@ def delta_pct(candle: Candle) -> Decimal | None:
 def detect_volume_spike(
     candles: Sequence[Candle],
     index: int,
+    *,
+    rvols: Sequence[Decimal | None] | None = None,
 ) -> VolumeSpike | None:
     """§6.2. SPIKE or ABNORMAL class **and** the absolute quote floor."""
-    rvol = relative_volume(candles, index)
+    rvol = rvol_at(candles, index, rvols)
     rvol_class = classify(rvol)
 
     if rvol is None or rvol_class is None:
@@ -117,6 +119,7 @@ def detect_expansion(
     index: int,
     *,
     atrs: Sequence[Decimal | None] | None = None,
+    rvols: Sequence[Decimal | None] | None = None,
 ) -> VolumeExpansion | None:
     """§6.3 expansion: three rising volumes, mean RVOL >= 1.2, real progress.
 
@@ -143,12 +146,12 @@ def detect_expansion(
     if not (third.volume > second.volume > first.volume):
         return None
 
-    rvols = [relative_volume(candles, i) for i in (index - 2, index - 1, index)]
+    readings = [rvol_at(candles, i, rvols) for i in (index - 2, index - 1, index)]
 
-    if any(value is None for value in rvols):
+    if any(value is None for value in readings):
         return None
 
-    mean_rvol = sum((value for value in rvols if value is not None), Decimal(0)) / 3
+    mean_rvol = sum((value for value in readings if value is not None), Decimal(0)) / 3
 
     if mean_rvol < EXPANSION_MEAN_RVOL:
         return None
@@ -171,6 +174,7 @@ def detect_contraction(
     index: int,
     *,
     atrs: Sequence[Decimal | None] | None = None,
+    rvols: Sequence[Decimal | None] | None = None,
 ) -> bool:
     """§6.3 contraction: five-candle mean RVOL and mean range both compressed.
 
@@ -183,13 +187,13 @@ def detect_contraction(
 
     window = range(index - CONTRACTION_WINDOW + 1, index + 1)
 
-    rvols = [relative_volume(candles, i) for i in window]
+    readings = [rvol_at(candles, i, rvols) for i in window]
 
-    if any(value is None for value in rvols):
+    if any(value is None for value in readings):
         return False
 
     mean_rvol = (
-        sum((value for value in rvols if value is not None), Decimal(0)) / CONTRACTION_WINDOW
+        sum((value for value in readings if value is not None), Decimal(0)) / CONTRACTION_WINDOW
     )
 
     if mean_rvol > CONTRACTION_MEAN_RVOL:
@@ -250,6 +254,7 @@ def cross_validate_abnormal_volume(
     *,
     depth: Decimal | None = None,
     median_depth_7d: Decimal | None = None,
+    rvols: Sequence[Decimal | None] | None = None,
 ) -> AbnormalVolumeCheck | None:
     """§6.4, for a candle whose RVOL class is ABNORMAL. None if it is not.
 
@@ -265,7 +270,7 @@ def cross_validate_abnormal_volume(
     if index < 0 or index >= len(candles):
         return None
 
-    if classify(relative_volume(candles, index)) is not RvolClass.ABNORMAL:
+    if classify(rvol_at(candles, index, rvols)) is not RvolClass.ABNORMAL:
         return None
 
     return AbnormalVolumeCheck(
