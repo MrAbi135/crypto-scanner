@@ -2228,6 +2228,53 @@ async def test_a_breaker_that_failed_its_first_retest_is_not_a2() -> None:
     assert next(c for c in report.candidates if c.direction == "UP").archetype != "A2"
 
 
+def _breaker_under_a_better_ob() -> dict:
+    """A MITIGATED breaker (BRK_A 50 + no state points) beside a FRESH OB_A
+    (40 + 25), both at price: the OB is the best-ranked zone, a breaker has
+    still formed. The shape one of 473 live setups had."""
+    setup = bullish_setup()
+    setup["zones"] = [
+        zone("brk", zone_type="BREAKER", grade="BRK_A", state="MITIGATED"),
+        zone("ob", zone_type="OB", grade="OB_A", state="FRESH"),
+    ]
+    return setup
+
+
+@pytest.mark.asyncio
+async def test_a2_does_not_borrow_another_zones_respect_and_confirmation() -> None:
+    """§8.6 A2 is one breaker's story. The OB's own first retest held and it
+    carries a Confirmation, but the breaker was never retested -- A2 must not
+    close by taking the breaker from one zone and the retest from another."""
+    svc, _ = service(
+        **_breaker_under_a_better_ob(),
+        htf_trend="BULLISH",
+        interactions={
+            "ob": [interaction("ob", "RESPECT", 40), interaction("ob", "CONFIRMATION", 41)]
+        },
+    )
+
+    up = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
+
+    assert up.gates_passed
+    assert up.archetype != "A2"
+
+
+@pytest.mark.asyncio
+async def test_a2_reads_the_breakers_own_first_retest_when_it_is_not_the_best_zone() -> None:
+    """The mirror: the breaker's own first retest held while a better-ranked OB
+    sits beside it. That is A2 -- BRK_A grade satisfies the last link."""
+    svc, _ = service(
+        **_breaker_under_a_better_ob(),
+        htf_trend="BULLISH",
+        interactions={"brk": [interaction("brk", "RESPECT", 40)]},
+    )
+
+    up = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
+
+    assert up.gates_passed
+    assert up.archetype == "A2"
+
+
 @pytest.mark.asyncio
 async def test_a_breaker_with_no_interaction_history_is_not_a2() -> None:
     setup = bullish_setup()
