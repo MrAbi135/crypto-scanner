@@ -13,6 +13,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -102,4 +103,11 @@ class IctZoneInteractionRow(Base):
     evidence: Mapped[str] = mapped_column(
         Text,
         nullable=False,
+    )
+
+    # Write time (migration 022): NULL for rows written before it existed.
+    recorded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=True,
     )
