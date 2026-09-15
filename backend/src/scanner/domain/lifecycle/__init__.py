@@ -12,6 +12,7 @@ from scanner.domain.lifecycle.payload import (
     SignalPayload,
     SuppressionReason,
     publication_checks,
+    tier_permits_publication,
 )
 from scanner.domain.lifecycle.state import (
     TERMINAL_STATES,
@@ -36,4 +37,5 @@ __all__ = [
     "may_transition",
     "observe",
     "publication_checks",
+    "tier_permits_publication",
 ]

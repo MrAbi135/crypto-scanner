@@ -77,6 +77,12 @@ class IngestSettings(BaseProcessSettings):
 class EngineSettings(BaseProcessSettings):
     health_port: int = Field(default=8002, gt=0, le=65535)
 
+    # Timeframes whose candidates may publish a signal. Owner ruling
+    # 2026-09-15: H1 and H4 only for now -- M15 and M5 compute RVOL, volume and
+    # momentum facts and record setups, but publishing on them is a separate
+    # decision. §0.3's Tier-1-only rule for M5 applies whatever is listed here.
+    signal_timeframes: str = "H1,H4"
+
 
 class WorkerSettings(BaseProcessSettings):
     health_port: int = Field(default=8003, gt=0, le=65535)

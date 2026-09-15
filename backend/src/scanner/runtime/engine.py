@@ -24,6 +24,7 @@ from scanner.application.detection.candle_close_consumer import CandleCloseConsu
 from scanner.application.detection.confluence_replay import CONFLUENCE_ALGO_VERSION
 from scanner.application.detection.trailing_window import TrailingWindowRunner
 from scanner.application.immutability_verification import verify_immutability_guards
+from scanner.application.marketdata.contexts import parse_signal_timeframes
 from scanner.application.param_set_verification import verify_parameter_set
 from scanner.application.ports.event_consumer import CANDLE_GROUP
 from scanner.application.ports.event_stream import CANDLE_STREAM
@@ -243,6 +244,7 @@ def main() -> None:
             redis_client,
             clock,
             metrics,
+            signal_timeframes=parse_signal_timeframes(settings.signal_timeframes),
         )
 
         name = _consumer_name()

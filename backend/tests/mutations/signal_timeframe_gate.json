@@ -1,0 +1,116 @@
+{
+  "description": "Signal publication gates (owner ruling 2026-09-15, confluence s8-confluence-v32): candidates publish only on the configured signal timeframes (default H1,H4 -- M15/M5 publishing is a separate decision after M8), and on M5 only for a Tier 1 symbol (SLS 0.3, whatever the configured set). Each mutation opens one gate, breaks its reason, or loses the fail-closed default on the way from settings to the service. Deterministic tests, so one battery run is a verdict. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/signal_timeframe_gate.json",
+  "pytest": [
+    "tests/unit/domain/lifecycle/test_payload.py",
+    "tests/unit/application/detection/test_confluence_replay.py",
+    "tests/unit/runtime/test_detection_wiring.py",
+    "tests/unit/config/test_signal_timeframes.py"
+  ],
+  "mutations": [
+    {
+      "name": "the published-timeframe set is ignored",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "            timeframe_published=timeframe in self._signal_timeframes,",
+      "new": "            timeframe_published=True,",
+      "expect_failing": [
+        "test_a_candidate_on_an_unpublished_timeframe_is_suppressed_with_its_reason"
+      ]
+    },
+    {
+      "name": "the tier gate is ignored",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "            tier_permitted=await self._tier_permits(symbol, timeframe),",
+      "new": "            tier_permitted=True,",
+      "expect_failing": [
+        "test_m5_never_publishes_below_tier_1_even_when_m5_is_published"
+      ]
+    },
+    {
+      "name": "M5 skips the universe-state read",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        if timeframe is not Timeframe.M5:\n            return True\n\n        state = await self._symbols.get_universe_state(symbol)",
+      "new": "        if True:\n            return True\n\n        state = await self._symbols.get_universe_state(symbol)",
+      "expect_failing": [
+        "test_m5_never_publishes_below_tier_1_even_when_m5_is_published",
+        "test_a_tier_1_m5_candidate_publishes_once_m5_is_published"
+      ]
+    },
+    {
+      "name": "every timeframe reads the universe state",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        if timeframe is not Timeframe.M5:\n            return True\n\n        state = await self._symbols.get_universe_state(symbol)",
+      "new": "        if False:\n            return True\n\n        state = await self._symbols.get_universe_state(symbol)",
+      "expect_failing": [
+        "test_a_candidate_on_an_unpublished_timeframe_is_suppressed_with_its_reason",
+        "test_an_h4_candidate_publishes_by_default_without_reading_a_tier"
+      ]
+    },
+    {
+      "name": "any known tier may publish on M5",
+      "file": "backend/src/scanner/domain/lifecycle/payload.py",
+      "old": "    return tier is UniverseTier.T1",
+      "new": "    return tier is not None",
+      "expect_failing": [
+        "test_m5_publishes_for_tier_1_only_and_every_other_timeframe_is_open",
+        "test_m5_never_publishes_below_tier_1_even_when_m5_is_published"
+      ]
+    },
+    {
+      "name": "an unpublished timeframe records no reason",
+      "file": "backend/src/scanner/domain/lifecycle/payload.py",
+      "old": "    if not timeframe_published:\n        reasons.append(SuppressionReason.TIMEFRAME_NOT_PUBLISHED)",
+      "new": "    if False:\n        reasons.append(SuppressionReason.TIMEFRAME_NOT_PUBLISHED)",
+      "expect_failing": [
+        "test_a_timeframe_outside_the_published_set_is_suppressed_with_its_reason",
+        "test_a_candidate_on_an_unpublished_timeframe_is_suppressed_with_its_reason"
+      ]
+    },
+    {
+      "name": "a refused tier records no reason",
+      "file": "backend/src/scanner/domain/lifecycle/payload.py",
+      "old": "    if not tier_permitted:\n        reasons.append(SuppressionReason.TIER_NOT_PERMITTED)",
+      "new": "    if False:\n        reasons.append(SuppressionReason.TIER_NOT_PERMITTED)",
+      "expect_failing": [
+        "test_a_tier_the_timeframe_does_not_permit_is_suppressed_with_its_reason",
+        "test_m5_never_publishes_below_tier_1_even_when_m5_is_published"
+      ]
+    },
+    {
+      "name": "the service default publishes every timeframe",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "DEFAULT_SIGNAL_TIMEFRAMES: frozenset[Timeframe] = frozenset({Timeframe.H1, Timeframe.H4})",
+      "new": "DEFAULT_SIGNAL_TIMEFRAMES: frozenset[Timeframe] = frozenset(Timeframe)",
+      "expect_failing": [
+        "test_a_candidate_on_an_unpublished_timeframe_is_suppressed_with_its_reason",
+        "test_confluence_publishes_h1_and_h4_when_nothing_is_configured"
+      ]
+    },
+    {
+      "name": "the engine setting defaults to every ingested timeframe",
+      "file": "backend/src/scanner/config/processes.py",
+      "old": "    signal_timeframes: str = \"H1,H4\"",
+      "new": "    signal_timeframes: str = \"M5,M15,H1,H4\"",
+      "expect_failing": [
+        "test_the_engine_publishes_h1_and_h4_unless_told_otherwise"
+      ]
+    },
+    {
+      "name": "the configured set never reaches confluence",
+      "file": "backend/src/scanner/runtime/wiring/detection.py",
+      "old": "            signal_timeframes=signal_timeframes,\n",
+      "new": "",
+      "expect_failing": [
+        "test_the_configured_published_set_reaches_confluence"
+      ]
+    },
+    {
+      "name": "an empty published set is accepted",
+      "file": "backend/src/scanner/application/marketdata/contexts.py",
+      "old": "    if not parsed:\n        raise ValidationError(\"at least one signal timeframe is required\")",
+      "new": "    if False:\n        raise ValidationError(\"at least one signal timeframe is required\")",
+      "expect_failing": [
+        "test_an_empty_or_repeated_set_is_refused"
+      ]
+    }
+  ]
+}
