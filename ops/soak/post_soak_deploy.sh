@@ -108,7 +108,7 @@ remote_rev=$(git rev-parse origin/main)
 # s6-v4) or passes while proving nothing about what is being shipped.
 grep -qF 's4-v10' backend/src/scanner/application/detection/structure_replay.py   || fail "#271 missing: STRUCTURE_ALGO_VERSION is not s4-v10 (structure facts in candle order)"
 grep -qF 's6-structure-shift-v5' backend/src/scanner/application/detection/structure_shift_replay.py   || fail "#270 missing: the shift engine does not resume"
-grep -qF 's5-v14' backend/src/scanner/application/detection/liquidity_replay.py   || fail "#269/#272 missing: LIQUIDITY_ALGO_VERSION is not s5-v14"
+grep -qF 's5-v15' backend/src/scanner/application/detection/liquidity_replay.py   || fail "maturation fix missing: LIQUIDITY_ALGO_VERSION is not s5-v15"
 grep -qF 's6-v6' backend/src/scanner/application/detection/ict_replay.py   || fail "#272 missing: ICT_ALGO_VERSION is not s6-v6"
 grep -qF 's6-ote-v6' backend/src/scanner/application/detection/ict_ote_replay.py   || fail "#272 missing: ICT_OTE_ALGO_VERSION is not s6-ote-v6"
 grep -qF 's6-ob-v8' backend/src/scanner/application/detection/ict_ob_replay.py   || fail "#272 missing: ICT_OB_ALGO_VERSION is not s6-ob-v8"
@@ -250,7 +250,7 @@ step "5. Verify the RUNNING containers, not the tree"
 
 docker exec scanner-dev-engine-1 grep -qF 's4-v10' /app/src/scanner/application/detection/structure_replay.py   || fail "running engine: STRUCTURE_ALGO_VERSION is not s4-v10 (structure facts in candle order)"
 docker exec scanner-dev-engine-1 grep -qF 's6-structure-shift-v5' /app/src/scanner/application/detection/structure_shift_replay.py   || fail "running engine: the shift engine does not resume"
-docker exec scanner-dev-engine-1 grep -qF 's5-v14' /app/src/scanner/application/detection/liquidity_replay.py   || fail "running engine: LIQUIDITY_ALGO_VERSION is not s5-v14"
+docker exec scanner-dev-engine-1 grep -qF 's5-v15' /app/src/scanner/application/detection/liquidity_replay.py   || fail "running engine: LIQUIDITY_ALGO_VERSION is not s5-v15"
 docker exec scanner-dev-engine-1 grep -qF 's6-v6' /app/src/scanner/application/detection/ict_replay.py   || fail "running engine: ICT_ALGO_VERSION is not s6-v6"
 docker exec scanner-dev-engine-1 grep -qF 's6-ote-v6' /app/src/scanner/application/detection/ict_ote_replay.py   || fail "running engine: ICT_OTE_ALGO_VERSION is not s6-ote-v6"
 docker exec scanner-dev-engine-1 grep -qF 's6-ob-v8' /app/src/scanner/application/detection/ict_ob_replay.py   || fail "running engine: ICT_OB_ALGO_VERSION is not s6-ob-v8"

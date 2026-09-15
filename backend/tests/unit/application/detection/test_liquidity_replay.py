@@ -831,6 +831,171 @@ async def test_a_displacement_that_moves_to_a_later_candle_is_not_published_twic
     assert displaced[0].event_at == candles[sweep_index + 1].close_time
 
 
+def _bsl_sweep_through_100(candles: list[Candle], sweep_index: int) -> LiquidityTransitionRecord:
+    """A BSL sweep of 100 to 102, closed back at 99, confirmed on `sweep_index`."""
+    return LiquidityTransitionRecord(
+        transition_id="t-sweep",
+        pool_id="pool-1",
+        symbol="BTCUSDT",
+        timeframe=Timeframe.M5,
+        from_state="ACTIVE",
+        to_state="SWEPT",
+        reason="liquidity_sweep",
+        transitioned_at=candles[sweep_index].close_time,
+        candle_index=497,
+        evidence=json.dumps(
+            {
+                "pool_id": "pool-1",
+                "side": "BSL",
+                "liquidity_class": "EXTERNAL",
+                "reference_level": "100",
+                "penetration_price": "102",
+                "close_back_price": "99",
+                "sweep_depth_atr": "1.2",
+                "confirmation_window": 1,
+                "gap_sweep": False,
+                "reclaimed": False,
+                "displaced_after": False,
+                "setup_expiry_index": 512,
+            }
+        ),
+    )
+
+
+def _bearish_displacement_on(monkeypatch: pytest.MonkeyPatch) -> set[int]:
+    """The candle indices §5.10 reports a bearish displacement on -- window-start
+    ATR drift is exactly a change in this set between passes."""
+    import scanner.application.detection.liquidity_replay as liquidity_module
+    from scanner.domain.ict.displacement import Displacement, DisplacementDirection
+
+    on: set[int] = set()
+
+    def displacement(series, index, *, atr):
+        if index not in on:
+            return None
+
+        return Displacement(
+            candle_index=index,
+            direction=DisplacementDirection.BEARISH,
+            body=Decimal("4.5"),
+            candle_range=Decimal("5"),
+            mean_body_20=Decimal("1"),
+            atr=atr,
+            body_multiple=Decimal("4.5"),
+            range_multiple=Decimal("3"),
+            close_position=Decimal("0.1"),
+        )
+
+    monkeypatch.setattr(liquidity_module, "detect_displacement", displacement)
+
+    return on
+
+
+@pytest.mark.asyncio
+async def test_a_displacement_on_a_candle_an_earlier_pass_decided_is_not_published(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Audit M3, in the maturation walk. A pass judged the candle after a sweep
+    against its own window's ATR and found no displacement; a later pass, its
+    window start moved, found one and published it. On the host that was a
+    LINKUSDT M5 LIQUIDITY_SWEEP_DISPLACED written 456 periods after its candle
+    (2026-09-15). The decided candle keeps its answer; an undecided one is
+    still judged."""
+    candles = pad_for_warmup(
+        [
+            make_candle(0, open_="97", high="99", low="97", close="98"),
+            make_candle(1, open_="99", high="102", low="98", close="99"),
+            make_candle(2, open_="99", high="99", low="94", close="94.5"),
+            make_candle(3, open_="94.5", high="95", low="93.5", close="94"),
+        ]
+    )
+    sweep_index = len(candles) - 3
+    displacing = _bearish_displacement_on(monkeypatch)
+
+    async def displaced(*, on: int, decided_before: int) -> list[datetime]:
+        service, transitions, events = _maturation_service(candles, FakePools(make_pool()))
+        transitions.items.append(_bsl_sweep_through_100(candles, sweep_index))
+        displacing.clear()
+        displacing.add(on)
+
+        await service._mature_recent_sweeps(
+            "BTCUSDT",
+            Timeframe.M5,
+            candles,
+            wilder_atr_series(candles),
+            decided_before=decided_before,
+        )
+
+        return [e.event_at for e in events.items if e.event_type == "LIQUIDITY_SWEEP_DISPLACED"]
+
+    # The premise: undecided, the same displacement is published.
+    assert await displaced(on=sweep_index + 1, decided_before=0) == [
+        candles[sweep_index + 1].close_time
+    ]
+    assert await displaced(on=sweep_index + 1, decided_before=sweep_index + 2) == []
+    assert await displaced(on=sweep_index + 2, decided_before=sweep_index + 2) == [
+        candles[sweep_index + 2].close_time
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_stop_hunt_published_on_a_decided_candle_still_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Not judging a decided candle again must not forget what it decided. The
+    hunt published there is what later candles fail -- so when a later pass's
+    ATR no longer shows its displacement, the hunt is replayed from the
+    published fact and its failure is still recorded."""
+    candles = pad_for_warmup(
+        [
+            make_candle(0, open_="97", high="99", low="97", close="98"),
+            # The sweep of 100: wick to 102, close back at 99. Midpoint 98.
+            make_candle(1, open_="99", high="102", low="94", close="99"),
+            # Displaces, closing above the midpoint: displaced, no hunt yet.
+            make_candle(2, open_="99.8", high="99.9", low="98.9", close="99"),
+            # Displaces below the midpoint two candles after: the stop hunt.
+            make_candle(3, open_="99", high="99", low="94", close="94.5"),
+            # Closes above the sweep's 102 extreme: the hunt fails.
+            make_candle(4, open_="95", high="103", low="95", close="102.5"),
+        ]
+    )
+    sweep_index = len(candles) - 4
+    displacing = _bearish_displacement_on(monkeypatch)
+
+    async def facts(*, decided_before: int) -> list[str]:
+        service, transitions, events = _maturation_service(candles, FakePools(make_pool()))
+        transitions.items.append(_bsl_sweep_through_100(candles, sweep_index))
+
+        # Pass 1: the hunt candle is the newest, and displaces.
+        displacing.update({sweep_index + 1, sweep_index + 2})
+        first = candles[:-1]
+        await service._mature_recent_sweeps(
+            "BTCUSDT", Timeframe.M5, first, wilder_atr_series(first)
+        )
+
+        # Pass 2: one candle later, and the drifted ATR shows no displacement.
+        displacing.clear()
+        await service._mature_recent_sweeps(
+            "BTCUSDT",
+            Timeframe.M5,
+            candles,
+            wilder_atr_series(candles),
+            decided_before=decided_before,
+        )
+
+        return [e.event_type for e in events.items]
+
+    judged_again = await facts(decided_before=0)
+    decided = await facts(decided_before=len(candles) - 1)
+
+    # The premise: pass 1 published the hunt, and judging again loses its failure.
+    assert judged_again.count("LIQUIDITY_STOP_HUNT") == 1
+    assert "LIQUIDITY_STOP_HUNT_FAILED" not in judged_again
+
+    assert decided.count("LIQUIDITY_STOP_HUNT") == 1
+    assert decided.count("LIQUIDITY_STOP_HUNT_FAILED") == 1
+
+
 @pytest.mark.asyncio
 async def test_a_close_back_after_the_expiry_window_is_not_a_reclaim() -> None:
     """§4.6: the reclaim window is `sweep_expiry = 15` closed candles."""

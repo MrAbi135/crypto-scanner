@@ -402,6 +402,92 @@ async def test_no_pool_is_born_on_a_candle_an_earlier_pass_decided() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_pass_publishes_no_displacement_on_a_candle_it_decided_before(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Audit M3 through `run`: the pass hands the maturation walk the candle
+    its previous pass decided. Pass 1 ends on the candle after the sweep and
+    finds no displacement there; pass 2, one candle later, does (the ATR drift
+    a moved window start brings). Decided, nothing is published; with no state
+    the same two passes publish it."""
+    from tests.golden.harness.memory import InMemoryCandleRepository, InMemoryEngineStateStore
+
+    import scanner.application.detection.liquidity_replay as liquidity_module
+    from scanner.application.detection.state import LIQUIDITY_NAMESPACE, EngineStateManager
+    from scanner.domain.ict.displacement import Displacement, DisplacementDirection
+
+    # Padded without its last candle, so pass 1's window clears §1.9's floor
+    # too: a first draft padded all four, pass 1 fell one candle short and
+    # returned before sweeping or recording anything, and pass 2 was then a
+    # first pass that proved nothing.
+    candles = [
+        *pad_for_warmup(
+            [
+                bar(0, open_="97", high="99", low="97", close="98"),
+                bar(1, open_="99", high="102", low="98", close="99"),
+                bar(2, open_="99", high="99", low="94", close="94.5"),
+            ]
+        ),
+        bar(3, open_="94.5", high="95", low="93.5", close="94"),
+    ]
+    displacement_candle = candles[-2]
+    drifted = {"on": False}
+
+    def displacement(series, index, *, atr):
+        if not drifted["on"] or series[index].open_time != displacement_candle.open_time:
+            return None
+
+        return Displacement(
+            candle_index=index,
+            direction=DisplacementDirection.BEARISH,
+            body=Decimal("4.5"),
+            candle_range=Decimal("5"),
+            mean_body_20=Decimal("1"),
+            atr=atr,
+            body_multiple=Decimal("4.5"),
+            range_multiple=Decimal("3"),
+            close_position=Decimal("0.1"),
+        )
+
+    monkeypatch.setattr(liquidity_module, "detect_displacement", displacement)
+
+    async def displaced(state: EngineStateManager | None) -> list[datetime]:
+        stores = Stores()
+        await stores.pools.upsert(
+            pool("p-current", version=LIQUIDITY_ALGO_VERSION, created_at=candles[-5].close_time)
+        )
+
+        for window, drift in ((candles[:-1], False), (candles, True)):
+            drifted["on"] = drift
+            await LiquidityReplayService(
+                InMemoryCandleRepository(window),
+                stores.pools,
+                stores.transitions,
+                stores.events,
+                stores.snapshots,
+                stores.evidence,
+                FixedClock(),
+                state=state,
+            ).run(SYMBOL, TF, window[0].open_time, window[-1].open_time + TF.duration)
+
+            # The premise, from pass 1 on: the pool is swept, so pass 2 is not
+            # a version's first pass.
+            assert "LIQUIDITY_SWEEP" in stores.facts_about("p-current")
+
+        return [
+            e.event_at for e in stores.events.events if e.event_type == "LIQUIDITY_SWEEP_DISPLACED"
+        ]
+
+    assert await displaced(None) == [displacement_candle.close_time]
+    assert (
+        await displaced(
+            EngineStateManager(InMemoryEngineStateStore(), namespace=LIQUIDITY_NAMESPACE)
+        )
+        == []
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_level_held_by_another_version_does_not_absorb_this_versions_pool() -> None:
     """§4.2's dedup asks whether a level is already this map's. A previous
     version's pool at the same price is not: absorbed into it, this version
