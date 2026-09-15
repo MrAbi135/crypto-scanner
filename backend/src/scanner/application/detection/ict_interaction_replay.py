@@ -9,6 +9,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
+from scanner.application.detection.state import (
+    EngineStateManager,
+    StructureEngineState,
+    first_undecided_index,
+)
 from scanner.application.detection.window_time import rebased_indices
 from scanner.application.ports import CandleRepository
 from scanner.application.ports.ict_zone_interactions import (
@@ -49,10 +54,25 @@ from scanner.shared import Timeframe
 # 501-candle window -- and never received a single interaction (FVG 0 of
 # 1,928; A2 matched 0 of 473 setups). OTE, born at 490-495, re-walked only
 # its last few candles.
-ICT_INTERACTION_ALGO_VERSION = "s6-interaction-v5"
+# v6: each candle is decided once, and a zone retired on an undecided candle
+# is still walked to it (audit M3 + harness parity). The pass read only live
+# zones, but the lifecycles run first: a zone killed on the newest candle was
+# already terminal, so that candle's interactions were never written -- on the
+# host no FVG, IFVG, BPR, OB or mitigation-block VIOLATION since the deploy
+# (OB 0 of 2,055 interactions while 293 were invalidated). The golden harness
+# listed every zone, so it recorded them and certified behaviour production
+# lacked. Re-walking the whole window instead re-decides old candles against a
+# window-start ATR: the harness wrote 426 interactions > 100 candles late on
+# DOGEUSDT M15. The MAX_ZONES bound is gone too (owner ruling M9: it bounds
+# scoring, not which zones' facts are recorded).
+ICT_INTERACTION_ALGO_VERSION = "s6-interaction-v6"
 
 _ATR_PERIOD = 14
 _CONFIRMATION_MAX_LTF_CANDLES = 5
+# A RESPECT's confirmation reads up to five lower-timeframe candles after it,
+# which close within two candles of this timeframe (M15 -> M5 is three to one),
+# so the newest two decided candles are walked again for it.
+_CONFIRMATION_REWALK = 2
 _ZERO = Decimal("0")
 
 # One definition, in the domain beside the state machines that produce them.
@@ -83,11 +103,16 @@ class IctZoneInteractionReplayService:
         interactions: IctZoneInteractionRepository,
         *,
         algo_version: str = ICT_INTERACTION_ALGO_VERSION,
+        state: EngineStateManager | None = None,
     ) -> None:
         self._candles = candles
         self._context = context
         self._interactions = interactions
         self._algo_version = algo_version
+        # The last candle a pass decided and the zones it walked. Absent (the
+        # golden harness, `engine run` over a range), every pass walks its
+        # whole window.
+        self._state = state
 
     async def run(
         self,
@@ -117,9 +142,20 @@ class IctZoneInteractionReplayService:
         # Once per run, not once per candle per zone -- see `_atr_at`.
         atrs = wilder_atr_series(candles)
 
+        # Each candle decided once (audit M3): a zone an earlier pass walked is
+        # walked only from the first undecided candle (less the confirmation
+        # re-walk), and a zone the lifecycles retired on one of those candles
+        # is still read -- its killing candle's interactions are this pass's.
+        first_index = await first_undecided_index(
+            self._state, symbol, timeframe, self._algo_version, candles
+        )
+        rewalk_from = min(max(first_index - _CONFIRMATION_REWALK, 0), len(candles) - 1)
+        walked = await _walked_zone_ids(self._state, symbol, timeframe, self._algo_version)
+
         zones = await self._context.list_zones(
             symbol,
             timeframe,
+            terminal_since=candles[rewalk_from].open_time,
         )
 
         lower_timeframe = _lower_timeframe(timeframe)
@@ -173,6 +209,9 @@ class IctZoneInteractionReplayService:
             start_index = max(
                 0,
                 confirmed + 1,
+                # A zone not walked before (born since the last pass, an OTE's
+                # late confirmation included) is walked from its confirmation.
+                rewalk_from if record.zone_id in walked else 0,
             )
 
             if start_index >= len(candles):
@@ -285,6 +324,8 @@ class IctZoneInteractionReplayService:
 
             pending.clear()
 
+        await _record_walked(self._state, symbol, timeframe, self._algo_version, candles, zones)
+
         return IctInteractionReplayReport(
             symbol=symbol,
             timeframe=timeframe,
@@ -396,6 +437,49 @@ class IctZoneInteractionReplayService:
             close_through=False,
             evidence=evidence,
         )
+
+
+async def _walked_zone_ids(
+    state: EngineStateManager | None,
+    symbol: str,
+    timeframe: Timeframe,
+    algo_version: str,
+) -> frozenset[str]:
+    """The live zones the last pass walked; empty with no record of one."""
+    if state is None:
+        return frozenset()
+
+    saved = await state.load(symbol, timeframe.value, algo_version)
+
+    if saved is None or saved.detail is None:
+        return frozenset()
+
+    return frozenset(json.loads(saved.detail))
+
+
+async def _record_walked(
+    state: EngineStateManager | None,
+    symbol: str,
+    timeframe: Timeframe,
+    algo_version: str,
+    candles: Sequence[Candle],
+    zones: Sequence[IctZoneRecord],
+) -> None:
+    """This window's newest candle as decided, and the live zones it walked."""
+    if state is None or not candles:
+        return
+
+    await state.save(
+        StructureEngineState(
+            symbol=symbol,
+            timeframe=timeframe.value,
+            algo_version=algo_version,
+            last_processed_open_time=candles[-1].open_time.isoformat(),
+            detail=json.dumps(
+                sorted(zone.zone_id for zone in zones if zone.state not in _TERMINAL_STATES)
+            ),
+        )
+    )
 
 
 def _find_ltf_confirmation(

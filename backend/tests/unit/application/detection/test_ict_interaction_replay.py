@@ -73,7 +73,10 @@ class FakeContextRepository:
         self,
         symbol: str,
         timeframe: Timeframe,
+        *,
+        terminal_since: datetime | None = None,
     ) -> tuple[IctZoneRecord, ...]:
+        self.asked_terminal_since = terminal_since
         return tuple(
             zone for zone in self.zones if (zone.symbol == symbol and zone.timeframe is timeframe)
         )

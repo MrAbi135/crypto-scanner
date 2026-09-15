@@ -21,7 +21,7 @@ from scanner.application.ports.ict_zones import (
     IctZoneRecord,
     IctZoneTransitionRecord,
 )
-from scanner.domain.ict import MAX_ZONES, TERMINAL_ZONE_STATES, InteractionKind
+from scanner.domain.ict import TERMINAL_ZONE_STATES, InteractionKind
 from scanner.infrastructure.persistence.ict_zone_interaction_models import (
     IctZoneInteractionRow,
 )
@@ -199,46 +199,60 @@ class PgIctZoneInteractionContextRepository:
         self,
         symbol: str,
         timeframe: Timeframe,
+        *,
+        terminal_since: datetime | None = None,
     ) -> tuple[IctZoneRecord, ...]:
+        # §5 makes terminal states permanent, so a zone retired before
+        # `terminal_since` can never interact again. Returning every terminal
+        # zone had the interaction replay walk 3,934 zones on real BTCUSDT H1
+        # where 701 were still capable of anything.
+        #
+        # A zone retired at or after it still owes the candles up to its
+        # terminal one. The lifecycles run before the interaction pass, so a
+        # zone killed on the newest candle was already terminal when this read
+        # ran, and its VIOLATION was never recorded: on the host, 0 of 2,055 OB
+        # interactions after 293 order blocks were invalidated, and no FVG,
+        # IFVG, BPR or mitigation block violation at all.
+        live = IctZoneRow.state.notin_(sorted(TERMINAL_ZONE_STATES))
+        condition: sa.ColumnElement[bool] = live
+
+        if terminal_since is not None:
+            recently_retired = select(IctZoneTransitionRow.zone_id).where(
+                IctZoneTransitionRow.symbol == symbol,
+                IctZoneTransitionRow.timeframe == timeframe.value,
+                IctZoneTransitionRow.to_state.in_(sorted(TERMINAL_ZONE_STATES)),
+                IctZoneTransitionRow.transitioned_at >= terminal_since,
+            )
+            condition = sa.or_(live, IctZoneRow.zone_id.in_(recently_retired))
+
         async with self._sessions() as session:
             result = await session.execute(
                 select(IctZoneRow)
                 .where(
                     IctZoneRow.symbol == symbol,
                     IctZoneRow.timeframe == timeframe.value,
-                    # §5 makes terminal states permanent, so these zones can
-                    # never interact again. Returning them had the interaction
-                    # replay walk 3,934 zones on real BTCUSDT H1 where 701 were
-                    # still capable of anything -- five sixths of the largest
-                    # service's work, on zones that were dead.
-                    IctZoneRow.state.notin_(sorted(TERMINAL_ZONE_STATES)),
+                    condition,
                 )
                 # `created_at`, not `created_index` — the same correction
                 # `list_live` already carries. `created_index` is the zone's
                 # offset inside whichever 500-candle window first detected it,
                 # frozen there while the window slides on, so ordering by it
-                # sorts zones from different windows against each other by an
-                # accident of when the engine looked. That was survivable while
-                # this query returned everything; with the bound below it
-                # decides *which* zones exist as far as this service is
-                # concerned.
+                # sorts zones from different windows by an accident of when
+                # the engine looked.
                 .order_by(
                     IctZoneRow.created_at.desc(),
                     IctZoneRow.zone_type.asc(),
                     IctZoneRow.zone_id.asc(),
                 )
-                # §5.1's `P.ict.max_zones = 60`, which this path was missing
-                # while `list_live` had it. The consequence was not subtle:
-                # BTCUSDT M5 reached 33,807 live zones on the soak VM, every
-                # pass walked all of them (22s → 82s against a 2s target), and
-                # at 32,767 the transitions read below hit PostgreSQL's
-                # per-statement parameter ceiling and every pass began to fail.
-                #
-                # Bounding here rather than only downstream is what makes the
-                # two paths agree: §8 confluence sees 60 zones via `list_live`,
-                # so recording interactions for the other 33,747 was work whose
-                # output nothing read.
-                .limit(MAX_ZONES)
+                # No `MAX_ZONES` limit. §5.1's `P.ict.max_zones = 60` bounds what
+                # §8 scores (`list_live`), not which zones' interactions are
+                # recorded (owner ruling, audit M9): a zone outside the newest
+                # sixty got no interactions at all. The bound was added here
+                # when BTCUSDT M5 reached 33,807 live zones on the soak VM -- but
+                # those zones were live only because the lifecycles themselves
+                # read the newest sixty and never retired the rest, which #267
+                # fixed. `list_transitions_for` binds one array, so the id count
+                # no longer meets PostgreSQL's 32,767-parameter ceiling.
             )
 
             return tuple(_zone_record(row) for row in result.scalars().all())
@@ -282,10 +296,10 @@ class PgIctZoneInteractionContextRepository:
                     # into a soak, with every container still reporting
                     # healthy.
                     #
-                    # The bound in `list_zones` means the list is now sixty
-                    # long. This stays because a limit that has to hold for
-                    # correctness *and* for the query to parse is one limit
-                    # doing two jobs, and the next caller will not know that.
+                    # `list_zones` is unbounded (audit M9), so this is what keeps
+                    # a context with many live zones parseable: no limit that
+                    # has to hold for correctness also has to hold for the
+                    # statement to parse.
                     IctZoneTransitionRow.zone_id
                     == sa.any_(sa.cast(list(zone_ids), ARRAY(sa.String))),
                 )

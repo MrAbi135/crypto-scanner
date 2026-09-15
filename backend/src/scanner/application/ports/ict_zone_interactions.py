@@ -90,7 +90,15 @@ class IctZoneInteractionContextRepository(Protocol):
         self,
         symbol: str,
         timeframe: Timeframe,
-    ) -> tuple[IctZoneRecord, ...]: ...
+        *,
+        terminal_since: datetime | None = None,
+    ) -> tuple[IctZoneRecord, ...]:
+        """Every live zone, plus those retired at or after `terminal_since`.
+
+        A zone retired on a candle this pass has not decided still owes that
+        candle's interactions; one retired earlier cannot interact again.
+        """
+        ...
 
     async def list_transitions(
         self,
