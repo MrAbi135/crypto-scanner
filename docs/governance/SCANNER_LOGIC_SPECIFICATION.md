@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.8
-**Ratified:** 2026-07-12 · **Last amended:** 2026-08-30 (v1.0.8; see Amendment History)
+**Version:** 1.0.9
+**Ratified:** 2026-07-12 · **Last amended:** 2026-09-15 (v1.0.9; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -1158,6 +1158,39 @@ Every parameter change increments `param_set_version` and requires golden-datase
 ---
 
 ## Amendment History
+
+### v1.0.9 — 2026-09-15
+
+Six clarifications out of the 2026-09-14 look-ahead / window-start audit, ruled by
+the product owner: five on 2026-09-14 ("haan" to each recommended option) and the
+§3.1 record timing the same day ("3 candle ruk kar ek record"). **Unlike v1.0.6–
+v1.0.8, these change behaviour.** The engine serves a live close by replaying the
+500-candle window that ends at it; the audit measured facts about old candles
+written hundreds of candles after they closed (on the host, 48% of BOS rows more
+than a day late) because each pass re-decided the whole window from where it
+started. §0.2(2) already forbade retro-classification and §0.2(4) demands identical
+output from identical history; these entries say what those clauses require of an
+engine that works in sliding windows.
+
+| # | Section | Was | Now | Why |
+|---|---|---|---|---|
+| 1 | §0.2 | "a detection, once confirmed and emitted, is immutable"; silent on what counts as the history a detection may use | **Each candle is decided once.** A fact about a candle is decided on the pass for which that candle is the newest decidable one, from the history up to it, and is never created, removed or re-labelled by a later pass. A later window's first candles are its warm-up, not candles to decide again. | Wilder ATR and every "first in window" rule are seeded at the window's first candle, so a threshold decision about a candle there flipped as the start slid, and a later pass wrote a new fact about a candle up to 500 old (range expansion, compression, FVG gaps, displacements, pool epsilons, SEED labels, zone interactions). Replays after the fix: facts written more than 100 candles late 110 → 0 (BNBUSDT H1), 293 → 0 (DOGEUSDT M15). |
+| 2 | §3.1 | "every external swing is by construction also an internal swing; it is stored once with `strength = external`" — timing of that single record unstated | The single record is written when the external (k = 5) decision is made; the internal label (k = 2) is still written at k = 2. A pivot that is not promoted gets its internal record at k = 5. | Written at k = 2 and again at k = 5, one pivot carried two strength records whenever an earlier pass could not yet know the promotion (1,644 on the host), and a window start cutting a promoted pivot's left side re-wrote its internal twin ~496 candles late (1,162). |
+| 3 | §4.2 | "overlapping pools within `ε` merge", `ε` from §0.4, ATR source unstated | `ε` for a candidate level is taken from the ATR at the **newer** pool's confirmation candle. | Taken from the window's newest candle, one new close could move `ε` across a price tick and split or merge whole families of historical pools (14 pools born at once on SOLUSDT M15), whose lifecycles then back-wrote sweeps and, through §3.6, flipped days of CHoCH. |
+| 4 | §4.2 | merge order unstated | **Candle order alone decides** which level holds a zone: levels are claimed in order of confirmation, and a consumed level no longer absorbs. | The map depended on which pools a previous pass had persisted (the persisted ACTIVE pool claimed first), so the same candles produced different pools in a fresh window and an incremental one. |
+| 5 | §5.1, App. A | `P.ict.max_zones = 60` under Performance | The bound limits the zones **§8 scores**; it does not limit which zones' lifecycles and §5.9 interactions are evaluated. | Applied to the lifecycle and interaction reads, a zone outside the newest sixty never advanced or expired, and wrote its transitions late when it re-entered (a zone 472 candles late); `domain/ict/state.py` already stated the intended reading. |
+| 6 | §2.11 | "median of same time-of-day slot over prior 20 days" | The 20 prior days (20 prior candles on H4 and above) are read from **stored history**, not limited to the detection window. | A 500-candle H1 window holds twenty prior days for its newest ~21 candles and an M15 or M5 window for none, so RVOL was undefined on M15/M5 and §7.1's participation component changed with the window start. |
+
+**Impact review.** Detector and engine versions bumped with each change: structure
+s4-v10, structure-shift s6-structure-shift-v5, liquidity s5-v14, ICT s6-v6, OTE
+s6-ote-v6, OB s6-ob-v8, interactions s6-interaction-v6, participation
+s7-participation-v4, confluence s8-confluence-v31 (#265–#276). No parameter value
+changes, so no `param_set_version` bump. Golden datasets relabelled where an entry
+moved an expected output (five s4 datasets lose exactly one undecided tail
+SWING_INTERNAL; the s8 datasets' version-hashed ids), each with a dated note.
+The changes ship together as one release with one soak reset (owner ruling
+2026-09-14); the deploy itself awaits the product owner's approval.
+
 
 ### v1.0.8 — 2026-08-30
 
