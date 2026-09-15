@@ -127,7 +127,15 @@ from scanner.shared import Timeframe
 # sat deeper in the window became its own pool once its confirmation reached
 # them -- and that pass wrote its old sweep or break 477-486 candles late
 # (DOGEUSDT M15: five pools, each born at window index 12 with epsilon 0).
-LIQUIDITY_ALGO_VERSION = "s5-v14"
+# v15: a sweep's maturation decides each candle once too (audit M3). Every pass
+# re-walked each recent sweep across its whole maturation window and judged
+# displacement against this window's ATR, so a candle an earlier pass had found
+# no displacement on could find one after the window start moved: on the host a
+# LINKUSDT M5 LIQUIDITY_SWEEP_DISPLACED was written 456 periods after its candle,
+# over two hours after its own sweep and reclaim (2026-09-15). On a decided
+# candle a displacement now exists only where this sweep's stop hunt was
+# published; reclaim and hunt failure read closes alone and replay as before.
+LIQUIDITY_ALGO_VERSION = "s5-v15"
 
 _ATR_PERIOD = 14
 _SWEEP_SCAN_ATR = Decimal("3")
@@ -266,6 +274,10 @@ class LiquidityReplayService:
         # The walk judges every level on the candle that confirms it instead.
         seeds, known = await self._seed_levels(symbol, timeframe, candles)
 
+        decided_before = await first_undecided_index(
+            self._state, symbol, timeframe, self._algo_version, candles
+        )
+
         walk = _PoolMapWalk(
             candles,
             atrs,
@@ -279,9 +291,7 @@ class LiquidityReplayService:
             # A level confirmed on a candle an earlier pass decided, with no
             # row, never became a pool when that candle was newest; it is not
             # born now (audit M3).
-            decided_before=await first_undecided_index(
-                self._state, symbol, timeframe, self._algo_version, candles
-            ),
+            decided_before=decided_before,
             known=known,
         )
 
@@ -397,6 +407,7 @@ class LiquidityReplayService:
             timeframe,
             candles,
             atrs,
+            decided_before=decided_before,
         )
 
         active = await self._pools.list_active(
@@ -752,8 +763,14 @@ class LiquidityReplayService:
         timeframe: Timeframe,
         candles: Sequence[Candle],
         atrs: Sequence[Decimal | None],
+        *,
+        decided_before: int = 0,
     ) -> None:
         """Re-examine §4.6's maturing facts on every pass.
+
+        `decided_before` is the first candle of this window no earlier pass has
+        decided (audit M3); 0 judges the whole window, as a version's first pass
+        and the golden harness do.
 
         `reclaimed`, `displaced_after` and §4.7's stop hunt all concern candles
         that close AFTER the sweep confirms, and a live sweep confirms on the
@@ -809,6 +826,7 @@ class LiquidityReplayService:
                 candles,
                 atrs,
                 published,
+                decided_before=decided_before,
             )
 
     async def _published_sweep_facts(
@@ -817,8 +835,10 @@ class LiquidityReplayService:
         timeframe: Timeframe,
         start: datetime,
         end: datetime,
-    ) -> set[tuple[str, str]]:
-        facts: set[tuple[str, str]] = set()
+    ) -> dict[tuple[str, str], datetime]:
+        """What this version published, by (fact, sweep), with the candle it
+        named -- the walk replays a decided candle from it."""
+        facts: dict[tuple[str, str], datetime] = {}
 
         for event in await self._events.list_events(symbol, timeframe, start, end):
             if event.algo_version != self._algo_version or event.event_type not in _SWEEP_FACTS:
@@ -828,7 +848,7 @@ class LiquidityReplayService:
             pool_id = payload.get("pool_id") or payload.get("sweep_pool_id")
 
             if isinstance(pool_id, str):
-                facts.add((event.event_type, pool_id))
+                facts.setdefault((event.event_type, pool_id), event.event_at)
 
         return facts
 
@@ -839,7 +859,9 @@ class LiquidityReplayService:
         sweep: SweepEvent,
         candles: Sequence[Candle],
         atrs: Sequence[Decimal | None],
-        published: set[tuple[str, str]],
+        published: dict[tuple[str, str], datetime],
+        *,
+        decided_before: int,
     ) -> None:
         reversal = (
             DisplacementDirection.BEARISH
@@ -882,52 +904,62 @@ class LiquidityReplayService:
                     },
                 )
 
-            atr = _atr_at(atrs, index)
+            if index < decided_before:
+                # Decided on the pass where it was newest, against that window's
+                # ATR (audit M3). Judged again here it reads an ATR seeded at a
+                # later window start, and a "no" became a DISPLACED written 456
+                # periods late. What that pass's "yes" still has to drive is
+                # the stop hunt, whose failure later candles track -- so a
+                # decided candle displaces exactly where the hunt was published.
+                # Its DISPLACED needs no replay: it was published then, or it is
+                # not this pass's to publish.
+                reversed_here = candle.close_time == published.get(
+                    ("LIQUIDITY_STOP_HUNT", sweep.pool_id)
+                )
+            else:
+                atr = _atr_at(atrs, index)
+                displacement = detect_displacement(candles, index, atr=atr) if atr > 0 else None
+                reversed_here = displacement is not None and displacement.direction is reversal
 
-            if atr > 0:
-                displacement = detect_displacement(candles, index, atr=atr)
+            if reversed_here:
+                was_displaced = sweep.displaced_after
 
-                if displacement is not None and displacement.direction is reversal:
-                    was_displaced = sweep.displaced_after
+                sweep = mark_displaced_after(
+                    sweep,
+                    candle_index=index,
+                    displacement_in_reversal_direction=True,
+                )
 
-                    sweep = mark_displaced_after(
-                        sweep,
-                        candle_index=index,
-                        displacement_in_reversal_direction=True,
+                if sweep.displaced_after and not was_displaced:
+                    await self._append_sweep_fact_once(
+                        published,
+                        "LIQUIDITY_SWEEP_DISPLACED",
+                        symbol,
+                        timeframe,
+                        object_id=sweep.pool_id,
+                        event_at=candle.close_time,
+                        payload={
+                            "pool_id": sweep.pool_id,
+                            "side": sweep.side.value,
+                            "liquidity_class": sweep.liquidity_class.value,
+                            "displacement_close": str(candle.close),
+                            "sweep_confirmed_at": sweep.confirmed_at.isoformat(),
+                            "candles_since_confirmation": (index - sweep.confirmed_index),
+                        },
                     )
 
-                    if sweep.displaced_after and not was_displaced:
-                        await self._append_sweep_fact_once(
-                            published,
-                            "LIQUIDITY_SWEEP_DISPLACED",
-                            symbol,
-                            timeframe,
-                            object_id=sweep.pool_id,
-                            event_at=candle.close_time,
-                            payload={
-                                "pool_id": sweep.pool_id,
-                                "side": sweep.side.value,
-                                "liquidity_class": sweep.liquidity_class.value,
-                                "displacement_close": str(candle.close),
-                                "sweep_confirmed_at": sweep.confirmed_at.isoformat(),
-                                "candles_since_confirmation": (index - sweep.confirmed_index),
-                            },
-                        )
-
-                    if hunt is None:
-                        hunt = await self._record_stop_hunt(
-                            symbol,
-                            timeframe,
-                            sweep,
-                            candles,
-                            published,
-                            displacement_index=index,
-                            displacement_direction=(
-                                "DOWN"
-                                if displacement.direction is DisplacementDirection.BEARISH
-                                else "UP"
-                            ),
-                        )
+                if hunt is None:
+                    hunt = await self._record_stop_hunt(
+                        symbol,
+                        timeframe,
+                        sweep,
+                        candles,
+                        published,
+                        displacement_index=index,
+                        displacement_direction=(
+                            "DOWN" if reversal is DisplacementDirection.BEARISH else "UP"
+                        ),
+                    )
 
             if hunt is not None and not hunt.failed:
                 was_failed = hunt.failed
@@ -963,7 +995,7 @@ class LiquidityReplayService:
         timeframe: Timeframe,
         sweep: SweepEvent,
         candles: Sequence[Candle],
-        published: set[tuple[str, str]],
+        published: dict[tuple[str, str], datetime],
         *,
         displacement_index: int,
         displacement_direction: str,
@@ -1030,7 +1062,7 @@ class LiquidityReplayService:
 
     async def _append_sweep_fact_once(
         self,
-        published: set[tuple[str, str]],
+        published: dict[tuple[str, str], datetime],
         event_type: str,
         symbol: str,
         timeframe: Timeframe,
@@ -1044,7 +1076,7 @@ class LiquidityReplayService:
         if (event_type, object_id) in published:
             return
 
-        published.add((event_type, object_id))
+        published[(event_type, object_id)] = event_at
 
         await self._append_sweep_fact(
             event_type,
