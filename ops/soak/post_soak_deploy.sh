@@ -106,19 +106,34 @@ remote_rev=$(git rev-parse origin/main)
 # rewritten for every batch, because a grep naming the LAST batch either fails
 # (blocking a good deploy: 's6-v3' did exactly that once ict_replay reached
 # s6-v4) or passes while proving nothing about what is being shipped.
-grep -qF 's4-v9' backend/src/scanner/application/detection/structure_replay.py   || fail "#203 missing: STRUCTURE_ALGO_VERSION is not s4-v9"
-grep -qF 's5-v11' backend/src/scanner/application/detection/liquidity_replay.py   || fail "sweep-class fix missing: LIQUIDITY_ALGO_VERSION is not s5-v11"
-grep -qF 's8-confluence-v29' backend/src/scanner/application/detection/confluence_replay.py   || fail "#206 missing: CONFLUENCE_ALGO_VERSION is not s8-confluence-v29"
-grep -qF '_mature_recent_sweeps' backend/src/scanner/application/detection/liquidity_replay.py   || fail "#199 missing: sweeps never mature, so reclaimed/displaced/stop-hunt stay unreachable"
+grep -qF 's4-v10' backend/src/scanner/application/detection/structure_replay.py   || fail "#271 missing: STRUCTURE_ALGO_VERSION is not s4-v10 (structure facts in candle order)"
+grep -qF 's6-structure-shift-v5' backend/src/scanner/application/detection/structure_shift_replay.py   || fail "#270 missing: the shift engine does not resume"
+grep -qF 's5-v14' backend/src/scanner/application/detection/liquidity_replay.py   || fail "#269/#272 missing: LIQUIDITY_ALGO_VERSION is not s5-v14"
+grep -qF 's6-v6' backend/src/scanner/application/detection/ict_replay.py   || fail "#272 missing: ICT_ALGO_VERSION is not s6-v6"
+grep -qF 's6-ote-v6' backend/src/scanner/application/detection/ict_ote_replay.py   || fail "#272 missing: ICT_OTE_ALGO_VERSION is not s6-ote-v6"
+grep -qF 's6-ob-v8' backend/src/scanner/application/detection/ict_ob_replay.py   || fail "#272 missing: ICT_OB_ALGO_VERSION is not s6-ob-v8"
+grep -qF 's6-interaction-v6' backend/src/scanner/application/detection/ict_interaction_replay.py   || fail "#275 missing: ICT_INTERACTION_ALGO_VERSION is not s6-interaction-v6"
+grep -qF 's7-participation-v4' backend/src/scanner/application/detection/participation_replay.py   || fail "#273 missing: PARTICIPATION_ALGO_VERSION is not s7-participation-v4"
+grep -qF 's8-confluence-v32' backend/src/scanner/application/detection/confluence_replay.py   || fail "signal gate missing: CONFLUENCE_ALGO_VERSION is not s8-confluence-v32"
+grep -qF 'DEFAULT_SIGNAL_TIMEFRAMES' backend/src/scanner/application/detection/confluence_replay.py   || fail "signal gate missing: no fail-closed published-timeframe default"
+grep -qF 'def first_undecided_index' backend/src/scanner/application/detection/state.py   || fail "#272 missing: engines still re-decide the whole window"
+grep -qF 'CURRENT_EVENT_VERSIONS' backend/src/scanner/application/detection/event_versions.py   || fail "#274 missing: event reads are not pinned to the running versions"
+grep -qF 'terminal_since' backend/src/scanner/application/detection/ict_interaction_replay.py   || fail "#275 missing: the killing candle's interactions are still dropped"
+grep -qF 'def relative_volumes' backend/src/scanner/domain/common/rvol.py   || fail "#273 missing: RVOL still reads the window only"
+grep -qF 'expire_only' backend/src/scanner/application/detection/liquidity_replay.py   || fail "liquidity version pin missing: the replay still sweeps another version's pools"
+grep -qF 'only_version=LIQUIDITY_ALGO_VERSION' backend/src/scanner/application/detection/confluence_replay.py   || fail "liquidity version pin missing: confluence reads every liquidity generation"
+grep -qF '_mature_recent_sweeps' backend/src/scanner/application/detection/liquidity_replay.py   || fail "#199 missing: sweeps never mature"
 grep -qF 'def apply_recovery' backend/src/scanner/domain/structure/trend.py   || fail "#198 missing: the trend machine has no recovery edge"
-grep -qF '_broken_premise' backend/src/scanner/application/detection/signal_monitor.py   || fail "#200/#204 missing: INVALIDATED_EARLY is still unreachable"
+grep -qF '_broken_premise' backend/src/scanner/application/detection/signal_monitor.py   || fail "#200/#204 missing: INVALIDATED_EARLY is unreachable"
 grep -qF 'abs(candles[cursor].high - candidate)' backend/src/scanner/domain/structure/swings.py   || fail "#203 missing: the swing walk-back still consumes higher candles"
-grep -qF 's6-ob-v6' backend/src/scanner/application/detection/ict_ob_replay.py   || fail "#222 missing: ICT_OB_ALGO_VERSION is not s6-ob-v6"
-grep -qF 'origin_opens = ob.created_at' backend/src/scanner/application/detection/ict_ob_replay.py   || fail "#222 missing: the OB helpers still index the window with frozen offsets"
-grep -qF 'expire_only' backend/src/scanner/application/detection/liquidity_replay.py   || fail "liquidity version pin missing: the replay still sweeps and matures another version's pools"
-grep -qF 'only_version=LIQUIDITY_ALGO_VERSION' backend/src/scanner/application/detection/confluence_replay.py   || fail "liquidity version pin missing: confluence still reads every liquidity generation"
+grep -qF 'origin_opens = ob.created_at' backend/src/scanner/application/detection/ict_ob_replay.py   || fail "#222 missing: the OB helpers index the window with frozen offsets"
+test -f backend/src/scanner/infrastructure/persistence/alembic/versions/022_recorded_at.py   || fail "#276 missing: migration 022_recorded_at is not in the tree"
 
-echo "   all eleven batch markers present in the tree at $(git rev-parse --short HEAD)"
+# Owner ruling 2026-09-15 (M8 option B): M15/M5 must not publish. The code defaults to
+# H1,H4; an override in the env file would open them, so its presence refuses the deploy.
+! grep -q '^SCANNER_SIGNAL_TIMEFRAMES=' ops/env/dev.env   || fail "ops/env/dev.env sets SCANNER_SIGNAL_TIMEFRAMES -- the H1,H4 default is the approved set"
+
+echo "   all 22 batch markers present, signal-timeframe override absent, tree at $(git rev-parse --short HEAD)"
 
 # ---------------------------------------------------------------------------
 step "1. Invariants before touching anything (expect: exit 0, 1 acknowledged)"
@@ -202,15 +217,28 @@ sleep 15
 step "5. Verify the RUNNING containers, not the tree"
 # ---------------------------------------------------------------------------
 
-docker exec scanner-dev-engine-1 grep -qF 's5-v11' /app/src/scanner/application/detection/liquidity_replay.py   || fail "running engine is not s5-v11 -- the image that started is not the image built"
-docker exec scanner-dev-engine-1 grep -qF 's8-confluence-v29' /app/src/scanner/application/detection/confluence_replay.py   || fail "running engine is not s8-confluence-v29"
-docker exec scanner-dev-engine-1 grep -qF '_mature_recent_sweeps' /app/src/scanner/application/detection/liquidity_replay.py   || fail "running engine does not mature sweeps"
-docker exec scanner-dev-engine-1 grep -qF 'def apply_recovery' /app/src/scanner/domain/structure/trend.py   || fail "running engine has no trend recovery edge"
-docker exec scanner-dev-engine-1 grep -qF '_broken_premise' /app/src/scanner/application/detection/signal_monitor.py   || fail "running engine cannot reach INVALIDATED_EARLY"
-docker exec scanner-dev-engine-1 grep -qF 'abs(candles[cursor].high - candidate)' /app/src/scanner/domain/structure/swings.py   || fail "running engine still has the old swing walk-back"
-docker exec scanner-dev-engine-1 grep -qF 'origin_opens = ob.created_at' /app/src/scanner/application/detection/ict_ob_replay.py   || fail "running engine still indexes the window with the OB's frozen offsets"
-docker exec scanner-dev-engine-1 grep -qF 'expire_only' /app/src/scanner/application/detection/liquidity_replay.py   || fail "running engine does not pin liquidity to its own version"
-docker exec scanner-dev-engine-1 grep -qF 'only_version=LIQUIDITY_ALGO_VERSION' /app/src/scanner/application/detection/confluence_replay.py   || fail "running confluence still reads every liquidity generation"
+docker exec scanner-dev-engine-1 grep -qF 's4-v10' /app/src/scanner/application/detection/structure_replay.py   || fail "running engine: STRUCTURE_ALGO_VERSION is not s4-v10 (structure facts in candle order)"
+docker exec scanner-dev-engine-1 grep -qF 's6-structure-shift-v5' /app/src/scanner/application/detection/structure_shift_replay.py   || fail "running engine: the shift engine does not resume"
+docker exec scanner-dev-engine-1 grep -qF 's5-v14' /app/src/scanner/application/detection/liquidity_replay.py   || fail "running engine: LIQUIDITY_ALGO_VERSION is not s5-v14"
+docker exec scanner-dev-engine-1 grep -qF 's6-v6' /app/src/scanner/application/detection/ict_replay.py   || fail "running engine: ICT_ALGO_VERSION is not s6-v6"
+docker exec scanner-dev-engine-1 grep -qF 's6-ote-v6' /app/src/scanner/application/detection/ict_ote_replay.py   || fail "running engine: ICT_OTE_ALGO_VERSION is not s6-ote-v6"
+docker exec scanner-dev-engine-1 grep -qF 's6-ob-v8' /app/src/scanner/application/detection/ict_ob_replay.py   || fail "running engine: ICT_OB_ALGO_VERSION is not s6-ob-v8"
+docker exec scanner-dev-engine-1 grep -qF 's6-interaction-v6' /app/src/scanner/application/detection/ict_interaction_replay.py   || fail "running engine: ICT_INTERACTION_ALGO_VERSION is not s6-interaction-v6"
+docker exec scanner-dev-engine-1 grep -qF 's7-participation-v4' /app/src/scanner/application/detection/participation_replay.py   || fail "running engine: PARTICIPATION_ALGO_VERSION is not s7-participation-v4"
+docker exec scanner-dev-engine-1 grep -qF 's8-confluence-v32' /app/src/scanner/application/detection/confluence_replay.py   || fail "running engine: CONFLUENCE_ALGO_VERSION is not s8-confluence-v32"
+docker exec scanner-dev-engine-1 grep -qF 'DEFAULT_SIGNAL_TIMEFRAMES' /app/src/scanner/application/detection/confluence_replay.py   || fail "running engine: no fail-closed published-timeframe default"
+docker exec scanner-dev-engine-1 grep -qF 'def first_undecided_index' /app/src/scanner/application/detection/state.py   || fail "running engine: engines still re-decide the whole window"
+docker exec scanner-dev-engine-1 grep -qF 'CURRENT_EVENT_VERSIONS' /app/src/scanner/application/detection/event_versions.py   || fail "running engine: event reads are not pinned to the running versions"
+docker exec scanner-dev-engine-1 grep -qF 'terminal_since' /app/src/scanner/application/detection/ict_interaction_replay.py   || fail "running engine: the killing candle's interactions are still dropped"
+docker exec scanner-dev-engine-1 grep -qF 'def relative_volumes' /app/src/scanner/domain/common/rvol.py   || fail "running engine: RVOL still reads the window only"
+docker exec scanner-dev-engine-1 grep -qF 'expire_only' /app/src/scanner/application/detection/liquidity_replay.py   || fail "running engine: the replay still sweeps another version's pools"
+docker exec scanner-dev-engine-1 grep -qF 'only_version=LIQUIDITY_ALGO_VERSION' /app/src/scanner/application/detection/confluence_replay.py   || fail "running engine: confluence reads every liquidity generation"
+docker exec scanner-dev-engine-1 grep -qF '_mature_recent_sweeps' /app/src/scanner/application/detection/liquidity_replay.py   || fail "running engine: sweeps never mature"
+docker exec scanner-dev-engine-1 grep -qF 'def apply_recovery' /app/src/scanner/domain/structure/trend.py   || fail "running engine: the trend machine has no recovery edge"
+docker exec scanner-dev-engine-1 grep -qF '_broken_premise' /app/src/scanner/application/detection/signal_monitor.py   || fail "running engine: INVALIDATED_EARLY is unreachable"
+docker exec scanner-dev-engine-1 grep -qF 'abs(candles[cursor].high - candidate)' /app/src/scanner/domain/structure/swings.py   || fail "running engine: the swing walk-back still consumes higher candles"
+docker exec scanner-dev-engine-1 grep -qF 'origin_opens = ob.created_at' /app/src/scanner/application/detection/ict_ob_replay.py   || fail "running engine: the OB helpers index the window with frozen offsets"
+docker exec scanner-dev-engine-1 test -f /app/src/scanner/infrastructure/persistence/alembic/versions/022_recorded_at.py   || fail "running engine image has no migration 022_recorded_at"
 
 running_release=$(docker exec scanner-dev-engine-1 printenv SCANNER_RELEASE 2>/dev/null | tr -d '
 ')
