@@ -400,3 +400,156 @@ from spread
 where pools >= 200
   and distinct_values = 1
 order by component;
+
+
+-- ===========================================================================
+-- J. A fact written later than it could first be known
+-- ===========================================================================
+-- Every check above reads what a row SAYS. The window-start class shows only in
+-- WHEN it was written: the sliding 500-candle window re-judged old candles on
+-- every pass, so in steady state ~48% of s4-v9 BOS were first written more
+-- than a day after their candle, and SEED labels and sweeps 300-500 periods
+-- after theirs. Each value was plausible; only its write time was wrong. The
+-- look-ahead audit (#265-#279) made every engine decide a candle once, and
+-- nothing watched for the class coming back.
+--
+-- **The horizon is the doctrine's, per type:** how many closed candles after
+-- its own candle a fact can first be known -- k=5 for an external swing and
+-- its label, and for an internal swing too since SLS v1.0.9 records both at
+-- k=5; k=2 for an internal label; FAILED_BREAK_CANDLES; the sweep's
+-- confirmation and its 15-candle maturation; MSS follow-through; the reclaim
+-- window. Plus one period for the pass itself. `lag` counts periods after the
+-- candle CLOSED.
+--
+-- **What writes old candles legitimately, and is excluded:**
+--   * the first hour after the engine starts -- a restart's catch-up;
+--   * each context's first 15 minutes of writes after that start -- a new
+--     version's first pass decides its whole window. That is not always inside
+--     the hour: H4's first pass waits for a 4-hour boundary, and on 2026-09-15
+--     it wrote 16,389 interactions up to 487 periods old at 20:00, 2h38m
+--     after the deploy, every one of them expected.
+--
+-- **No minimum sample.** A floor elsewhere keeps an opinion from firing; here
+-- one row is already the fact -- a candle decided twice. Measured before this
+-- was added (2026-09-15 18:21-20:15Z, 35 event types): one row beyond its
+-- horizon, a LINKUSDT M5 LIQUIDITY_SWEEP_DISPLACED written 456 periods after
+-- its candle, while its sweep and reclaim were written in the first pass. That
+-- is the defect class, not noise.
+--
+-- **J2 keeps the horizon list honest.** A type written with no horizon would
+-- otherwise be checked against nothing and never mentioned -- the check that
+-- cannot fail. SIGNAL_SUPPRESSED_* (#278) had never been written when this was
+-- added, and is classified anyway.
+
+with horizon(pattern, periods) as (values
+    ('^SWING_(INTERNAL|EXTERNAL)_(HIGH|LOW)$',                                    5 + 1),
+    ('^STRUCTURE_INTERNAL_(HH|HL|LH|LL|EQH|EQL|SEED)$',                            2 + 1),
+    ('^STRUCTURE_EXTERNAL_(HH|HL|LH|LL|EQH|EQL|SEED)$',                            5 + 1),
+    ('^(BOS|CHOCH)_(UP|DOWN)$',                                                   0 + 1),
+    ('^STRUCTURE_FAILED_BREAK_(UP|DOWN)$',                                        3 + 1),
+    ('^MSS_(UP|DOWN)$',                                                           5 + 1),
+    ('^STRUCTURE_MSS_INVALIDATED_(UP|DOWN)$',                                    10 + 1),
+    ('^LIQUIDITY_SWEEP$',                                                         2 + 1),
+    ('^LIQUIDITY_(SWEEP_RECLAIMED|SWEEP_DISPLACED|STOP_HUNT|STOP_HUNT_FAILED)$', 17 + 1),
+    ('^(RANGE_EXPANSION|COMPRESSION|MOMENTUM_ACCELERATING|EXHAUSTION_WATCH)$',    0 + 1),
+    ('^VOLUME_(SPIKE|EXPANSION|CONTRACTION|SUSPECT)$',                            0 + 1),
+    ('^(SETUP_CANDIDATE|SIGNAL_SUPPRESSED)_(UP|DOWN)$',                           0 + 1)
+),
+tf(name, seconds) as (values
+    ('M5', 300), ('M15', 900), ('H1', 3600), ('H4', 14400), ('D1', 86400), ('W1', 604800)
+),
+since_start as (
+    select e.event_type, e.symbol, e.timeframe, e.event_at, e.created_at,
+           extract(epoch from e.created_at - e.event_at) / tf.seconds - 1 as lag
+    from soak_engine_events e
+    join tf on tf.name = e.timeframe
+    where e.created_at >= :'engine_started'::timestamptz
+),
+first_write as (
+    select symbol, timeframe, min(created_at) as first_at from since_start group by 1, 2
+),
+recent as (
+    select s.*, h.periods
+    from since_start s
+    join first_write f using (symbol, timeframe)
+    left join horizon h on s.event_type ~ h.pattern
+    where s.created_at >= now() - interval '24 hours'
+      and s.created_at >= :'engine_started'::timestamptz + interval '60 minutes'
+      and s.created_at > f.first_at + interval '15 minutes'
+)
+select 'J. event written beyond its horizon' as check,
+       event_type, timeframe, count(*) as late_writes,
+       round(max(lag)::numeric, 1) as worst_periods_late, min(periods) as horizon,
+       (array_agg(symbol || ' ' || event_at order by lag desc))[1] as worst
+from recent
+where lag > periods
+group by 2, 3
+union all
+select 'J2. event type has no horizon' as check,
+       event_type, timeframe, count(*), null, null, null
+from recent
+where periods is null
+group by 2, 3
+order by 1, 2, 3;
+
+-- J3. The same question of the tables that are not events.
+--
+-- Zone and pool transitions and zone interactions are the other writes the
+-- window re-judged -- 20.6x interaction duplication once -- and the ones #276's
+-- recorded_at exists to date. A row is due once both its candle and its zone or
+-- pool exist, so `lag` runs from the later of the two, and one period (the
+-- pass) is allowed.
+--
+-- **OTE rows get ten**, measured rather than derived. An OTE zone is dated to
+-- its leg's extreme candle close, and the leg is known only once the swing
+-- after it confirms, so its interactions AND its transitions arrive late: in
+-- the first three hours after the 2026-09-15 deploy, up to 6.1 periods after
+-- close (1,137 interactions; a first draft allowing interactions alone fired on
+-- a UNIUSDT M15 OTE transition at 2.0). Every other kind stayed within 1. Why
+-- OTE exceeds k=5 is not established. Ten stays quiet on that and still fires
+-- on the window-start class, which is hundreds.
+
+with tf(name, seconds) as (values
+    ('M5', 300), ('M15', 900), ('H1', 3600), ('H4', 14400), ('D1', 86400), ('W1', 604800)
+),
+written as (
+    select 'zone transition' as kind, zt.zone_type, zt.symbol, zt.timeframe, zt.recorded_at,
+           greatest(zt.transitioned_at, z.created_at) as due_at
+    from detection.ict_zone_transitions zt
+    join soak_ict_zones z using (zone_id)
+    where zt.recorded_at >= :'engine_started'::timestamptz
+    union all
+    select 'pool transition', '-', lt.symbol, lt.timeframe, lt.recorded_at,
+           greatest(lt.transitioned_at, p.created_at)
+    from detection.liquidity_transitions lt
+    join soak_liquidity_pools p using (pool_id)
+    where lt.recorded_at >= :'engine_started'::timestamptz
+    union all
+    select 'interaction', zi.zone_type, zi.symbol, zi.timeframe, zi.recorded_at,
+           greatest(zi.observed_at, z.created_at)
+    from detection.ict_zone_interactions zi
+    join soak_ict_zones z using (zone_id)
+    where zi.recorded_at >= :'engine_started'::timestamptz
+),
+first_write as (
+    select symbol, timeframe, min(recorded_at) as first_at from written group by 1, 2
+),
+recent as (
+    select w.kind, w.zone_type, w.symbol, w.timeframe, w.due_at,
+           extract(epoch from w.recorded_at - w.due_at) / tf.seconds - 1 as lag,
+           case when w.zone_type = 'OTE' then 10 else 1 end as allowed
+    from written w
+    join tf on tf.name = w.timeframe
+    join first_write f using (symbol, timeframe)
+    where w.recorded_at >= now() - interval '24 hours'
+      and w.recorded_at >= :'engine_started'::timestamptz + interval '60 minutes'
+      and w.recorded_at > f.first_at + interval '15 minutes'
+)
+select 'J3. row written beyond its horizon' as check,
+       kind, zone_type, timeframe, count(*) as late_rows,
+       round(max(lag)::numeric, 1) as worst_periods_late, min(allowed) as allowed,
+       (array_agg(symbol || ' ' || due_at order by lag desc))[1] as worst
+from recent
+where lag > allowed
+group by 2, 3, 4
+order by 2, 3, 4;

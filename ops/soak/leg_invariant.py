@@ -41,6 +41,15 @@ ways), which blocked a deploy and fired hourly for two days; requiring the
 other side's escalations to be zero fired on 0. With the #142 fix reverted,
 both forms fired on 29 of 29 -- so the narrower check lost nothing it exists
 to catch.
+
+**Only candles the structure engine has decided, and only its own swings.**
+The §3.1 comparison used to read the newest 501 candles in the table. A candle
+that had been ingested but not yet passed -- a close landing while this ran, or
+a resumed pass that stops at a candle the shift engine has not reached -- made
+a real pivot read as "unrecorded". So the window now ends at the candle the
+running structure version last decided (its Redis state), and the recorded
+swings are that version's: every generation's rows stay in the table, and an
+old version's swing is no evidence the running one recorded it.
 """
 
 from __future__ import annotations
@@ -49,15 +58,18 @@ import asyncio
 import os
 from datetime import UTC, datetime, timedelta
 
-from redis.asyncio import Redis  # noqa: F401  (import proves the image is wired)
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
 
+from scanner.application.detection.state import EngineStateManager
+from scanner.application.detection.structure_replay import STRUCTURE_ALGO_VERSION
 from scanner.domain.common import Candle
 from scanner.domain.common.atr import wilder_atr_series
 from scanner.domain.ict.displacement import detect_displacement
 from scanner.domain.momentum.legs import LegKind, segment_legs
 from scanner.domain.structure import detect_external_swings
+from scanner.infrastructure.redis.client import build_redis
+from scanner.infrastructure.redis.engine_state import RedisEngineStateStore
 from scanner.shared import Timeframe
 
 WINDOW = 500
@@ -105,16 +117,26 @@ async def _symbols(conn) -> tuple[str, ...]:
     return tuple(r[0] for r in rows)
 
 
-async def _window(conn, symbol: str, timeframe: Timeframe) -> list[Candle]:
+async def _decided(states: EngineStateManager, symbol: str, timeframe: Timeframe) -> datetime | None:
+    """The newest candle the running structure version has decided."""
+    saved = await states.load(symbol, timeframe.value, STRUCTURE_ALGO_VERSION)
+
+    if saved is None or saved.last_processed_open_time is None:
+        return None
+
+    return datetime.fromisoformat(saved.last_processed_open_time)
+
+
+async def _window(conn, symbol: str, timeframe: Timeframe, decided: datetime) -> list[Candle]:
     rows = await conn.execute(
         text(
             "select open_time, open, high, low, close, volume, quote_volume,"
             "       taker_buy_volume, trade_count"
             "  from market.candles"
-            " where symbol = :s and timeframe = :t"
+            " where symbol = :s and timeframe = :t and open_time <= :d"
             " order by open_time desc limit :n"
         ),
-        {"s": symbol, "t": timeframe.value, "n": WINDOW + 1},
+        {"s": symbol, "t": timeframe.value, "d": decided, "n": WINDOW + 1},
     )
 
     return [
@@ -160,10 +182,10 @@ async def _recorded_swings(conn, symbol: str, timeframe: Timeframe) -> dict[str,
     rows = await conn.execute(
         text(
             "select event_type, event_at from detection.engine_events"
-            " where symbol = :s and timeframe = :t"
+            " where symbol = :s and timeframe = :t and algo_version = :v"
             "   and event_type in ('SWING_EXTERNAL_HIGH','SWING_EXTERNAL_LOW')"
         ),
-        {"s": symbol, "t": timeframe.value},
+        {"s": symbol, "t": timeframe.value, "v": STRUCTURE_ALGO_VERSION},
     )
 
     found: dict[str, set] = {"HIGH": set(), "LOW": set()}
@@ -230,12 +252,22 @@ def _swing_faults(series: list[Candle], recorded: dict[str, set]) -> list[str]:
 
 async def main() -> None:
     engine = create_async_engine(_dsn())
+    redis = build_redis(os.environ["SCANNER_REDIS_URL"])
+    states = EngineStateManager(RedisEngineStateStore(redis))
     violations = 0
+    checked = 0
 
     async with engine.connect() as conn:
         for symbol in await _symbols(conn):
             for timeframe in CONTEXTS:
-                series = await _window(conn, symbol, timeframe)
+                decided = await _decided(states, symbol, timeframe)
+
+                if decided is None:
+                    print(f"{symbol:8} {timeframe.value:3} no {STRUCTURE_ALGO_VERSION} state yet, skipped")
+                    continue
+
+                checked += 1
+                series = await _window(conn, symbol, timeframe, decided)
 
                 if len(series) < WINDOW:
                     print(f"{symbol:8} {timeframe.value:3} only {len(series)} candles, skipped")
@@ -279,6 +311,15 @@ async def main() -> None:
                     print(f"{symbol:8} {timeframe.value:3} §3.1 swings agree with the candles")
 
     await engine.dispose()
+    await redis.aclose()
+
+    # Skipping a context with no state is right for one context and wrong for
+    # all of them: a Redis read that finds nothing anywhere -- a wrong URL, a
+    # version constant the engine does not write -- would otherwise print a row
+    # of "skipped" and exit clean, having compared nothing.
+    if checked == 0:
+        print(f"VIOLATION no context has {STRUCTURE_ALGO_VERSION} structure state -- nothing was checked")
+        violations += 1
 
     stamp = datetime.now(UTC).replace(microsecond=0).isoformat()
     print(f"checked at {stamp}; {violations} violation(s)")
