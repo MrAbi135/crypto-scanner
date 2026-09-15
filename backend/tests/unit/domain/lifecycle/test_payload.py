@@ -6,6 +6,7 @@ import json
 from dataclasses import replace
 from decimal import Decimal
 
+from scanner.domain.common.universe import UniverseTier
 from scanner.domain.confluence import (
     ZONE_DISTAL_EDGE,
     SignalLevels,
@@ -17,7 +18,12 @@ from scanner.domain.lifecycle import (
     SignalPayload,
     SuppressionReason,
     publication_checks,
+    tier_permits_publication,
 )
+from scanner.shared import Timeframe
+
+# Both publication gates open, for tests about §15.3's own checks.
+GATES_OPEN = {"timeframe_published": True, "tier_permitted": True}
 
 
 def levels(
@@ -142,7 +148,7 @@ def test_two_candidates_on_one_zone_share_a_dedup_key() -> None:
 
 
 def test_a_complete_payload_with_fresh_feeds_publishes() -> None:
-    decision = publication_checks(payload(), feeds_fresh=True, dedup_clear=True)
+    decision = publication_checks(payload(), feeds_fresh=True, dedup_clear=True, **GATES_OPEN)
 
     assert decision.published
     assert decision.reasons == ()
@@ -157,7 +163,7 @@ def test_every_failing_check_is_reported_not_just_the_first() -> None:
     """
     tight = payload(levels=levels(target_low="103"))
 
-    decision = publication_checks(tight, feeds_fresh=False, dedup_clear=False)
+    decision = publication_checks(tight, feeds_fresh=False, dedup_clear=False, **GATES_OPEN)
 
     assert not decision.published
     assert set(decision.reasons) == {
@@ -185,6 +191,7 @@ def test_an_empty_evidence_chain_is_incomplete() -> None:
             replace(payload(), **{field_name: empty}),
             feeds_fresh=True,
             dedup_clear=True,
+            **GATES_OPEN,
         )
 
         assert SuppressionReason.INCOMPLETE_PAYLOAD in decision.reasons, field_name
@@ -199,9 +206,51 @@ def test_incoherent_levels_are_caught_separately_from_the_rr_floor() -> None:
     """
     backwards = payload(levels=levels(target_low="90"))
 
-    decision = publication_checks(backwards, feeds_fresh=True, dedup_clear=True)
+    decision = publication_checks(backwards, feeds_fresh=True, dedup_clear=True, **GATES_OPEN)
 
     assert SuppressionReason.INCOHERENT_LEVELS in decision.reasons
+
+
+def test_a_timeframe_outside_the_published_set_is_suppressed_with_its_reason() -> None:
+    """Owner ruling 2026-09-15: M15/M5 publishing is a separate decision. A
+    complete payload on such a timeframe is refused with its own reason, so the
+    §14 funnel says why rather than calling it a routine suppression."""
+    decision = publication_checks(
+        payload(),
+        feeds_fresh=True,
+        dedup_clear=True,
+        timeframe_published=False,
+        tier_permitted=True,
+    )
+
+    assert not decision.published
+    assert decision.reasons == (SuppressionReason.TIMEFRAME_NOT_PUBLISHED,)
+
+
+def test_a_tier_the_timeframe_does_not_permit_is_suppressed_with_its_reason() -> None:
+    decision = publication_checks(
+        payload(),
+        feeds_fresh=True,
+        dedup_clear=True,
+        timeframe_published=True,
+        tier_permitted=False,
+    )
+
+    assert not decision.published
+    assert decision.reasons == (SuppressionReason.TIER_NOT_PERMITTED,)
+
+
+def test_m5_publishes_for_tier_1_only_and_every_other_timeframe_is_open() -> None:
+    """§0.3: M5 is "Execution-refinement TF (Tier 1 symbols only)". Doctrine,
+    so it holds whatever the published set is; an unknown tier is not Tier 1."""
+    assert tier_permits_publication(Timeframe.M5, UniverseTier.T1)
+
+    for tier in (UniverseTier.T2, UniverseTier.T3, UniverseTier.INELIGIBLE, None):
+        assert not tier_permits_publication(Timeframe.M5, tier), tier
+
+    for timeframe in (Timeframe.M15, Timeframe.H1, Timeframe.H4, Timeframe.D1):
+        for tier in (UniverseTier.T1, UniverseTier.T2, None):
+            assert tier_permits_publication(timeframe, tier), (timeframe, tier)
 
 
 def test_the_dedup_key_survives_a_sub_cent_symbol() -> None:

@@ -26,6 +26,7 @@ from scanner.application.marketdata import (
     SymbolSyncService,
     verify_continuity,
 )
+from scanner.application.marketdata.contexts import parse_signal_timeframes
 from scanner.application.marketdata.warmth import ENGINE_TIMEFRAMES, assess_all
 from scanner.application.ports.sessions import RevokeReason
 from scanner.application.ranking import RankingSnapshotService
@@ -281,6 +282,7 @@ async def _run_engine(
             sessions,
             redis_client,
             SystemClock(),
+            signal_timeframes=parse_signal_timeframes(settings.signal_timeframes),
         )
 
         report = await pipeline.run(

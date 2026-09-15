@@ -186,11 +186,25 @@ class FakeZoneRepository:
 class FakeSymbols:
     """§6.6's symbol-level tag, which §6.7 caps F4 on."""
 
-    def __init__(self, wash_risk: bool = False) -> None:
+    def __init__(self, wash_risk: bool = False, tier: str | None = "T1") -> None:
         self.state = WashRiskState(tagged=wash_risk)
+        # §1.4's tier, which §0.3 reads for M5. None: no universe state recorded.
+        self.tier = tier
+        self.tier_reads = 0
 
     async def get_wash_risk(self, exchange_symbol: str) -> WashRiskState:
         return self.state
+
+    async def get_universe_state(self, exchange_symbol: str):
+        from scanner.application.ports.repositories import UniverseStateRecord
+        from scanner.domain.common.universe import UniverseTier
+
+        self.tier_reads += 1
+
+        if self.tier is None:
+            return None
+
+        return UniverseStateRecord(exchange_symbol=exchange_symbol, tier=UniverseTier(self.tier))
 
 
 class FakeTradeAggregates:
@@ -462,6 +476,8 @@ def service(
     incidents=None,
     transitions=None,
     metrics=None,
+    signal_timeframes=None,
+    tier: str | None = "T1",
 ):
     repo = FakeEventRepository(events)
 
@@ -491,7 +507,7 @@ def service(
         FakeInteractions(interactions, respected),
         FakePools(pools),
         FakeTradeAggregates(minutes),
-        FakeSymbols(wash_risk),
+        FakeSymbols(wash_risk, tier),
         FakeClock(),
         shift_state,
         shift_algo_version=SHIFT_ALGO,
@@ -500,6 +516,7 @@ def service(
         incidents=incidents,
         transitions=transitions,
         metrics=metrics,
+        **({} if signal_timeframes is None else {"signal_timeframes": signal_timeframes}),
     )
 
     return svc, repo
@@ -921,6 +938,88 @@ async def test_a_clean_candidate_is_published_and_sealed() -> None:
     # §12.5's TTL for this timeframe travels with the signal -- §12.3 needs it
     # to know when to stop watching.
     assert row.ttl_candles == 18
+
+
+def _suppression_reasons(repo) -> list[list[str]]:
+    return [
+        json.loads(record.payload)["reasons"]
+        for record in repo.appended.values()
+        if record.event_type.startswith("SIGNAL_SUPPRESSED_")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_on_an_unpublished_timeframe_is_suppressed_with_its_reason() -> None:
+    """Owner ruling 2026-09-15: M8 made RVOL readable on M15/M5, and publishing
+    there is a separate decision -- H1 and H4 publish for now. The candidate is
+    refused with its reason on the event log, like any other suppression, and
+    no universe state is read for a timeframe §0.3 does not restrict."""
+    signals = FakeSignals()
+
+    svc, repo = service(**bullish_setup(), signals=signals, incidents=FakeIncidents())
+
+    await svc._publish("BTCUSDT", Timeframe.M15, BASE + TF.duration * 10, publishable_candidate())
+
+    assert signals.rows == {}
+    assert _suppression_reasons(repo) == [["TIMEFRAME_NOT_PUBLISHED"]]
+    assert svc._symbols.tier_reads == 0
+
+
+@pytest.mark.asyncio
+async def test_m5_never_publishes_below_tier_1_even_when_m5_is_published() -> None:
+    """§0.3: M5 is for Tier 1 symbols only. Doctrine, not configuration: it
+    holds after an operator opens M5, and a symbol with no recorded tier is not
+    Tier 1."""
+    published = frozenset({Timeframe.M5, Timeframe.H1, Timeframe.H4})
+
+    for tier in ("T2", None):
+        signals = FakeSignals()
+        svc, repo = service(
+            **bullish_setup(),
+            signals=signals,
+            incidents=FakeIncidents(),
+            signal_timeframes=published,
+            tier=tier,
+        )
+
+        await svc._publish(
+            "BTCUSDT", Timeframe.M5, BASE + TF.duration * 10, publishable_candidate()
+        )
+
+        assert signals.rows == {}, tier
+        assert _suppression_reasons(repo) == [["TIER_NOT_PERMITTED"]], tier
+
+
+@pytest.mark.asyncio
+async def test_a_tier_1_m5_candidate_publishes_once_m5_is_published() -> None:
+    """The premise of the test above: the same candidate on M5 does publish for
+    a Tier 1 symbol, so the refusal there is the tier and nothing else."""
+    signals = FakeSignals()
+
+    svc, _ = service(
+        **bullish_setup(),
+        signals=signals,
+        incidents=FakeIncidents(),
+        signal_timeframes=frozenset({Timeframe.M5, Timeframe.H1, Timeframe.H4}),
+        tier="T1",
+    )
+
+    await svc._publish("BTCUSDT", Timeframe.M5, BASE + TF.duration * 10, publishable_candidate())
+
+    assert len(signals.rows) == 1
+    assert svc._symbols.tier_reads == 1
+
+
+@pytest.mark.asyncio
+async def test_an_h4_candidate_publishes_by_default_without_reading_a_tier() -> None:
+    signals = FakeSignals()
+
+    svc, _ = service(**bullish_setup(), signals=signals, incidents=FakeIncidents(), tier="T2")
+
+    await svc._publish("BTCUSDT", Timeframe.H4, BASE + TF.duration * 10, publishable_candidate())
+
+    assert len(signals.rows) == 1
+    assert svc._symbols.tier_reads == 0
 
 
 @pytest.mark.asyncio

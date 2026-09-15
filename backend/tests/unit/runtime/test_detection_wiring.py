@@ -80,3 +80,24 @@ def test_structure_does_not_seed_from_its_own_namespace() -> None:
     seed = structure._shift_state.context_key("BTCUSDT", "H1", structure._shift_algo_version)
 
     assert own != seed
+
+
+def test_confluence_publishes_h1_and_h4_when_nothing_is_configured() -> None:
+    """Owner ruling 2026-09-15. A builder that forgot the setting must fail
+    closed, not open M15/M5 publishing."""
+    from scanner.shared import Timeframe
+
+    assert build()._confluence._signal_timeframes == {Timeframe.H1, Timeframe.H4}
+
+
+def test_the_configured_published_set_reaches_confluence() -> None:
+    from scanner.shared import Timeframe
+
+    pipeline = build_detection_pipeline(
+        sessions=None,  # type: ignore[arg-type]
+        redis_client=FakeRedis(),  # type: ignore[arg-type]
+        clock=FakeClock(),
+        signal_timeframes=frozenset({Timeframe.H4}),
+    )
+
+    assert pipeline._confluence._signal_timeframes == {Timeframe.H4}

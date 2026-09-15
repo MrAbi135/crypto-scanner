@@ -90,6 +90,26 @@ def parse_timeframes(raw: str) -> tuple[Timeframe, ...]:
     return ordered
 
 
+def parse_signal_timeframes(raw: str) -> frozenset[Timeframe]:
+    """The timeframes whose candidates may publish a signal.
+
+    Not the ingest ladder: a published set may skip rungs (H1 and H4 publish
+    while M15 is still ingested for H1's zone confirmation), so the ladder
+    rule above does not apply. An empty set is refused -- publishing nothing
+    is a stopped engine, and it must be said out loud rather than configured
+    by accident.
+    """
+    parsed = tuple(Timeframe.parse(part.strip()) for part in raw.split(",") if part.strip())
+
+    if not parsed:
+        raise ValidationError("at least one signal timeframe is required")
+
+    if len(set(parsed)) != len(parsed):
+        raise ValidationError(f"duplicate signal timeframes: {raw}")
+
+    return frozenset(parsed)
+
+
 def stream_names(
     symbols: tuple[str, ...],
     timeframes: tuple[Timeframe, ...],

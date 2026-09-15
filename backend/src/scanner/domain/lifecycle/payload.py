@@ -23,7 +23,9 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
 
+from scanner.domain.common.universe import UniverseTier
 from scanner.domain.confluence import SignalLevels
+from scanner.shared import Timeframe
 
 
 class SuppressionReason(str, Enum):
@@ -34,6 +36,24 @@ class SuppressionReason(str, Enum):
     STALE_FEEDS = "STALE_FEEDS"
     BELOW_MIN_RR = "BELOW_MIN_RR"
     DUPLICATE_KEY = "DUPLICATE_KEY"
+    # The timeframe is not in the operator's published set (owner ruling
+    # 2026-09-15: H1 and H4 publish; M15/M5 publishing is a separate decision).
+    TIMEFRAME_NOT_PUBLISHED = "TIMEFRAME_NOT_PUBLISHED"
+    # §0.3: M5 is "Execution-refinement TF (Tier 1 symbols only)".
+    TIER_NOT_PERMITTED = "TIER_NOT_PERMITTED"
+
+
+def tier_permits_publication(timeframe: Timeframe, tier: UniverseTier | None) -> bool:
+    """§0.3: a signal on M5 is for Tier 1 symbols only; other timeframes are open.
+
+    Doctrine, not configuration: it holds whatever set of timeframes the
+    operator publishes, so opening M5 later can never publish a Tier 2 signal
+    there. An unknown tier (no universe state recorded yet) is not Tier 1.
+    """
+    if timeframe is not Timeframe.M5:
+        return True
+
+    return tier is UniverseTier.T1
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,14 +228,22 @@ def publication_checks(
     *,
     feeds_fresh: bool,
     dedup_clear: bool,
+    timeframe_published: bool,
+    tier_permitted: bool,
 ) -> PublicationDecision:
-    """§15.3, evaluated exactly once.
+    """§15.3, evaluated exactly once, plus the two publication gates.
 
     `feeds_fresh` and `dedup_clear` are facts the caller establishes, not
     questions answered here: the first needs the ingest layer's freshness view
     and the second needs the signals table. Passing them in keeps this a pure
-    function of the payload plus two stated facts, which is what makes the
-    verdict reproducible from a stored row months later.
+    function of the payload plus stated facts, which is what makes the verdict
+    reproducible from a stored row months later.
+
+    `timeframe_published` is the operator's published-timeframe set (owner
+    ruling 2026-09-15: H1 and H4) and `tier_permitted` is §0.3's Tier-1-only
+    rule for M5 (`tier_permits_publication`). Both are required arguments, not
+    defaults: a caller that forgot one would otherwise leave that gate open
+    without a trace.
 
     **Every failing check is reported, not just the first.** §12.2 records a
     suppression reason for the funnel in §14, and "it failed on freshness"
@@ -238,6 +266,12 @@ def publication_checks(
 
     if not dedup_clear:
         reasons.append(SuppressionReason.DUPLICATE_KEY)
+
+    if not timeframe_published:
+        reasons.append(SuppressionReason.TIMEFRAME_NOT_PUBLISHED)
+
+    if not tier_permitted:
+        reasons.append(SuppressionReason.TIER_NOT_PERMITTED)
 
     return PublicationDecision(published=not reasons, reasons=tuple(reasons))
 

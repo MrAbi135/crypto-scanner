@@ -11,7 +11,10 @@ from __future__ import annotations
 import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from scanner.application.detection.confluence_replay import ConfluenceReplayService
+from scanner.application.detection.confluence_replay import (
+    DEFAULT_SIGNAL_TIMEFRAMES,
+    ConfluenceReplayService,
+)
 from scanner.application.detection.ict_interaction_replay import (
     IctZoneInteractionReplayService,
 )
@@ -76,6 +79,7 @@ from scanner.infrastructure.persistence.signal_transition_repository import (
 from scanner.infrastructure.redis.engine_state import RedisEngineStateStore
 from scanner.infrastructure.redis.ict_zone_state import RedisIctZoneStateStore
 from scanner.infrastructure.redis.liquidity_state import RedisLiquidityStateStore
+from scanner.shared import Timeframe
 
 
 def build_detection_pipeline(
@@ -83,6 +87,8 @@ def build_detection_pipeline(
     redis_client: aioredis.Redis,
     clock: Clock,
     metrics: DetectionMetrics | None = None,
+    *,
+    signal_timeframes: frozenset[Timeframe] = DEFAULT_SIGNAL_TIMEFRAMES,
 ) -> DetectionPipeline:
     """Optional metrics so `engine run` and the golden harness stay collector-free.
 
@@ -227,6 +233,7 @@ def build_detection_pipeline(
             incidents=PgIncidentRepository(sessions),
             transitions=PgSignalTransitionRepository(sessions),
             metrics=metrics,
+            signal_timeframes=signal_timeframes,
         ),
         monitor=SignalMonitorService(
             candles,
