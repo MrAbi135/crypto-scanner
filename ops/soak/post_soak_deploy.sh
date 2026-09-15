@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # The soak-end deploy, as a script instead of a memory.
 #
-# The batch waiting on this window is the 2026-08-29 domain review: PRs #192
-# through #208, seventeen fixes across every engine, plus the SLS v1.0.8
-# clarifications. This runs the sequence with an assertion at every step --
+# The step-0 and step-5 markers name the look-ahead audit bundle, PRs #265
+# through #279 (deployed 2026-09-15), which also brought migration 022. This
+# runs the sequence with an assertion at every step --
 # because the deploy days before it each lost hours to a step that "ran" and
 # did nothing: a patch whose replace matched nothing, a deploy that rebuilt
 # one image of four, a release stamp that described the checkout rather than
@@ -149,35 +149,17 @@ tail -3 /tmp/pre_deploy_invariants.log
 step "2. Pre-deploy counts, so step 6 has something to compare against"
 # ---------------------------------------------------------------------------
 
-# What this batch is supposed to move, measured before it moves. Each is a
-# count the old code could not change: the attribution ids were never written
-# at all, and the four maturation event types did not exist as strings in the
-# old engine. A number that does NOT move after the deploy means the fix is
-# not running, whatever the greps in step 5 say about the file being present.
-pre_null_ids=$($PSQL -c "
-  select count(*)
-    from detection.setups s,
-         lateral json_each(s.evidence::json -> 'attribution') f,
-         lateral json_array_elements(f.value) c
-   where c.value ->> 'evidence_id' is null;" 2>/dev/null || echo "?")
-
-pre_matured=$($PSQL -c "
-  select count(*) from detection.engine_events
-   where event_type in ('LIQUIDITY_SWEEP_RECLAIMED',
-                        'LIQUIDITY_SWEEP_DISPLACED',
-                        'LIQUIDITY_STOP_HUNT_FAILED',
-                        'STRUCTURE_MSS_INVALIDATED_UP',
-                        'STRUCTURE_MSS_INVALIDATED_DOWN');" 2>/dev/null || echo "?")
-
+# Signals are split by timeframe because the signal gate (#278, owner ruling
+# 2026-09-15) keeps M5 and M15 out of that table. A new row for either after
+# this deploy means the gate is not what is running, whatever the step-5 greps
+# say about the file being present.
 pre_setups=$($PSQL -c "select count(*) from detection.setups;")
 pre_signals=$($PSQL -c "select count(*) from detection.signals;")
+pre_low_tf=$($PSQL -c "select count(*) from detection.signals where timeframe in ('M5','M15');")
 
-echo "   contributions with no evidence id : $pre_null_ids (every one, before v26)"
-echo "   maturation events so far          : $pre_matured (zero -- the types are new)"
-echo "   setups seen                       : $pre_setups"
-echo "   signals published                 : $pre_signals"
-
-[ "$pre_matured" = "0" ] || echo "   (note: maturation events already exist -- was the deploy already done?)"
+echo "   setups seen               : $pre_setups"
+echo "   signals published         : $pre_signals"
+echo "   of which on M5 or M15     : $pre_low_tf"
 
 # ---------------------------------------------------------------------------
 step "2b. Stamp the release with the commit actually being built"
@@ -205,6 +187,55 @@ step "3. Build ALL FOUR images (the 2026-08-26 lesson: never just one)"
 # ---------------------------------------------------------------------------
 
 $DC build api engine worker ingest frontend || fail "build failed"
+
+# ---------------------------------------------------------------------------
+step "3b. Migrate the schema BEFORE the new code starts"
+# ---------------------------------------------------------------------------
+# On 2026-09-15 this script had no such step. The new engine started against a
+# database still on 021, every pass of the first M5 close failed with
+# UndefinedColumn recorded_at -- 30 detection_pass_failed -- and 022 was applied
+# by hand five minutes later. The step-0 grep proved the migration FILE was in
+# the tree; nothing proved it had run.
+#
+# Before `up`, not after: the old code keeps working on a migrated schema
+# (migrations here are additive), the new code must never start on an old one,
+# and a migration that fails here leaves the running containers untouched.
+#
+# The owner credential reaches this one-off container and nothing else (the
+# grant layer, docs/runbooks/deploy-p1b.md): read from the db container inside
+# a subshell, passed to compose by NAME so it is in no argument list and no
+# log, and gone when the subshell exits. The long-running services keep the
+# scanner_app DSN from ops/env/dev.env.
+
+versions=backend/src/scanner/infrastructure/persistence/alembic/versions
+revisions=$(cat "$versions"/*.py | tr -d '\r' | sed -n 's/^revision = "\(.*\)"$/\1/p' | sort)
+parents=$(cat "$versions"/*.py | tr -d '\r' | sed -n 's/^down_revision = "\(.*\)"$/\1/p' | sort)
+head_rev=$(comm -23 <(printf '%s\n' "$revisions") <(printf '%s\n' "$parents"))
+
+[ -n "$head_rev" ] && [ "$(printf '%s\n' "$head_rev" | wc -l)" -eq 1 ]   || fail "the migrations in the tree do not have exactly one head: '${head_rev}'"
+
+schema_rev=$($PSQL -c "select version_num from alembic_version;" | tr -d '\r')
+echo "   schema: ${schema_rev:-?}   tree head: $head_rev"
+
+if [ "$schema_rev" = "$head_rev" ]; then
+  echo "   already at head -- nothing to migrate"
+else
+  (
+    pw=$(docker exec scanner-dev-db-1 printenv POSTGRES_PASSWORD </dev/null) || exit 3
+    [ -n "$pw" ] || exit 3
+    export SCANNER_MIGRATION_DB_DSN="postgresql+asyncpg://scanner:${pw}@db:5432/scanner"
+    unset pw
+    $DC run --rm --no-deps -T -e SCANNER_MIGRATION_DB_DSN api alembic upgrade head </dev/null
+  )
+  migrate_rc=$?
+
+  [ "$migrate_rc" -eq 0 ]   || fail "alembic upgrade head failed (exit $migrate_rc) -- nothing was restarted, the old containers still run"
+fi
+
+schema_rev=$($PSQL -c "select version_num from alembic_version;" | tr -d '\r')
+[ "$schema_rev" = "$head_rev" ]   || fail "schema is at '$schema_rev' after migrating; the tree head is '$head_rev'"
+
+echo "   schema at head: $schema_rev"
 
 # ---------------------------------------------------------------------------
 step "4. Deploy -- this resets T0, which is the point"
@@ -240,6 +271,9 @@ docker exec scanner-dev-engine-1 grep -qF 'abs(candles[cursor].high - candidate)
 docker exec scanner-dev-engine-1 grep -qF 'origin_opens = ob.created_at' /app/src/scanner/application/detection/ict_ob_replay.py   || fail "running engine: the OB helpers index the window with frozen offsets"
 docker exec scanner-dev-engine-1 test -f /app/src/scanner/infrastructure/persistence/alembic/versions/022_recorded_at.py   || fail "running engine image has no migration 022_recorded_at"
 
+schema_now=$($PSQL -c "select version_num from alembic_version;" | tr -d '\r')
+[ "$schema_now" = "$head_rev" ]   || fail "the new code is running on schema '$schema_now'; the tree head is '$head_rev'"
+
 running_release=$(docker exec scanner-dev-engine-1 printenv SCANNER_RELEASE 2>/dev/null | tr -d '
 ')
 [ "$running_release" = "$release" ]   || fail "running engine reports release '$running_release', expected '$release'"
@@ -261,39 +295,34 @@ step "6. What to do next (the parts that need hours, not a script)"
 # ---------------------------------------------------------------------------
 
 cat <<NEXT
-   1. After ~30 min (a few M5/M15 passes), check the two counts MOVED. A file
-      present in the container proves the image; only these prove the code:
+   1. After the first M5 close (~15 min), no pass may have failed. A schema
+      or wiring defect shows here before anywhere else -- on 2026-09-15 it
+      was 30 of these within five minutes:
 
-        $PSQL -c "select count(*) from detection.engine_events where event_type in ('LIQUIDITY_SWEEP_RECLAIMED','LIQUIDITY_SWEEP_DISPLACED','LIQUIDITY_STOP_HUNT_FAILED','STRUCTURE_MSS_INVALIDATED_UP','STRUCTURE_MSS_INVALIDATED_DOWN');"
-          -- was: $pre_matured   want: > 0 once a sweep or MSS matures
+        docker logs --since "$new_started" scanner-dev-engine-1 2>&1 | grep -c detection_pass_failed
+          -- want: 0
 
-        $PSQL -c "select count(*) from detection.setups s, lateral json_each(s.evidence::json -> 'attribution') f, lateral json_array_elements(f.value) c where c.value ->> 'evidence_id' is not null;"
-          -- was: 0 (of $pre_null_ids)   want: > 0 as NEW setups arrive
+   2. After the first-pass burst (~30 min), nothing may be left pending:
 
-      Neither is instant: maturation needs a sweep with candles after it, and
-      the id counts only move for setups written after this deploy. Old rows
-      keep their nulls forever -- that is append-only working, not a failure.
+        docker exec scanner-dev-redis-1 redis-cli XPENDING scanner:stream:candle-closed engine
+          -- want: a first field of 0
 
-   2. Invariants: the two false alarms are fixed in this same tree (check B
-      read 'pool_id' where stop hunts write 'sweep_pool_id'; check A asked
-      one of SLS 3.4's two idle conditions). Run:
+   3. The signal gate, for as long as the M5/M15 ruling stands:
+
+        $PSQL -c "select count(*) from detection.signals where timeframe in ('M5','M15') and published_at >= '$new_started';"
+          -- was: $pre_low_tf in all history   want: 0 new, ever
+
+   4. Invariants, then a 2-4 hour shakedown. The :17 cron keeps running;
+      read ~/soak-logs/alerts.log before trusting anything:
+
         bash ops/soak/check_invariants.sh
-      Expect: the ETHUSDT-H4 idle flag and the STOP_HUNT duplicate flag both
-      GONE, with zero acknowledged lines. If either survives, the fix did not
-      land -- do not acknowledge it, investigate it.
+          -- want: exit 0. A new violation is investigated, never acknowledged
+             to get the deploy through.
 
-      Check A now reads its algo version off the RUNNING engine, so it cannot
-      go blind on a version bump the way it would have on this one.
+   5. The 72h clock restarted at:  $new_started   (schema: $head_rev)
 
-   3. Shakedown 2-4 hours: the :17 cron keeps running; read
-      ~/soak-logs/alerts.log before trusting anything. It carried 167 fires
-      across the last soak, every one of them from the two false alarms.
-
-   4. The 72h clock restarted at:  $new_started
-
-   5. Still deliberately NOT done here: SCANNER_INGEST_TRADES, and the 50
-      ACTIVE symbols that ingest does not yet subscribe to. Both are their
-      own step after a clean shakedown.
+   6. Still deliberately NOT done here: SCANNER_INGEST_TRADES, and widening
+      the ingest subscription. Each is its own step after a clean shakedown.
 NEXT
 
 echo

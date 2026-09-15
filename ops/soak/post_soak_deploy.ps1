@@ -8,10 +8,11 @@
     host, run it there. The checks live in the bash script because they
     interrogate docker and the database, which live on the VM.
 
-    The script refuses to run before the engine container has 72 hours up,
-    refuses a dirty tree, and verifies every fix against the RUNNING
-    containers -- so running this early or twice is safe: it stops at the
-    first precondition instead of half-deploying.
+    The script refuses to run before the soak recorded in ~/soak-logs/T0 has
+    72 hours on it, refuses a dirty tree, migrates the schema to the tree's
+    head before any container restarts, and verifies every fix against the
+    RUNNING containers -- so running this early or twice is safe: it stops at
+    the first precondition instead of half-deploying.
 
     Exit code mirrors the remote script: 0 deployed-and-verified, 1 a check
     refused, 2 the run itself could not happen.
