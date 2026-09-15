@@ -1558,6 +1558,80 @@ async def test_the_interaction_zone_read_includes_zones_retired_since_the_undeci
     } == {"r-live", "r-recent"}
 
 
+async def test_transitions_and_interactions_record_when_they_were_written(engine) -> None:
+    """Migration 022: the database stamps `recorded_at` on every new zone
+    transition, pool transition and interaction, so a late write can be measured
+    on the host the way `engine_events.created_at` already allows. The
+    repositories insert explicit column lists; the default does the work."""
+    sessions = build_session_factory(engine)
+    symbol = "ZRECORDED"
+
+    await PgIctZoneRepository(sessions).upsert(zone("rec-zone", symbol=symbol))
+    await PgIctZoneTransitionRepository(sessions).append(
+        IctZoneTransitionRecord(
+            transition_id="rec-zt",
+            zone_id="rec-zone",
+            symbol=symbol,
+            timeframe=TF,
+            zone_type="OB",
+            from_state="FRESH",
+            to_state="TESTED",
+            reason="zone_test",
+            transitioned_at=T0,
+            candle_index=0,
+            evidence="{}",
+        )
+    )
+    await PgIctZoneInteractionRepository(sessions).append(
+        IctZoneInteractionRecord(
+            interaction_id="rec-ix",
+            zone_id="rec-zone",
+            symbol=symbol,
+            timeframe=TF,
+            zone_type="OB",
+            kind="TOUCH",
+            observed_at=T0,
+            candle_index=0,
+            penetration_depth=Decimal("0.5"),
+            close_price=Decimal("101"),
+            rejection_wick=Decimal("0"),
+            close_through=False,
+            evidence="{}",
+        )
+    )
+    await PgLiquidityPoolRepository(sessions).upsert(pool("rec-pool", symbol=symbol))
+    await PgLiquidityTransitionRepository(sessions).append(
+        LiquidityTransitionRecord(
+            transition_id="rec-lt",
+            pool_id="rec-pool",
+            symbol=symbol,
+            timeframe=TF,
+            from_state="ACTIVE",
+            to_state="SWEPT",
+            reason="liquidity_sweep",
+            transitioned_at=T0,
+            candle_index=0,
+            evidence="{}",
+        )
+    )
+
+    async with engine.connect() as conn:
+        for table, key, value in (
+            ("ict_zone_transitions", "transition_id", "rec-zt"),
+            ("ict_zone_interactions", "interaction_id", "rec-ix"),
+            ("liquidity_transitions", "transition_id", "rec-lt"),
+        ):
+            recorded = (
+                await conn.execute(
+                    text(f"SELECT recorded_at FROM detection.{table} WHERE {key} = :value"),
+                    {"value": value},
+                )
+            ).scalar_one()
+
+            assert recorded is not None, f"{table}.recorded_at was not filled"
+            assert recorded > T0  # written now, long after the candle it is about
+
+
 async def test_reading_transitions_survives_more_ids_than_postgres_takes_parameters(
     engine,
 ) -> None:
