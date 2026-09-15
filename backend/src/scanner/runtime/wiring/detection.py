@@ -25,6 +25,7 @@ from scanner.application.detection.participation_replay import (
 from scanner.application.detection.pipeline import DetectionPipeline
 from scanner.application.detection.signal_monitor import SignalMonitorService
 from scanner.application.detection.state import (
+    ICT_INTERACTION_NAMESPACE,
     ICT_NAMESPACE,
     ICT_OB_NAMESPACE,
     ICT_OTE_NAMESPACE,
@@ -191,6 +192,10 @@ def build_detection_pipeline(
             candles,
             PgIctZoneInteractionContextRepository(sessions),
             zone_interactions,
+            # Each candle decided once; the marker also names the zones walked.
+            state=EngineStateManager(
+                RedisEngineStateStore(redis_client), namespace=ICT_INTERACTION_NAMESPACE
+            ),
         ),
         participation=ParticipationReplayService(
             candles,

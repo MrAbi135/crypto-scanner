@@ -1491,18 +1491,13 @@ async def test_verify_seals_reads_the_stored_payloads(engine) -> None:
     assert "sig-1" in failed
 
 
-async def test_the_interaction_path_applies_the_same_zone_bound_as_confluence(engine) -> None:
-    """§5.1's `P.ict.max_zones = 60`, on the path that was missing it.
-
-    `list_live` carried the bound and `list_zones` did not, so §8 confluence
-    saw sixty zones while the interaction replay walked every live one. On the
-    soak VM that reached 33,807 for BTCUSDT M5: the pass time went 22s → 82s
-    against a 2s target, and interactions were being recorded for zones
-    nothing downstream would ever read.
-    """
+async def test_the_interaction_zone_read_is_not_bounded_by_the_scoring_limit(engine) -> None:
+    """`P.ict.max_zones = 60` bounds what §8 scores (`list_live`), not which
+    zones' interactions are recorded (owner ruling, audit M9). Every live zone
+    is read, newest first."""
     sessions = build_session_factory(engine)
     zones = PgIctZoneRepository(sessions)
-    symbol = "ZBOUND"
+    symbol = "ZUNBOUND"
 
     for i in range(MAX_ZONES + 25):
         await zones.upsert(
@@ -1516,47 +1511,51 @@ async def test_the_interaction_path_applies_the_same_zone_bound_as_confluence(en
 
     listed = await PgIctZoneInteractionContextRepository(sessions).list_zones(symbol, TF)
 
-    assert len(listed) == MAX_ZONES
+    assert len(listed) == MAX_ZONES + 25
+    assert listed[0].zone_id == f"b-{MAX_ZONES + 24:04d}"
 
 
-async def test_the_bounded_zone_read_keeps_the_newest_by_wall_clock(engine) -> None:
-    """Which sixty, and by what ordering.
-
-    `created_index` is the zone's offset inside whichever 500-candle window
-    first detected it — frozen there while the window slides on. Ordering by
-    it sorted zones from different windows against each other by an accident
-    of when the engine looked, which was survivable while this query returned
-    everything and is not now that it decides which zones exist.
-
-    **The fixture had to be rebuilt to make this test capable of failing.**
-    The first version gave the newest zone the *lowest* index, which makes
-    index-ascending and time-descending select the same sixty rows — the test
-    passed against the wrong ordering, which mutation-testing caught and
-    reading did not. Here the two run together instead, so index-ascending
-    keeps the sixty oldest and time-descending keeps the sixty newest, and the
-    two answers share only fifty-five rows.
-    """
+async def test_the_interaction_zone_read_includes_zones_retired_since_the_undecided_candle(
+    engine,
+) -> None:
+    """The lifecycles run before the interaction pass, so a zone killed on the
+    newest candle is already terminal when it is read. It still owes that
+    candle's interactions -- its VIOLATION above all -- so a zone whose
+    terminal transition is at or after `terminal_since` is read; one retired
+    earlier is not, and without `terminal_since` only live zones are."""
     sessions = build_session_factory(engine)
     zones = PgIctZoneRepository(sessions)
-    # Its own symbol: the module shares one database and "ZORDER" already
-    # belongs to the `list_live` ordering test above.
-    symbol = "ZORDERBOUND"
+    transitions = PgIctZoneTransitionRepository(sessions)
+    symbol = "ZRETIRED"
 
-    for i in range(MAX_ZONES + 5):
-        await zones.upsert(
-            zone(
-                f"o-{i:04d}",
+    await zones.upsert(zone("r-live", symbol=symbol))
+    await zones.upsert(zone("r-recent", symbol=symbol, state="INVALIDATED"))
+    await zones.upsert(zone("r-old", symbol=symbol, state="INVALIDATED"))
+
+    for zone_id, minutes in (("r-recent", 60), ("r-old", 10)):
+        await transitions.append(
+            IctZoneTransitionRecord(
+                transition_id=f"t-{zone_id}",
+                zone_id=zone_id,
                 symbol=symbol,
-                created_index=i,
-                created_at=T0 + timedelta(minutes=i),
+                timeframe=TF,
+                zone_type="OB",
+                from_state="FRESH",
+                to_state="INVALIDATED",
+                reason="close_through",
+                transitioned_at=T0 + timedelta(minutes=minutes),
+                candle_index=0,
+                evidence="{}",
             )
         )
 
-    listed = await PgIctZoneInteractionContextRepository(sessions).list_zones(symbol, TF)
+    context = PgIctZoneInteractionContextRepository(sessions)
 
-    # Newest first, and the five oldest are the ones dropped.
-    assert listed[0].zone_id == f"o-{MAX_ZONES + 4:04d}"
-    assert {z.zone_id for z in listed}.isdisjoint({f"o-{i:04d}" for i in range(5)})
+    assert {z.zone_id for z in await context.list_zones(symbol, TF)} == {"r-live"}
+    assert {
+        z.zone_id
+        for z in await context.list_zones(symbol, TF, terminal_since=T0 + timedelta(minutes=30))
+    } == {"r-live", "r-recent"}
 
 
 async def test_reading_transitions_survives_more_ids_than_postgres_takes_parameters(

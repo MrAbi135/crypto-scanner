@@ -27,6 +27,9 @@ ICT_NAMESPACE = "ict"
 ICT_OTE_NAMESPACE = "ict_ote"
 ICT_OB_NAMESPACE = "ict_ob"
 LIQUIDITY_NAMESPACE = "liquidity"
+# The interaction engine's marker also carries the zones it has walked, so a
+# zone born since the last pass is walked from its confirmation.
+ICT_INTERACTION_NAMESPACE = "ict_interaction"
 
 
 async def first_undecided_index(

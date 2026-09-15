@@ -199,19 +199,39 @@ class PgIctZoneInteractionContextRepository:
         self,
         symbol: str,
         timeframe: Timeframe,
+        *,
+        terminal_since: datetime | None = None,
     ) -> tuple[IctZoneRecord, ...]:
+        # §5 makes terminal states permanent, so a zone retired before
+        # `terminal_since` can never interact again. Returning every terminal
+        # zone had the interaction replay walk 3,934 zones on real BTCUSDT H1
+        # where 701 were still capable of anything.
+        #
+        # A zone retired at or after it still owes the candles up to its
+        # terminal one. The lifecycles run before the interaction pass, so a
+        # zone killed on the newest candle was already terminal when this read
+        # ran, and its VIOLATION was never recorded: on the host, 0 of 2,055 OB
+        # interactions after 293 order blocks were invalidated, and no FVG,
+        # IFVG, BPR or mitigation block violation at all.
+        live = IctZoneRow.state.notin_(sorted(TERMINAL_ZONE_STATES))
+        condition: sa.ColumnElement[bool] = live
+
+        if terminal_since is not None:
+            recently_retired = select(IctZoneTransitionRow.zone_id).where(
+                IctZoneTransitionRow.symbol == symbol,
+                IctZoneTransitionRow.timeframe == timeframe.value,
+                IctZoneTransitionRow.to_state.in_(sorted(TERMINAL_ZONE_STATES)),
+                IctZoneTransitionRow.transitioned_at >= terminal_since,
+            )
+            condition = sa.or_(live, IctZoneRow.zone_id.in_(recently_retired))
+
         async with self._sessions() as session:
             result = await session.execute(
                 select(IctZoneRow)
                 .where(
                     IctZoneRow.symbol == symbol,
                     IctZoneRow.timeframe == timeframe.value,
-                    # §5 makes terminal states permanent, so these zones can
-                    # never interact again. Returning them had the interaction
-                    # replay walk 3,934 zones on real BTCUSDT H1 where 701 were
-                    # still capable of anything -- five sixths of the largest
-                    # service's work, on zones that were dead.
-                    IctZoneRow.state.notin_(sorted(TERMINAL_ZONE_STATES)),
+                    condition,
                 )
                 # `created_at`, not `created_index` — the same correction
                 # `list_live` already carries. `created_index` is the zone's

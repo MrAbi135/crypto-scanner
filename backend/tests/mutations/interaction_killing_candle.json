@@ -1,0 +1,102 @@
+{
+  "description": "Interaction pass s6-interaction-v6: a zone retired on an undecided candle is still walked to its killing candle, each candle is decided once, and the golden harness's zone read mirrors production. Each mutation breaks one of those. The Pg query is covered by tests/integration/test_detection_persistence_pg.py in CI; the harness mutations here guard the double golden certifies. Deterministic tests, so one battery run is a verdict. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/interaction_killing_candle.json",
+  "pytest": [
+    "tests/unit/application/detection/test_interaction_killing_candle.py",
+    "tests/unit/application/detection/test_ict_interaction_replay.py"
+  ],
+  "mutations": [
+    {
+      "name": "a zone retired on an undecided candle is not read",
+      "file": "backend/tests/golden/harness/memory.py",
+      "old": "and (zone.state not in _TERMINAL_ZONE_STATES or zone.zone_id in retired)",
+      "new": "and zone.state not in _TERMINAL_ZONE_STATES",
+      "expect_failing": [
+        "test_a_zone_killed_on_an_undecided_candle_gets_its_violation"
+      ]
+    },
+    {
+      "name": "a zone retired on a decided candle is read again",
+      "file": "backend/tests/golden/harness/memory.py",
+      "old": "                and transition.transitioned_at >= terminal_since\n",
+      "new": "",
+      "expect_failing": [
+        "test_a_zone_retired_on_a_decided_candle_is_not_read_again"
+      ]
+    },
+    {
+      "name": "the pass asks for live zones only",
+      "file": "backend/src/scanner/application/detection/ict_interaction_replay.py",
+      "old": "            terminal_since=candles[rewalk_from].open_time,",
+      "new": "            terminal_since=None,",
+      "expect_failing": [
+        "test_a_zone_killed_on_an_undecided_candle_gets_its_violation",
+        "test_the_zone_read_reaches_back_over_the_confirmation_rewalk"
+      ]
+    },
+    {
+      "name": "the last decided candle is ignored",
+      "file": "backend/src/scanner/application/detection/ict_interaction_replay.py",
+      "old": "        rewalk_from = min(max(first_index - _CONFIRMATION_REWALK, 0), len(candles) - 1)",
+      "new": "        rewalk_from = 0",
+      "expect_failing": [
+        "test_a_zone_retired_on_a_decided_candle_is_not_read_again",
+        "test_a_zone_walked_before_is_not_walked_over_decided_candles",
+        "test_the_zone_read_reaches_back_over_the_confirmation_rewalk"
+      ]
+    },
+    {
+      "name": "the confirmation re-walk is dropped",
+      "file": "backend/src/scanner/application/detection/ict_interaction_replay.py",
+      "old": "_CONFIRMATION_REWALK = 2",
+      "new": "_CONFIRMATION_REWALK = 0",
+      "expect_failing": [
+        "test_the_zone_read_reaches_back_over_the_confirmation_rewalk"
+      ]
+    },
+    {
+      "name": "a walked zone is walked over decided candles again",
+      "file": "backend/src/scanner/application/detection/ict_interaction_replay.py",
+      "old": "                rewalk_from if record.zone_id in walked else 0,",
+      "new": "                0,",
+      "expect_failing": [
+        "test_a_zone_walked_before_is_not_walked_over_decided_candles"
+      ]
+    },
+    {
+      "name": "a new zone is walked over undecided candles only",
+      "file": "backend/src/scanner/application/detection/ict_interaction_replay.py",
+      "old": "                rewalk_from if record.zone_id in walked else 0,",
+      "new": "                rewalk_from,",
+      "expect_failing": [
+        "test_a_zone_walked_before_is_not_walked_over_decided_candles"
+      ]
+    },
+    {
+      "name": "the walked zones are never read back",
+      "file": "backend/src/scanner/application/detection/ict_interaction_replay.py",
+      "old": "    return frozenset(json.loads(saved.detail))",
+      "new": "    return frozenset()",
+      "expect_failing": [
+        "test_a_zone_walked_before_is_not_walked_over_decided_candles"
+      ]
+    },
+    {
+      "name": "retired zones are recorded as walked",
+      "file": "backend/src/scanner/application/detection/ict_interaction_replay.py",
+      "old": "sorted(zone.zone_id for zone in zones if zone.state not in _TERMINAL_STATES)",
+      "new": "sorted(zone.zone_id for zone in zones)",
+      "expect_failing": [
+        "test_a_pass_records_its_newest_candle_and_the_live_zones_it_walked"
+      ]
+    },
+    {
+      "name": "the pass is never recorded",
+      "file": "backend/src/scanner/application/detection/ict_interaction_replay.py",
+      "old": "        await _record_walked(self._state, symbol, timeframe, self._algo_version, candles, zones)",
+      "new": "        pass",
+      "expect_failing": [
+        "test_a_pass_records_its_newest_candle_and_the_live_zones_it_walked"
+      ]
+    }
+  ]
+}

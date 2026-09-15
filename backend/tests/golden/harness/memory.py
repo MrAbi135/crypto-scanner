@@ -708,11 +708,39 @@ class InMemoryIctZoneInteractionContextRepository:
         self,
         symbol: str,
         timeframe: Timeframe,
+        *,
+        terminal_since: datetime | None = None,
     ) -> tuple[IctZoneRecord, ...]:
+        """Mirrors `PgIctZoneInteractionContextRepository.list_zones`: live zones,
+        plus zones retired at or after `terminal_since`, newest first, unbounded.
+
+        It used to return every zone, terminal ones included, which production
+        never did -- so golden runs recorded interactions production could not.
+        """
+        retired = (
+            set()
+            if terminal_since is None
+            else {
+                transition.zone_id
+                for transition in self._transitions.transitions
+                if transition.symbol == symbol
+                and transition.timeframe == timeframe
+                and transition.to_state in _TERMINAL_ZONE_STATES
+                and transition.transitioned_at >= terminal_since
+            }
+        )
+
         return tuple(
-            zone
-            for zone in self._zones.zones.values()
-            if zone.symbol == symbol and zone.timeframe == timeframe
+            sorted(
+                (
+                    zone
+                    for zone in self._zones.zones.values()
+                    if zone.symbol == symbol
+                    and zone.timeframe == timeframe
+                    and (zone.state not in _TERMINAL_ZONE_STATES or zone.zone_id in retired)
+                ),
+                key=lambda zone: (-zone.created_at.timestamp(), zone.zone_type, zone.zone_id),
+            )
         )
 
     async def list_transitions(
