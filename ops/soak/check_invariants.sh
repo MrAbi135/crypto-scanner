@@ -431,7 +431,18 @@ echo "-- database invariants --"
 
 verify_check_labels
 
-out=$($PSQL -At -F'|' -v ON_ERROR_STOP=1 -v syms="$INGEST_SYMBOLS" < ops/soak/invariants.sql 2>&1)
+# Check J asks when each fact was written, and a restart's catch-up writes old
+# candles on purpose -- so it needs the engine's start, which only the
+# container knows. Unreadable, it would exclude nothing or everything; either
+# way the check would not be the check, so that is flagged, not guessed.
+ENGINE_STARTED=$(docker inspect --format '{{.State.StartedAt}}' scanner-dev-engine-1 2>/dev/null)
+
+if [ -z "$ENGINE_STARTED" ]; then
+  flag "cannot read the engine start time -- check J ran over nothing"
+  ENGINE_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+fi
+
+out=$($PSQL -At -F'|' -v ON_ERROR_STOP=1 -v syms="$INGEST_SYMBOLS" -v engine_started="$ENGINE_STARTED" < ops/soak/invariants.sql 2>&1)
 rc=$?
 
 if [ "$rc" -ne 0 ]; then
