@@ -774,6 +774,33 @@ async def _run_users_list(
         await engine.dispose()
 
 
+async def _run_stable_review(
+    args: argparse.Namespace,
+) -> int:
+    """SLS §1.6's manual confirmation, for a flag the classifier raised.
+
+    Confirming a stablecoin is not an option here on purpose: that belongs on
+    the curated list in `domain/common/exclusions.py`, which excludes it for
+    good and is reviewed like any other code change.
+    """
+    settings = load_ingest_settings()
+    engine = build_engine(settings.db_dsn)
+
+    try:
+        repo = PgSymbolRepository(build_session_factory(engine))
+
+        await repo.review_stable_flag(args.symbol, dismiss=args.dismiss)
+
+        print(
+            f"stable-review: {args.symbol} "
+            + ("dismissed (scanned; never re-flagged)" if args.dismiss else "reopened")
+        )
+
+        return 0
+    finally:
+        await engine.dispose()
+
+
 _HANDLERS: dict[
     str,
     Callable[
@@ -785,6 +812,7 @@ _HANDLERS: dict[
     "backfill": _run_backfill,
     "verify-continuity": _run_verify,
     "warmth": _run_warmth,
+    "stable-review": _run_stable_review,
 }
 
 

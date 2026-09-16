@@ -123,6 +123,64 @@ async def test_daily_loop_runs_job_for_each_active_symbol() -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_stable_classifier_runs_before_tonights_evaluation() -> None:
+    """SLS §1.6 before §1.4: a symbol flagged tonight must be held in
+    QUARANTINE by tonight's evaluation, not tomorrow's."""
+    calls: list[str] = []
+
+    report = AsyncMock()
+    report.evaluation = None
+
+    job = AsyncMock()
+    job.run_symbol = AsyncMock(side_effect=lambda s: calls.append(f"evaluate {s}") or report)
+
+    stable_peg = AsyncMock()
+    stable_peg.run_symbol = AsyncMock(side_effect=lambda s: calls.append(f"peg {s}"))
+
+    symbols = AsyncMock()
+    symbols.list_observable = AsyncMock(
+        side_effect=[[Symbol("UUSDT"), Symbol("BTCUSDT")], asyncio.CancelledError]
+    )
+
+    with (
+        patch.object(worker, "_seconds_until_next_utc_midnight", AsyncMock(return_value=0.0)),
+        patch.object(worker.asyncio, "sleep", AsyncMock()),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await worker._run_daily_universe_loop(
+            job, symbols, AsyncMock(), AsyncMock(), FakeClock(), stable_peg
+        )
+
+    assert calls[:4] == ["peg UUSDT", "peg BTCUSDT", "evaluate UUSDT", "evaluate BTCUSDT"]
+
+
+@pytest.mark.asyncio
+async def test_a_classifier_failure_does_not_stop_the_evaluation() -> None:
+    report = AsyncMock()
+    report.evaluation = None
+
+    job = AsyncMock()
+    job.run_symbol = AsyncMock(return_value=report)
+
+    stable_peg = AsyncMock()
+    stable_peg.run_symbol = AsyncMock(side_effect=RuntimeError("klines timed out"))
+
+    symbols = AsyncMock()
+    symbols.list_observable = AsyncMock(side_effect=[[Symbol("BTCUSDT")], asyncio.CancelledError])
+
+    with (
+        patch.object(worker, "_seconds_until_next_utc_midnight", AsyncMock(return_value=0.0)),
+        patch.object(worker.asyncio, "sleep", AsyncMock()),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await worker._run_daily_universe_loop(
+            job, symbols, AsyncMock(), AsyncMock(), FakeClock(), stable_peg
+        )
+
+    job.run_symbol.assert_awaited_once_with("BTCUSDT")
+
+
+@pytest.mark.asyncio
 async def test_the_registry_is_synced_at_boot_before_the_first_sleep() -> None:
     """`market.symbols` held zero rows for the project's whole life.
 

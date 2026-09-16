@@ -22,6 +22,13 @@ from scanner.domain.common.rvol import (
     relative_volume,
     uses_seasonal_baseline,
 )
+from scanner.domain.common.stable_peg import (
+    PEG_DEVIATION_LIMIT,
+    PEG_WINDOW_DAYS,
+    StableFlag,
+    next_stable_flag,
+    peg_deviation,
+)
 from scanner.domain.common.symbol import Symbol, SymbolStatus
 from scanner.domain.common.trades import (
     TradeAggregate,
@@ -48,12 +55,15 @@ __all__ = [
     "DERIVED_DP",
     "DETECTION_MIN_CANDLES",
     "LISTING_MIN_DAYS",
+    "PEG_DEVIATION_LIMIT",
+    "PEG_WINDOW_DAYS",
     "TOLERANCE_ATR",
     "VOLUME_MOMENTUM_MIN_CANDLES",
     "Candle",
     "CandleSource",
     "ExclusionReason",
     "RvolClass",
+    "StableFlag",
     "Symbol",
     "SymbolStatus",
     "TradeAggregate",
@@ -70,6 +80,8 @@ __all__ = [
     "median",
     "minimum_candles",
     "minute_of",
+    "next_stable_flag",
+    "peg_deviation",
     "percentile",
     "quantise_derived",
     "relative_volume",

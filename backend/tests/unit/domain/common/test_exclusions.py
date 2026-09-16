@@ -29,7 +29,7 @@ def test_usd_stablecoins_are_excluded(base: str) -> None:
     assert _reason(base) is ExclusionReason.STABLECOIN
 
 
-@pytest.mark.parametrize("base", ["EUR", "EURI", "AEUR", "GBP", "AUD"])
+@pytest.mark.parametrize("base", ["EUR", "EURI", "AEUR", "GBP", "AUD", "KGST"])
 def test_fiat_pegged_assets_are_excluded(base: str) -> None:
     """EURUSDT was ACTIVE at T3: a currency rate, not a crypto market."""
     assert _reason(base) is ExclusionReason.FIAT_PEGGED

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from fastapi.testclient import TestClient
 
@@ -40,6 +41,9 @@ def row(
     status: str = "QUARANTINE",
     passes: int = 0,
     failures: int = 0,
+    exclusion_reason: str | None = None,
+    stable_flag: str | None = None,
+    stable_deviation: Decimal | None = None,
 ) -> UniverseRow:
     return UniverseRow(
         exchange_symbol=symbol,
@@ -51,6 +55,9 @@ def row(
         consecutive_passes=passes,
         consecutive_failures=failures,
         first_seen_at=NOW,
+        exclusion_reason=exclusion_reason,
+        stable_flag=stable_flag,
+        stable_deviation=stable_deviation,
     )
 
 
@@ -185,3 +192,37 @@ def test_a_client_sort_is_refused() -> None:
 
 def test_it_needs_a_token() -> None:
     assert build().get("/api/v1/scanner/universe").status_code == 401
+
+
+def test_an_excluded_symbol_says_why_and_is_not_collecting() -> None:
+    """SLS 1.3: without the reason, an EXCLUDED row with zero observations
+    reads exactly like a young symbol still collecting."""
+    symbols = FakeSymbols([row("USDCUSDT", status="EXCLUDED", exclusion_reason="STABLECOIN")], {})
+
+    data = get(build(symbols)).json()["data"][0]
+
+    assert (data["exclusion_reason"], data["assessment"]) == ("STABLECOIN", "excluded")
+
+
+def test_a_stable_flag_is_shown_as_awaiting_review() -> None:
+    """SLS 1.6: a flagged symbol is held for a person, and the page says so
+    with the measurement that raised the flag."""
+    symbols = FakeSymbols(
+        [
+            row(
+                "UUSDT",
+                tier=UniverseTier.T1,
+                stable_flag="FLAGGED",
+                stable_deviation=Decimal("0.00042"),
+            )
+        ],
+        {"UUSDT": 9},
+    )
+
+    data = get(build(symbols)).json()["data"][0]
+
+    assert (data["stable_flag"], data["stable_deviation"], data["assessment"]) == (
+        "FLAGGED",
+        "0.00042",
+        "stable_review",
+    )

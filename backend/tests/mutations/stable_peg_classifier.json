@@ -1,0 +1,133 @@
+{
+  "description": "SLS 1.6 automatic stablecoin classifier: 30 closed daily closes, RMS distance from 1.00 USD below 1% raises FLAGGED; leaving the peg clears it; DISMISSED (a person's ruling) is never overridden; FLAGGED holds the symbol in QUARANTINE whatever its tier; the worker classifies before it evaluates. Each mutation breaks one of those and names the test that must notice. Needs Docker for the Pg test. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/stable_peg_classifier.json",
+  "pytest": [
+    "tests/unit/domain/common/test_stable_peg.py",
+    "tests/unit/application/marketdata/test_stable_peg_job.py",
+    "tests/unit/runtime/test_worker.py",
+    "tests/unit/interfaces/api/test_universe_endpoint.py",
+    "tests/integration/test_persistence_pg.py"
+  ],
+  "mutations": [
+    {
+      "name": "spread around the mean instead of distance from one",
+      "file": "backend/src/scanner/domain/common/stable_peg.py",
+      "old": "    mean_square = sum(((close - PEG_TARGET) ** 2 for close in closes), Decimal(0)) / len(closes)",
+      "new": "    mean = sum(closes, Decimal(0)) / len(closes)\n    mean_square = sum(((close - mean) ** 2 for close in closes), Decimal(0)) / len(closes)",
+      "expect_failing": [
+        "test_the_measure_is_distance_from_one_not_stillness",
+        "test_a_flat_price_far_from_one_is_not_a_peg"
+      ]
+    },
+    {
+      "name": "any window length measures",
+      "file": "backend/src/scanner/domain/common/stable_peg.py",
+      "old": "    if len(closes) != PEG_WINDOW_DAYS:\n        return None",
+      "new": "    if not closes:\n        return None",
+      "expect_failing": [
+        "test_only_exactly_thirty_closes_measure_anything",
+        "test_a_short_history_is_recorded_as_unmeasured_and_keeps_its_flag"
+      ]
+    },
+    {
+      "name": "the limit is inclusive",
+      "file": "backend/src/scanner/domain/common/stable_peg.py",
+      "old": "    if deviation < PEG_DEVIATION_LIMIT:",
+      "new": "    if deviation <= PEG_DEVIATION_LIMIT:",
+      "expect_failing": [
+        "test_the_limit_is_strict"
+      ]
+    },
+    {
+      "name": "a measurement overrides a dismissal",
+      "file": "backend/src/scanner/domain/common/stable_peg.py",
+      "old": "    if current is StableFlag.DISMISSED or deviation is None:",
+      "new": "    if deviation is None:",
+      "expect_failing": [
+        "test_a_dismissal_is_never_overridden_by_a_measurement",
+        "test_a_dismissed_symbol_stays_dismissed_on_a_perfect_peg"
+      ]
+    },
+    {
+      "name": "a missing measurement clears the flag",
+      "file": "backend/src/scanner/domain/common/stable_peg.py",
+      "old": "    if current is StableFlag.DISMISSED or deviation is None:\n        return current",
+      "new": "    if current is StableFlag.DISMISSED:\n        return current\n    if deviation is None:\n        return None",
+      "expect_failing": [
+        "test_no_measurement_changes_nothing",
+        "test_a_short_history_is_recorded_as_unmeasured_and_keeps_its_flag"
+      ]
+    },
+    {
+      "name": "the flag never clears",
+      "file": "backend/src/scanner/domain/common/stable_peg.py",
+      "old": "        return StableFlag.FLAGGED\n\n    return None",
+      "new": "        return StableFlag.FLAGGED\n\n    return current",
+      "expect_failing": [
+        "test_leaving_the_peg_clears_the_flag"
+      ]
+    },
+    {
+      "name": "the job includes today's open candle",
+      "file": "backend/src/scanner/application/marketdata/stable_peg_job.py",
+      "old": "        end = now.replace(hour=0, minute=0, second=0, microsecond=0)",
+      "new": "        end = now",
+      "expect_failing": [
+        "test_it_reads_thirty_closed_days_ending_at_midnight"
+      ]
+    },
+    {
+      "name": "a flag does not hold the tier out",
+      "file": "backend/src/scanner/infrastructure/persistence/repositories.py",
+      "old": "                    or row.stable_flag == StableFlag.FLAGGED.value\n",
+      "new": "",
+      "expect_failing": [
+        "test_a_stable_flag_holds_even_a_t1_symbol_in_quarantine"
+      ]
+    },
+    {
+      "name": "raising a flag leaves an ACTIVE symbol active",
+      "file": "backend/src/scanner/infrastructure/persistence/repositories.py",
+      "old": "            if flag is StableFlag.FLAGGED and row.status == SymbolStatus.ACTIVE.value:",
+      "new": "            if False:",
+      "expect_failing": [
+        "test_a_stable_flag_holds_even_a_t1_symbol_in_quarantine"
+      ]
+    },
+    {
+      "name": "a dismissal is not stored",
+      "file": "backend/src/scanner/infrastructure/persistence/repositories.py",
+      "old": "            row.stable_flag = StableFlag.DISMISSED.value if dismiss else None",
+      "new": "            row.stable_flag = None",
+      "expect_failing": [
+        "test_a_stable_flag_holds_even_a_t1_symbol_in_quarantine"
+      ]
+    },
+    {
+      "name": "the worker evaluates before it classifies",
+      "file": "backend/src/scanner/runtime/worker.py",
+      "old": "        if stable_peg is not None:\n            for symbol in observable:",
+      "new": "        if False:\n            for symbol in observable:",
+      "expect_failing": [
+        "test_the_stable_classifier_runs_before_tonights_evaluation"
+      ]
+    },
+    {
+      "name": "a classifier failure stops the night",
+      "file": "backend/src/scanner/runtime/worker.py",
+      "old": "                try:\n                    await stable_peg.run_symbol(symbol.exchange_symbol)\n                except Exception:",
+      "new": "                try:\n                    await stable_peg.run_symbol(symbol.exchange_symbol)\n                except ZeroDivisionError:",
+      "expect_failing": [
+        "test_a_classifier_failure_does_not_stop_the_evaluation"
+      ]
+    },
+    {
+      "name": "the page does not say a flag awaits review",
+      "file": "backend/src/scanner/interfaces/api/scanner.py",
+      "old": "            if row.stable_flag == \"FLAGGED\"",
+      "new": "            if False",
+      "expect_failing": [
+        "test_a_stable_flag_is_shown_as_awaiting_review"
+      ]
+    }
+  ]
+}
