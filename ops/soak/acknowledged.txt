@@ -22,3 +22,15 @@
 #
 # Format: pattern | until (UTC date) | why
 # The pattern is matched against the whole violation line as a fixed substring.
+
+# Liquidity s5-v14 re-judges displacement on decided candles (audit M3, fixed
+# by #282 s5-v15). Hourly since 2026-09-15 21:17Z; these rows leave check J the
+# moment the fixed engine starts (J reads only writes since engine start), so
+# delete these three lines in the first PR after that deploy.
+J. event written beyond its horizon|LIQUIDITY_SWEEP_DISPLACED| | 2026-09-17 | s5-v14 maturation re-judges decided candles; fixed by #282, awaiting its deploy
+J. event written beyond its horizon|LIQUIDITY_STOP_HUNT| | 2026-09-17 | s5-v14 maturation re-judges decided candles; fixed by #282, awaiting its deploy
+J. event written beyond its horizon|LIQUIDITY_STOP_HUNT_FAILED| | 2026-09-17 | s5-v14 maturation re-judges decided candles; fixed by #282, awaiting its deploy
+
+# One OTE interaction at exactly the measured 10-period allowance; OTE delay is
+# unexplained and watched, so only this row is acknowledged, never the kind.
+|LISTAUSDT 2026-09-16 04:10:00+00 | 2026-09-17 | one OTE interaction at the edge of the 10-period allowance (2026-09-16); watched, not explained

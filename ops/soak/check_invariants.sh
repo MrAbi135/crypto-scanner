@@ -329,7 +329,7 @@ for key in $keys; do
       coalesce((select extract(epoch from max(event_at))::bigint
                   from detection.engine_events
                  where symbol='${symbol}' and timeframe='${timeframe}'
-                   and event_type='${want}'), 0),
+                   and event_type in ('${want}', 'CHOCH_${want#BOS_}', 'MSS_${want#BOS_}')), 0),
       coalesce((select extract(epoch from max(open_time))::bigint
                   from market.candles
                  where symbol='${symbol}' and timeframe='${timeframe}'), 0),
@@ -361,6 +361,12 @@ for key in $keys; do
   printf '%-8s %-4s trend=%-8s last %-8s %-18s %s candles ago, closes %s
 '     "$symbol" "$timeframe" "$trend" "$want" "$since" "$candles" "${bracket:-?}"
 
+  # "No break in a hundred candles" is counted from the trend's own last break,
+  # and the break that turned it is a CHOCH or an MSS, not a BOS. Counted from
+  # BOS alone, the first check after a flip reads the previous regime's last
+  # BOS, days old, beside the close that flipped the trend: LITEBUSDT M15
+  # (MSS_UP written 14:15:13Z, check 14:17, BOS_UP 14:30) and H1 (MSS_UP
+  # 18:00:12Z, check 18:17, BOS_UP 19:00) on 2026-09-16, each gone the next hour.
   # A break test must read only closes made AFTER the level it is compared
   # against existed. The first draft compared the CURRENT bracket against ALL
   # of the last 100 closes, and on 2026-09-10 that fired on BTCUSDT M15: the

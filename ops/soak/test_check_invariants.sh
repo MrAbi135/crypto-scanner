@@ -144,7 +144,11 @@ rm -f "$ACK_FILE"
 #    violation nobody feeds here is one nobody has looked at.
 ACK_FILE=ops/soak/acknowledged.txt
 problems=0
-triage_violations "E. some new violation|X|9|9" > "$OUT"
+triage_violations "E. some new violation|X|9|9
+J. event written beyond its horizon|LIQUIDITY_SWEEP_DISPLACED|M5|9|478.0|18|BNBUSDT 2026-09-14 20:10:00+00
+J. event written beyond its horizon|LIQUIDITY_STOP_HUNT|M5|4|477.1|18|LINKUSDT 2026-09-15 00:10:00+00
+J. event written beyond its horizon|LIQUIDITY_STOP_HUNT_FAILED|M5|1|464.1|18|UNIUSDT 2026-09-14 06:25:00+00
+J3. row written beyond its horizon|interaction|OTE|M5|2|10.0|10|LISTAUSDT 2026-09-16 04:10:00+00" > "$OUT"
 check "the shipped file acknowledges only what it names" "1" "$problems"
 echo
 echo "check labels vs the row pattern"
