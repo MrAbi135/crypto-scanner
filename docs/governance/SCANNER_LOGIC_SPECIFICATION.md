@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.9
-**Ratified:** 2026-07-12 · **Last amended:** 2026-09-15 (v1.0.9; see Amendment History)
+**Version:** 1.0.10
+**Ratified:** 2026-07-12 · **Last amended:** 2026-09-17 (v1.0.10; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -660,7 +660,7 @@ Volume is confirmation evidence, never a standalone signal — and in crypto it 
 ### 6.6 Detector: Fake Volume Defense
 
 **Purpose.** Protect ranking integrity from wash trading and painted tape — a first-class institutional requirement for crypto.
-**Detection Logic (symbol-level, daily).** Fake-volume score 0–100 from four tests, 25 points each: (1) volume/depth ratio > 97.5th percentile of universe (volume unsupported by book); (2) round-trip symmetry — daily |cum delta| / total volume < 0.02 with elevated RVOL (perfectly two-sided tape); (3) trade-size uniformity — coefficient of variation of trade sizes < 0.2 (algorithmic wash signature); (4) `suspect_volume` candle count (§6.4) > 5 in 24h. Score ≥ 50 ⇒ symbol tagged `wash_risk`; consequences: volume factor globally capped at 50 for the symbol, alert priority capped at Medium, AI explanations must disclose the tag, meme-category symbols get test thresholds tightened by 20% (§1.8).
+**Detection Logic (symbol-level, daily).** Fake-volume score 0–100 from four tests, 25 points each: (1) volume/depth ratio > 97.5th percentile of universe (volume unsupported by book); (2) round-trip symmetry — daily |cum delta| / total volume < 0.02 with elevated RVOL (perfectly two-sided tape); (3) trade-size uniformity — coefficient of variation of trade sizes < 0.2 (algorithmic wash signature); (4) `suspect_volume` candle count (§6.4) on the symbol's **H1 and H4** candles > 5 in 24h. Score ≥ 50 ⇒ symbol tagged `wash_risk`; consequences: volume factor globally capped at 50 for the symbol, alert priority capped at Medium, AI explanations must disclose the tag, meme-category symbols get test thresholds tightened by 20% (§1.8).
 **Validation/Invalidation.** Recomputed daily; tag lifts after 3 consecutive clean days (hysteresis, §1.4 pattern). **Edge Cases.** Legitimate high-frequency market-making can trip (3): the composite (need ≥ 2 tests) plus hysteresis protects against single-test false positives — no single test may tag a symbol. **Performance.** Daily batch over stored aggregates. **Future.** Cross-exchange volume-consistency test once multi-venue data exists.
 
 ### 6.7 Volume Ranking Output
@@ -1158,6 +1158,22 @@ Every parameter change increments `param_set_version` and requires golden-datase
 ---
 
 ## Amendment History
+
+### v1.0.10 — 2026-09-17
+
+One clarification, ruled by the product owner on 2026-09-17 ("Haan, (a) — H1/H4
+only"). **It changes behaviour.**
+
+| # | Section | Was | Now | Why |
+|---|---|---|---|---|
+| 1 | §6.6 test (4) | "`suspect_volume` candle count (§6.4) > 5 in 24h" — which timeframes' candles count was unstated; the implementation summed every scanned timeframe | The count reads the symbol's **H1 and H4** candles only. | Before v1.0.9, M5 and M15 had no RVOL inside a 500-candle window and so produced no §6.4 candles, and the unstated scope was in effect H1/H4. Once §2.11 read the baseline from history (v1.0.9 #6) they produced most of them against the same threshold of five: on 2026-09-15 BTCUSDT had 6 on M5, 2 on M15 and none on H1 or H4, and BTCUSDT and XRPUSDT were tagged `wash_risk` — capping their confluence at 50 on every timeframe for at least three days. A fixed daily count over 288 M5 candles is not the test calibrated over 24 H1 candles. |
+
+**Impact review.** Worker-side only (`SuspectVolumeCounter`); no detector or engine
+algo version changes and no parameter value changes, so no `param_set_version`
+bump. Tags already set keep §6.6's hysteresis and lift after three clean days. Ships
+with liquidity s5-v15 (#282) as one release with one soak reset (owner ruling
+2026-09-17).
+
 
 ### v1.0.9 — 2026-09-15
 
