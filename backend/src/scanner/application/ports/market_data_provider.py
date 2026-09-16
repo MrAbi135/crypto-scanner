@@ -19,6 +19,8 @@ class ExchangeSymbolInfo:
     base_asset: str
     quote_asset: str
     trading: bool
+    # The venue's own leveraged-token flag (SLS §1.7), where it has one.
+    leveraged: bool = False
 
 
 class MarketDataProvider(Protocol):

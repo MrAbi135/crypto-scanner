@@ -49,6 +49,20 @@ _MAX_ATTEMPTS = 4
 _BACKOFF_BASE_S = 0.5
 
 
+def _is_leveraged(item: dict[str, Any]) -> bool:
+    """Binance's leveraged-token flag (SLS §1.7's "exchange metadata flag").
+
+    It lives in `permissionSets` today; the flat `permissions` list is the
+    older form of the same field and is read too, so either shape counts.
+    """
+    sets = item.get("permissionSets") or []
+    flat = item.get("permissions") or []
+
+    return "LEVERAGED" in flat or any(
+        isinstance(group, list) and "LEVERAGED" in group for group in sets
+    )
+
+
 def _depth_weight(limit: int) -> int:
     """Return Binance request weight for one order-book depth request."""
 
@@ -105,6 +119,7 @@ class BinanceRestAdapter(
                 base_asset=item["baseAsset"],
                 quote_asset=item["quoteAsset"],
                 trading=item.get("status") == "TRADING",
+                leveraged=_is_leveraged(item),
             )
             for item in symbols
             if isinstance(item, dict) and "symbol" in item

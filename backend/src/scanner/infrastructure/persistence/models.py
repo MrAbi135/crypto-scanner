@@ -92,6 +92,11 @@ class SymbolRow(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    # SLS §1.3: set exactly when status is EXCLUDED (migration 023's CHECK).
+    exclusion_reason: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
 
     tier: Mapped[str] = mapped_column(
         String(16),

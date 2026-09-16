@@ -11,6 +11,7 @@ from scanner.domain.common.atr import (
     wilder_atr_series,
 )
 from scanner.domain.common.candle import Candle, CandleSource
+from scanner.domain.common.exclusions import ExclusionReason, exclusion_reason
 from scanner.domain.common.rvol import (
     BASELINE_CANDLES,
     BASELINE_DAYS,
@@ -51,6 +52,7 @@ __all__ = [
     "VOLUME_MOMENTUM_MIN_CANDLES",
     "Candle",
     "CandleSource",
+    "ExclusionReason",
     "RvolClass",
     "Symbol",
     "SymbolStatus",
@@ -63,6 +65,7 @@ __all__ = [
     "baseline_sample",
     "classify",
     "detection_is_warm",
+    "exclusion_reason",
     "is_warm",
     "median",
     "minimum_candles",

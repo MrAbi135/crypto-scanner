@@ -236,6 +236,8 @@ def _universe_row(row: UniverseRow, observations: int) -> dict[str, Any]:
         "base_asset": row.base_asset,
         "quote_asset": row.quote_asset,
         "status": row.status,
+        # SLS §1.3: why an EXCLUDED symbol is never scanned; null otherwise.
+        "exclusion_reason": row.exclusion_reason,
         "tier": row.tier.value,
         "candidate_tier": row.candidate_tier.value if row.candidate_tier is not None else None,
         "consecutive_passes": row.consecutive_passes,
@@ -245,7 +247,9 @@ def _universe_row(row: UniverseRow, observations: int) -> dict[str, Any]:
         # threshold. "Not yet assessed" and "assessed and failing" are the two
         # states this page exists to separate.
         "assessment": (
-            "collecting"
+            "excluded"
+            if row.exclusion_reason is not None
+            else "collecting"
             if observations < REQUIRED_OBSERVATION_DAYS
             else "evaluating"
             if row.consecutive_failures == 0
