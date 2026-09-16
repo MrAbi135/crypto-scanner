@@ -77,6 +77,10 @@ FIAT_PEGGED_BASES = frozenset(
         "EURI",
         "GBP",
         "JPY",
+        # Kyrgyz som (0.011387 USD on 2026-09-17; 30-day close spread 0.19%).
+        # Found by the §1.6 classifier's first run over live data -- it is not
+        # USD-pegged, so the classifier itself would never flag it.
+        "KGST",
         "MXN",
         "PLN",
         "RON",

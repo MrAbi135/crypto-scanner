@@ -97,6 +97,13 @@ class SymbolRow(Base):
         String(32),
         nullable=True,
     )
+    # SLS §1.6's classifier (migration 024).
+    stable_flag: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    stable_deviation: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    stable_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     tier: Mapped[str] = mapped_column(
         String(16),

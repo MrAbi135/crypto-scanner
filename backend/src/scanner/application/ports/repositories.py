@@ -8,7 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Protocol
 
-from scanner.domain.common import Candle, Symbol, TradeAggregate
+from scanner.domain.common import Candle, StableFlag, Symbol, TradeAggregate
 from scanner.domain.common.universe import UniverseTier
 from scanner.domain.volume import WashRiskState
 from scanner.shared import Timeframe
@@ -44,6 +44,8 @@ class UniverseRow:
     consecutive_failures: int
     first_seen_at: datetime
     exclusion_reason: str | None = None
+    stable_flag: str | None = None
+    stable_deviation: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +93,23 @@ class SymbolRepository(Protocol):
 
     async def save_wash_risk(self, exchange_symbol: str, state: WashRiskState) -> None:
         """§6.6's daily tag, with the clean-day counter it lifts on."""
+        ...
+
+    async def get_stable_flag(self, exchange_symbol: str) -> StableFlag | None: ...
+
+    async def save_stable_peg(
+        self,
+        exchange_symbol: str,
+        *,
+        flag: StableFlag | None,
+        deviation: Decimal | None,
+        checked_at: datetime,
+    ) -> None:
+        """§1.6's nightly measurement; a new FLAGGED holds the symbol in QUARANTINE."""
+        ...
+
+    async def review_stable_flag(self, exchange_symbol: str, *, dismiss: bool) -> None:
+        """A person's §1.6 review: dismiss the flag for good, or reopen it."""
         ...
 
     async def list_observable(self) -> Sequence[Symbol]:

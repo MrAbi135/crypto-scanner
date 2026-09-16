@@ -49,6 +49,7 @@ def test_all_commands_have_handlers() -> None:
         "backfill",
         "verify-continuity",
         "warmth",
+        "stable-review",
     }
 
 
@@ -172,3 +173,24 @@ async def test_dispatch_refuses_an_unknown_users_subcommand() -> None:
 
     with pytest.raises(ValueError, match="unknown users command"):
         await cli._dispatch(args)
+
+
+def test_stable_review_takes_exactly_one_decision() -> None:
+    """SLS 1.6's manual confirmation: dismiss or reopen, never both or neither.
+
+    There is no "confirm" on purpose -- a confirmed stablecoin belongs on the
+    curated exclusion list, which is a reviewed code change.
+    """
+    parser = build_parser()
+
+    args = parser.parse_args(["stable-review", "--symbol", "UUSDT", "--dismiss"])
+    assert (args.command, args.symbol, args.dismiss, args.reopen) == (
+        "stable-review",
+        "UUSDT",
+        True,
+        False,
+    )
+
+    for bad in (["--symbol", "UUSDT"], ["--symbol", "UUSDT", "--dismiss", "--reopen"]):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["stable-review", *bad])

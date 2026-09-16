@@ -238,6 +238,11 @@ def _universe_row(row: UniverseRow, observations: int) -> dict[str, Any]:
         "status": row.status,
         # SLS §1.3: why an EXCLUDED symbol is never scanned; null otherwise.
         "exclusion_reason": row.exclusion_reason,
+        # SLS §1.6's classifier: FLAGGED awaits a person, DISMISSED was reviewed.
+        "stable_flag": row.stable_flag,
+        "stable_deviation": (
+            str(row.stable_deviation) if row.stable_deviation is not None else None
+        ),
         "tier": row.tier.value,
         "candidate_tier": row.candidate_tier.value if row.candidate_tier is not None else None,
         "consecutive_passes": row.consecutive_passes,
@@ -249,6 +254,8 @@ def _universe_row(row: UniverseRow, observations: int) -> dict[str, Any]:
         "assessment": (
             "excluded"
             if row.exclusion_reason is not None
+            else "stable_review"
+            if row.stable_flag == "FLAGGED"
             else "collecting"
             if observations < REQUIRED_OBSERVATION_DAYS
             else "evaluating"

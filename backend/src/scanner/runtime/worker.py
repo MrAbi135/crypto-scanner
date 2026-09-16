@@ -26,6 +26,7 @@ from scanner.application.marketdata.liquidity_collector import (
 from scanner.application.marketdata.liquidity_history import (
     LiquiditySnapshotBuilder,
 )
+from scanner.application.marketdata.stable_peg_job import StablePegJob
 from scanner.application.marketdata.symbol_sync import (
     SymbolSyncService,
 )
@@ -111,6 +112,7 @@ async def _run_daily_universe_loop(
     sync: SymbolSyncService,
     fake_volume: FakeVolumeJob,
     clock: Clock,
+    stable_peg: StablePegJob | None = None,
 ) -> None:
     # Once at boot, before the first sleep. `market.symbols` had zero rows for
     # the entire life of the project because `sync-symbols` existed only as a
@@ -136,6 +138,18 @@ async def _run_daily_universe_loop(
         # §6.6 is "recomputed daily" over a *closed* day, and the loop wakes at
         # midnight, so the day to score is the one that just ended.
         day = _previous_utc_day(clock.now())
+
+        # §1.6's classifier before §1.4's evaluation, so a symbol flagged
+        # tonight is held in QUARANTINE by tonight's evaluation, not tomorrow's.
+        if stable_peg is not None:
+            for symbol in observable:
+                try:
+                    await stable_peg.run_symbol(symbol.exchange_symbol)
+                except Exception:
+                    log.exception(
+                        "stable_peg_evaluation_failed",
+                        symbol=symbol.exchange_symbol,
+                    )
 
         for symbol in observable:
             try:
@@ -250,6 +264,7 @@ def main() -> None:
                     symbol_sync,
                     fake_volume,
                     clock,
+                    StablePegJob(rest_adapter, symbol_repo, clock),
                 )
             )
 

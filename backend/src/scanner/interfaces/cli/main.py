@@ -139,6 +139,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="default: every timeframe the engine consumes",
     )
 
+    stable_review = sub.add_parser(
+        "stable-review",
+        help="Review a symbol the SLS 1.6 stablecoin classifier flagged",
+    )
+
+    stable_review.add_argument(
+        "--symbol",
+        required=True,
+    )
+
+    decision = stable_review.add_mutually_exclusive_group(required=True)
+
+    decision.add_argument(
+        "--dismiss",
+        action="store_true",
+        help="not a stablecoin: keep scanning it; no later measurement re-flags it",
+    )
+
+    decision.add_argument(
+        "--reopen",
+        action="store_true",
+        help="undo a dismissal; the next nightly measurement decides again",
+    )
+
     engine = sub.add_parser(
         "engine",
         help="Detection engine operations",

@@ -4,7 +4,7 @@
 
 **Document Status:** Official Database Design Document — defines the complete persistence architecture
 **Authority:** Subordinate to `PROJECT_CONSTITUTION.md`, `SCANNER_LOGIC_SPECIFICATION.md`, `TECHNOLOGY_DECISION_RECORD.md`, `PRODUCT_REQUIREMENTS_DOCUMENT.md`, and `TECHNICAL_ARCHITECTURE_DOCUMENT.md` (all v1.0.0); authoritative over all database structure, retention, and data-operations policy
-**Version:** 1.0.2 | **Ratified:** 2026-07-12 | **Last amended:** 2026-09-17 (see §23)
+**Version:** 1.0.3 | **Ratified:** 2026-07-12 | **Last amended:** 2026-09-17 (see §23)
 **Amendment Rule:** Schema evolution follows expand-migrate-contract discipline (Constitution §33.6); structural changes require a DDD revision
 
 > Engine: PostgreSQL 16 + TimescaleDB (TDR §8). Access exclusively through the repository layer (TAD §13). This document defines structure and policy — no SQL, no migrations, no ORM models. Field lists name the semantically required columns; exact column naming follows Constitution §11 conventions at implementation.
@@ -118,7 +118,7 @@ Each table: Purpose / Description / Main Fields / Relationships / Index Requirem
 
 - **Purpose:** Universe registry — every instrument the platform has ever known.
 - **Description:** One row per (base, quote, venue); carries lifecycle status (QUARANTINE / ACTIVE / DELISTING / DELISTED per SLS §1, or EXCLUDED by SLS §1.3's hard exclusions, which sit outside that lifecycle and carry their reason), category tags, listing date, current tier (materialized from T2).
-- **Main Fields:** id (ULID), venue, base_asset, quote_asset, exchange_symbol, status, exclusion_reason (STABLECOIN / FIAT_PEGGED / LEVERAGED_TOKEN; present exactly when status is EXCLUDED — v1.0.2), category tags, listed_at, delisted_at, current_tier, tier_since, warmup_state per TF.
+- **Main Fields:** id (ULID), venue, base_asset, quote_asset, exchange_symbol, status, exclusion_reason (STABLECOIN / FIAT_PEGGED / LEVERAGED_TOKEN; present exactly when status is EXCLUDED — v1.0.2), stable_flag / stable_deviation / stable_checked_at (SLS §1.6 classifier: FLAGGED awaits manual confirmation and holds the symbol in QUARANTINE, DISMISSED is a person's ruling — v1.0.3), category tags, listed_at, delisted_at, current_tier, tier_since, warmup_state per TF.
 - **Relationships:** Parent of all market/detection per-symbol tables.
 - **Index Requirements:** Unique (venue, exchange_symbol); status + tier partial index (active universe scan).
 - **Expected Growth:** Hundreds of rows; trivial.
@@ -710,6 +710,19 @@ Validation is layered (Constitution §9.3): boundary (Pydantic) → application 
 
 ## 23. Amendment History
 
+### v1.0.3 — 2026-09-17
+
+One structural addition to T1, from migration `024_symbol_stable_flag.py`.
+
+| # | Where | Was | Now | Why |
+|---|---|---|---|---|
+| 1 | T1 `market.symbols` fields | no record of SLS §1.6's automatic classifier | `stable_flag` (NULL / FLAGGED / DISMISSED, CHECK), `stable_deviation` (RMS distance of the 30 daily closes from 1.00 USD, ≥ 0), `stable_checked_at` | §1.6 runs a classifier beside the curated list that "never removes a symbol; it flags", and a flagged symbol is "quarantined for manual confirmation". The flag is a question awaiting a person, not a decision, so it cannot be the EXCLUDED status of v1.0.2; and a person's dismissal has to outlive the next nightly measurement, so it must be stored rather than recomputed. The measurement is kept beside the flag so a reviewer sees the number that raised it. |
+
+Impact: additive only; no data changed by the migration. The worker's nightly
+pass fills the columns, `scanner stable-review` records a person's decision,
+and `GET /scanner/universe` shows the flag, its measurement and a
+`stable_review` assessment.
+
 ### v1.0.2 — 2026-09-17
 
 One structural addition to T1, from migration `023_symbol_exclusions.py`.
@@ -746,4 +759,4 @@ rule forbids.
 
 This design encodes the platform's core promise at the storage layer: **facts are append-only, evidence is permanent, derived state is disposable, and the signal record cannot be edited by anyone — including us.** The two-workload split (OLTP + time-series) lives in one operationally boring PostgreSQL cluster with every scale ceiling measured and its successor named. Repositories implement against this document; where a storage question is not answered here, the answer is a DDD amendment, never an improvised table.
 
-**— End of Database Design Document v1.0.2 —**
+**— End of Database Design Document v1.0.3 —**

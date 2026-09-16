@@ -22,7 +22,13 @@ from sqlalchemy import text
 from scanner.application.ports import IncidentRecord
 from scanner.application.ports.liquidity_history import LiquidityHistoryRecord
 from scanner.application.ports.repositories import UniverseStateRecord
-from scanner.domain.common import ExclusionReason, Symbol, SymbolStatus, TradeAggregate
+from scanner.domain.common import (
+    ExclusionReason,
+    StableFlag,
+    Symbol,
+    SymbolStatus,
+    TradeAggregate,
+)
 from scanner.domain.common.universe import UniverseTier
 from scanner.domain.volume import WashRiskState
 from scanner.infrastructure.persistence.database import build_session_factory
@@ -319,6 +325,63 @@ async def test_the_database_refuses_an_exclusion_without_a_reason(engine) -> Non
                     "quote_asset, status, first_seen_at) VALUES "
                     "('01J00000000000000000000000', 'binance', 'NOREASONUSDT', 'NOREASON', "
                     "'USDT', 'EXCLUDED', now())"
+                )
+            )
+        await conn.rollback()
+
+
+async def test_a_stable_flag_holds_even_a_t1_symbol_in_quarantine(engine) -> None:
+    """SLS §1.6: "flagged stable, quarantined for manual confirmation".
+
+    A liquid stablecoin earns T1 on liquidity alone, so the tier must not be
+    what lets it back into the scanned universe.
+    """
+    repo = PgSymbolRepository(build_session_factory(engine))
+
+    await _seed(repo, "PEGUSDT", SymbolStatus.QUARANTINE)
+    await repo.save_universe_state(_state("PEGUSDT", UniverseTier.T1))
+
+    active = await repo.get("PEGUSDT")
+    assert active is not None and active.status is SymbolStatus.ACTIVE  # premise
+
+    await repo.save_stable_peg(
+        "PEGUSDT", flag=StableFlag.FLAGGED, deviation=Decimal("0.0004"), checked_at=BASE_TIME
+    )
+
+    flagged = await repo.get("PEGUSDT")
+    assert flagged is not None and flagged.status is SymbolStatus.QUARANTINE
+    assert await repo.get_stable_flag("PEGUSDT") is StableFlag.FLAGGED
+
+    # Tonight's evaluation keeps it there despite the tier ...
+    await repo.save_universe_state(_state("PEGUSDT", UniverseTier.T1))
+
+    held = await repo.get("PEGUSDT")
+    assert held is not None and held.status is SymbolStatus.QUARANTINE
+
+    (row,) = [r for r in await repo.list_universe(tier="T1") if r.exchange_symbol == "PEGUSDT"]
+    assert (row.stable_flag, row.stable_deviation) == ("FLAGGED", Decimal("0.0004"))
+
+    # ... and a person's dismissal lets the next evaluation promote it.
+    await repo.review_stable_flag("PEGUSDT", dismiss=True)
+    await repo.save_universe_state(_state("PEGUSDT", UniverseTier.T1))
+
+    released = await repo.get("PEGUSDT")
+    assert released is not None and released.status is SymbolStatus.ACTIVE
+    assert await repo.get_stable_flag("PEGUSDT") is StableFlag.DISMISSED
+
+    await repo.review_stable_flag("PEGUSDT", dismiss=False)
+    assert await repo.get_stable_flag("PEGUSDT") is None
+
+
+async def test_the_database_refuses_an_unknown_stable_flag(engine) -> None:
+    async with engine.connect() as conn:
+        with pytest.raises(Exception, match="ck_symbols_stable_flag"):
+            await conn.execute(
+                text(
+                    "INSERT INTO market.symbols (id, venue, exchange_symbol, base_asset, "
+                    "quote_asset, status, first_seen_at, stable_flag) VALUES "
+                    "('01J00000000000000000000001', 'binance', 'BADFLAGUSDT', 'BADFLAG', "
+                    "'USDT', 'QUARANTINE', now(), 'CONFIRMED')"
                 )
             )
         await conn.rollback()

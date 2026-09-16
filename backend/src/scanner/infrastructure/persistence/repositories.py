@@ -33,6 +33,7 @@ from scanner.domain.common import (
     Candle,
     CandleSource,
     ExclusionReason,
+    StableFlag,
     Symbol,
     SymbolStatus,
     TradeAggregate,
@@ -201,6 +202,67 @@ class PgSymbolRepository:
 
             await session.commit()
 
+    async def get_stable_flag(
+        self,
+        exchange_symbol: str,
+    ) -> StableFlag | None:
+        async with self._sessions() as session:
+            row = await self._symbol_row(session, exchange_symbol)
+
+            return StableFlag(row.stable_flag) if row.stable_flag is not None else None
+
+    async def save_stable_peg(
+        self,
+        exchange_symbol: str,
+        *,
+        flag: StableFlag | None,
+        deviation: Decimal | None,
+        checked_at: datetime,
+    ) -> None:
+        async with self._sessions() as session:
+            row = await self._symbol_row(session, exchange_symbol)
+
+            row.stable_flag = flag.value if flag is not None else None
+            row.stable_deviation = deviation
+            row.stable_checked_at = checked_at
+
+            # §1.6: "flagged stable, quarantined for manual confirmation". Done
+            # here as well as in `save_universe_state`, because a symbol whose
+            # evaluation fails tonight would otherwise stay ACTIVE on a flag.
+            if flag is StableFlag.FLAGGED and row.status == SymbolStatus.ACTIVE.value:
+                row.status = SymbolStatus.QUARANTINE.value
+
+            await session.commit()
+
+    async def review_stable_flag(
+        self,
+        exchange_symbol: str,
+        *,
+        dismiss: bool,
+    ) -> None:
+        async with self._sessions() as session:
+            row = await self._symbol_row(session, exchange_symbol)
+
+            # Reopening clears the flag rather than setting FLAGGED: the next
+            # nightly measurement decides, so a reopened symbol that has since
+            # left its peg is not held in QUARANTINE on an old reading.
+            row.stable_flag = StableFlag.DISMISSED.value if dismiss else None
+
+            await session.commit()
+
+    @staticmethod
+    async def _symbol_row(session: AsyncSession, exchange_symbol: str) -> SymbolRow:
+        row = (
+            await session.execute(
+                select(SymbolRow).where(SymbolRow.exchange_symbol == exchange_symbol)
+            )
+        ).scalar_one_or_none()
+
+        if row is None:
+            raise LookupError(f"Unknown symbol: {exchange_symbol}")
+
+        return row
+
     async def list_observable(
         self,
     ) -> Sequence[Symbol]:
@@ -322,6 +384,8 @@ class PgSymbolRepository:
                     consecutive_failures=row.consecutive_failures,
                     first_seen_at=row.first_seen_at,
                     exclusion_reason=row.exclusion_reason,
+                    stable_flag=row.stable_flag,
+                    stable_deviation=row.stable_deviation,
                 )
                 for row in rows
             ]
@@ -383,10 +447,15 @@ class PgSymbolRepository:
             # DELISTED and DELISTING are left alone. §1.5 makes those exchange
             # facts, not liquidity ones, and a delisted symbol with a good 7-day
             # median is still delisted.
+            #
+            # A §1.6 FLAGGED symbol stays in QUARANTINE whatever its tier: the
+            # classifier's flag is "quarantined for manual confirmation", and a
+            # T1 tier is exactly what a liquid stablecoin earns.
             if row.status not in _EXCHANGE_OWNED_STATUSES:
                 row.status = (
                     SymbolStatus.QUARANTINE.value
                     if state.tier is UniverseTier.INELIGIBLE
+                    or row.stable_flag == StableFlag.FLAGGED.value
                     else SymbolStatus.ACTIVE.value
                 )
 
