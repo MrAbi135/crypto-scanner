@@ -58,6 +58,33 @@ async def test_exchange_info_maps_registry() -> None:
     assert by_symbol["BTCUSDT"].trading is True
     assert by_symbol["BTCUSDT"].quote_asset == "USDT"
     assert by_symbol["LUNAUSDT"].trading is False  # BREAK status maps to non-trading
+    assert by_symbol["BTCUSDT"].leveraged is False
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        # Today's shape: permissionSets is a list of lists.
+        {"permissionSets": [["SPOT", "LEVERAGED", "TRD_GRP_002"]], "permissions": []},
+        # The older flat field.
+        {"permissions": ["SPOT", "LEVERAGED"]},
+    ],
+)
+async def test_exchange_info_reads_the_leveraged_flag(item: dict[str, object]) -> None:
+    """SLS §1.7's "exchange metadata flag", as Binance reported BTCUPUSDT."""
+    payload = {
+        "symbols": [
+            {"symbol": "BTCUPUSDT", "baseAsset": "BTCUP", "quoteAsset": "USDT", "status": "BREAK"}
+            | item
+        ]
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    (info,) = await _adapter(handler).fetch_symbols()
+
+    assert info.leveraged is True
 
 
 async def test_client_error_is_not_retried() -> None:

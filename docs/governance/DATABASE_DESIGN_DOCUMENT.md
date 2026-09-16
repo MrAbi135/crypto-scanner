@@ -4,7 +4,7 @@
 
 **Document Status:** Official Database Design Document — defines the complete persistence architecture
 **Authority:** Subordinate to `PROJECT_CONSTITUTION.md`, `SCANNER_LOGIC_SPECIFICATION.md`, `TECHNOLOGY_DECISION_RECORD.md`, `PRODUCT_REQUIREMENTS_DOCUMENT.md`, and `TECHNICAL_ARCHITECTURE_DOCUMENT.md` (all v1.0.0); authoritative over all database structure, retention, and data-operations policy
-**Version:** 1.0.1 | **Ratified:** 2026-07-12 | **Last amended:** 2026-08-28 (see §23)
+**Version:** 1.0.2 | **Ratified:** 2026-07-12 | **Last amended:** 2026-09-17 (see §23)
 **Amendment Rule:** Schema evolution follows expand-migrate-contract discipline (Constitution §33.6); structural changes require a DDD revision
 
 > Engine: PostgreSQL 16 + TimescaleDB (TDR §8). Access exclusively through the repository layer (TAD §13). This document defines structure and policy — no SQL, no migrations, no ORM models. Field lists name the semantically required columns; exact column naming follows Constitution §11 conventions at implementation.
@@ -117,8 +117,8 @@ Each table: Purpose / Description / Main Fields / Relationships / Index Requirem
 #### T1 `market.symbols`
 
 - **Purpose:** Universe registry — every instrument the platform has ever known.
-- **Description:** One row per (base, quote, venue); carries lifecycle status (QUARANTINE / ACTIVE / DELISTING / DELISTED per SLS §1), category tags, listing date, current tier (materialized from T2).
-- **Main Fields:** id (ULID), venue, base_asset, quote_asset, exchange_symbol, status, category tags, listed_at, delisted_at, current_tier, tier_since, warmup_state per TF.
+- **Description:** One row per (base, quote, venue); carries lifecycle status (QUARANTINE / ACTIVE / DELISTING / DELISTED per SLS §1, or EXCLUDED by SLS §1.3's hard exclusions, which sit outside that lifecycle and carry their reason), category tags, listing date, current tier (materialized from T2).
+- **Main Fields:** id (ULID), venue, base_asset, quote_asset, exchange_symbol, status, exclusion_reason (STABLECOIN / FIAT_PEGGED / LEVERAGED_TOKEN; present exactly when status is EXCLUDED — v1.0.2), category tags, listed_at, delisted_at, current_tier, tier_since, warmup_state per TF.
 - **Relationships:** Parent of all market/detection per-symbol tables.
 - **Index Requirements:** Unique (venue, exchange_symbol); status + tier partial index (active universe scan).
 - **Expected Growth:** Hundreds of rows; trivial.
@@ -710,6 +710,20 @@ Validation is layered (Constitution §9.3): boundary (Pydantic) → application 
 
 ## 23. Amendment History
 
+### v1.0.2 — 2026-09-17
+
+One structural addition to T1, from migration `023_symbol_exclusions.py`.
+
+| # | Where | Was | Now | Why |
+|---|---|---|---|---|
+| 1 | T1 `market.symbols` description and fields | status ∈ QUARANTINE / ACTIVE / DELISTING / DELISTED; no exclusion field | status also admits EXCLUDED; new `exclusion_reason` (STABLECOIN / FIAT_PEGGED / LEVERAGED_TOKEN), required exactly when status is EXCLUDED, enforced by a CHECK | SLS §1.3 evaluates stablecoin bases (§1.6), leveraged tokens (§1.7) and fiat-pegged assets *before* liquidity tiers, and the registry had no way to record that outcome. Nothing applied the exclusions either, so on 2026-09-17 USDCUSDT and USD1USDT were ACTIVE at T1. A lifecycle status could not carry it truthfully: an excluded symbol is not quarantined (no liquidity reading will promote it) and not delisted (the venue still lists it). The reason is stored beside the status so a reader never has to re-derive *why* a symbol is absent from the scanned universe. |
+
+Impact: additive only. Existing rows are untouched by the migration; the next
+registry sync writes the exclusions, clears the excluded rows' tier and §1.4
+counters, and a symbol that leaves the exclusion list returns to the venue's
+lifecycle status. `GET /scanner/universe` gains an `exclusion_reason` field and
+an `excluded` assessment.
+
 ### v1.0.1 — 2026-08-28
 
 Two records of implemented reality, both from the `detection` schema's
@@ -732,4 +746,4 @@ rule forbids.
 
 This design encodes the platform's core promise at the storage layer: **facts are append-only, evidence is permanent, derived state is disposable, and the signal record cannot be edited by anyone — including us.** The two-workload split (OLTP + time-series) lives in one operationally boring PostgreSQL cluster with every scale ceiling measured and its successor named. Repositories implement against this document; where a storage question is not answered here, the answer is a DDD amendment, never an improvised table.
 
-**— End of Database Design Document v1.0.1 —**
+**— End of Database Design Document v1.0.2 —**

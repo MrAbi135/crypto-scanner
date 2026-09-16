@@ -43,6 +43,7 @@ class UniverseRow:
     consecutive_passes: int
     consecutive_failures: int
     first_seen_at: datetime
+    exclusion_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

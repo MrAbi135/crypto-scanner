@@ -12,7 +12,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import bindparam, func, select, text
+from sqlalchemy import bindparam, case, func, literal, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -32,6 +32,7 @@ from scanner.application.ports.outbox import (
 from scanner.domain.common import (
     Candle,
     CandleSource,
+    ExclusionReason,
     Symbol,
     SymbolStatus,
     TradeAggregate,
@@ -100,22 +101,59 @@ class PgSymbolRepository:
                 "quote_asset": symbol.quote_asset,
                 "status": symbol.status.value,
                 "first_seen_at": symbol.first_seen_at,
+                "exclusion_reason": (
+                    symbol.exclusion_reason.value if symbol.exclusion_reason is not None else None
+                ),
             }
             for symbol in symbols
         ]
 
         stmt = pg_insert(SymbolRow).values(rows)
 
-        # Known symbols keep their id/first_seen_at/lifecycle progress; only a
-        # venue-reported DELISTED transition is applied here (registry facts —
-        # richer lifecycle moves belong to the S3 universe manager).
+        excluded = SymbolStatus.EXCLUDED.value
+        incoming = stmt.excluded
+        becomes_excluded = incoming.status == excluded
+
+        # Known symbols keep their id/first_seen_at/lifecycle progress. Three
+        # registry facts are applied here; richer lifecycle moves belong to the
+        # S3 universe manager:
+        #
+        # 1. a venue-reported DELISTED transition;
+        # 2. an SLS §1.3 exclusion, which outranks every other status -- a
+        #    symbol that was ACTIVE at T1 the day before is excluded now, not
+        #    after a demotion no liquidity reading would ever cause;
+        # 3. leaving the exclusion (the list changed), back to whatever the
+        #    venue says now, so a mistaken exclusion is not permanent.
+        #
+        # Excluding also clears the tier and its counters: the universe page
+        # must not keep showing a peg as T1, and a symbol that is ever let back
+        # in starts §1.4's hysteresis from nothing.
         stmt = stmt.on_conflict_do_update(
             constraint="uq_symbols_venue_exchange",
             set_={
-                "status": stmt.excluded.status,
+                "status": incoming.status,
+                "exclusion_reason": incoming.exclusion_reason,
+                "tier": case((becomes_excluded, literal("INELIGIBLE")), else_=SymbolRow.tier),
+                "candidate_tier": case(
+                    (becomes_excluded, literal(None)), else_=SymbolRow.candidate_tier
+                ),
+                "consecutive_passes": case(
+                    (becomes_excluded, literal(0)), else_=SymbolRow.consecutive_passes
+                ),
+                "consecutive_failures": case(
+                    (becomes_excluded, literal(0)), else_=SymbolRow.consecutive_failures
+                ),
             },
-            where=(stmt.excluded.status == SymbolStatus.DELISTED.value)
-            & (SymbolRow.status != SymbolStatus.DELISTED.value),
+            where=or_(
+                (incoming.status == SymbolStatus.DELISTED.value)
+                & (SymbolRow.status != SymbolStatus.DELISTED.value),
+                becomes_excluded
+                & (
+                    (SymbolRow.status != excluded)
+                    | SymbolRow.exclusion_reason.is_distinct_from(incoming.exclusion_reason)
+                ),
+                (SymbolRow.status == excluded) & (incoming.status != excluded),
+            ),
         )
 
         async with self._sessions() as session:
@@ -176,12 +214,16 @@ class PgSymbolRepository:
 
         DELISTED is excluded because §1.5 retains its data but stops scanning
         it; there is nothing to measure and no tier that would bring it back.
+        EXCLUDED likewise: §1.3 decides before any tier, so a measurement could
+        change nothing.
         """
         async with self._sessions() as session:
             rows = (
                 await session.execute(
                     select(SymbolRow).where(
-                        SymbolRow.status != SymbolStatus.DELISTED.value,
+                        SymbolRow.status.notin_(
+                            (SymbolStatus.DELISTED.value, SymbolStatus.EXCLUDED.value)
+                        ),
                     )
                 )
             ).scalars()
@@ -279,6 +321,7 @@ class PgSymbolRepository:
                     consecutive_passes=row.consecutive_passes,
                     consecutive_failures=row.consecutive_failures,
                     first_seen_at=row.first_seen_at,
+                    exclusion_reason=row.exclusion_reason,
                 )
                 for row in rows
             ]
@@ -312,6 +355,13 @@ class PgSymbolRepository:
 
             if row is None:
                 raise LookupError(f"Unknown symbol: {state.exchange_symbol}")
+
+            # SLS §1.3 evaluates exclusions before liquidity tiers, so no tier
+            # is recorded for an excluded symbol at all. The daily loop does
+            # not visit one, but a sync can exclude a symbol between that loop
+            # listing it and saving its result.
+            if row.status == SymbolStatus.EXCLUDED.value:
+                return
 
             row.tier = state.tier.value
 
@@ -814,6 +864,9 @@ def _to_symbol(
         quote_asset=row.quote_asset,
         status=SymbolStatus(row.status),
         first_seen_at=row.first_seen_at,
+        exclusion_reason=(
+            ExclusionReason(row.exclusion_reason) if row.exclusion_reason is not None else None
+        ),
     )
 
 

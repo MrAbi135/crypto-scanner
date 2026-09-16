@@ -22,7 +22,7 @@ from sqlalchemy import text
 from scanner.application.ports import IncidentRecord
 from scanner.application.ports.liquidity_history import LiquidityHistoryRecord
 from scanner.application.ports.repositories import UniverseStateRecord
-from scanner.domain.common import Symbol, SymbolStatus, TradeAggregate
+from scanner.domain.common import ExclusionReason, Symbol, SymbolStatus, TradeAggregate
 from scanner.domain.common.universe import UniverseTier
 from scanner.domain.volume import WashRiskState
 from scanner.infrastructure.persistence.database import build_session_factory
@@ -228,6 +228,100 @@ async def test_list_observable_includes_quarantine_but_not_delisted(engine) -> N
     assert "OBSQUARUSDT" in observable
     assert "OBSLIVEUSDT" in observable
     assert "OBSGONEUSDT" not in observable
+
+
+async def test_an_exclusion_overrides_an_active_tier(engine) -> None:
+    """SLS §1.3 decides before tiers: USDCUSDT was ACTIVE at T1 on the VM.
+
+    The tier is cleared too, or the universe page would still show a peg as T1.
+    """
+    repo = PgSymbolRepository(build_session_factory(engine))
+
+    await _seed(repo, "USDCUSDT", SymbolStatus.QUARANTINE)
+    await repo.save_universe_state(_state("USDCUSDT", UniverseTier.T1))
+
+    # Premise: the symbol really is ACTIVE at T1 before the exclusion, or the
+    # assertions below would pass on a row that never had a tier to clear.
+    before = await repo.list_universe(status="ACTIVE", tier="T1")
+    assert "USDCUSDT" in {row.exchange_symbol for row in before}
+
+    await repo.upsert_many(
+        [
+            Symbol(
+                new_ulid(),
+                "binance",
+                "USDCUSDT",
+                "USDC",
+                "USDT",
+                SymbolStatus.EXCLUDED,
+                BASE_TIME,
+                exclusion_reason=ExclusionReason.STABLECOIN,
+            )
+        ]
+    )
+
+    stored = await repo.get("USDCUSDT")
+    assert stored is not None
+    assert stored.status is SymbolStatus.EXCLUDED
+    assert stored.exclusion_reason is ExclusionReason.STABLECOIN
+
+    (row,) = [
+        r for r in await repo.list_universe(status="EXCLUDED") if r.exchange_symbol == "USDCUSDT"
+    ]
+    assert row.tier is UniverseTier.INELIGIBLE
+    assert (row.candidate_tier, row.consecutive_passes, row.consecutive_failures) == (None, 0, 0)
+    assert row.exclusion_reason == "STABLECOIN"
+
+    # And the daily loop neither measures it nor gives it a tier back.
+    assert "USDCUSDT" not in {s.exchange_symbol for s in await repo.list_observable()}
+
+    await repo.save_universe_state(_state("USDCUSDT", UniverseTier.T1))
+
+    again = await repo.get("USDCUSDT")
+    assert again is not None and again.status is SymbolStatus.EXCLUDED
+
+
+async def test_a_symbol_leaves_the_exclusion_when_the_rule_no_longer_names_it(engine) -> None:
+    """A wrong entry in the list must not be permanent."""
+    repo = PgSymbolRepository(build_session_factory(engine))
+
+    await repo.upsert_many(
+        [
+            Symbol(
+                new_ulid(),
+                "binance",
+                "WASPEGUSDT",
+                "WASPEG",
+                "USDT",
+                SymbolStatus.EXCLUDED,
+                BASE_TIME,
+                exclusion_reason=ExclusionReason.STABLECOIN,
+            )
+        ]
+    )
+    excluded = await repo.get("WASPEGUSDT")
+    assert excluded is not None and excluded.status is SymbolStatus.EXCLUDED
+
+    await _seed(repo, "WASPEGUSDT", SymbolStatus.QUARANTINE)
+
+    stored = await repo.get("WASPEGUSDT")
+    assert stored is not None
+    assert (stored.status, stored.exclusion_reason) == (SymbolStatus.QUARANTINE, None)
+
+
+async def test_the_database_refuses_an_exclusion_without_a_reason(engine) -> None:
+    """Migration 023's CHECK: EXCLUDED and a reason come together or not at all."""
+    async with engine.connect() as conn:
+        with pytest.raises(Exception, match="ck_symbols_exclusion_reason"):
+            await conn.execute(
+                text(
+                    "INSERT INTO market.symbols (id, venue, exchange_symbol, base_asset, "
+                    "quote_asset, status, first_seen_at) VALUES "
+                    "('01J00000000000000000000000', 'binance', 'NOREASONUSDT', 'NOREASON', "
+                    "'USDT', 'EXCLUDED', now())"
+                )
+            )
+        await conn.rollback()
 
 
 def _aggregate(minute_offset: int, *, count: int = 3) -> TradeAggregate:
