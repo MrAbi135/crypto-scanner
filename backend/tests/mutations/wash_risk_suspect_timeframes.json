@@ -1,0 +1,27 @@
+{
+  "description": "SLS v1.0.10 (owner ruling 2026-09-17): §6.6(4) counts suspect_volume candles on H1 and H4 only. Deterministic tests, so one battery run is a verdict. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/wash_risk_suspect_timeframes.json",
+  "pytest": [
+    "tests/unit/application/marketdata/test_suspect_volume_counter.py",
+    "tests/unit/application/marketdata/test_fake_volume_job.py"
+  ],
+  "mutations": [
+    {
+      "name": "every ingested timeframe is counted again",
+      "file": "backend/src/scanner/application/marketdata/fake_volume_job.py",
+      "old": "            if timeframe not in SUSPECT_COUNT_TIMEFRAMES:\n                continue",
+      "new": "            if False:\n                continue",
+      "expect_failing": [
+        "test_only_h1_and_h4_suspect_candles_are_counted"
+      ]
+    },
+    {
+      "name": "H4 dropped from the counted timeframes",
+      "file": "backend/src/scanner/application/marketdata/fake_volume_job.py",
+      "old": "SUSPECT_COUNT_TIMEFRAMES = frozenset({Timeframe.H1, Timeframe.H4})",
+      "new": "SUSPECT_COUNT_TIMEFRAMES = frozenset({Timeframe.H1})",
+      "expect_failing": [
+        "test_only_h1_and_h4_suspect_candles_are_counted"
+      ]
+    }
+  ]
+}

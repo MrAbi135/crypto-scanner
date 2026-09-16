@@ -50,6 +50,9 @@ _DAY = timedelta(days=1)
 ELEVATED_RVOL = Decimal("1.5")
 BASELINE_DAYS = 20
 
+# §6.6(4)'s count reads these timeframes only (SLS v1.0.10).
+SUSPECT_COUNT_TIMEFRAMES = frozenset({Timeframe.H1, Timeframe.H4})
+
 
 @dataclass(frozen=True, slots=True)
 class FakeVolumeReport:
@@ -193,11 +196,16 @@ class FakeVolumeJob:
 
 
 class SuspectVolumeCounter:
-    """§6.6(4): how many §6.4 candles the symbol produced in the day.
+    """§6.6(4): how many §6.4 candles the symbol produced in the day, on H1 and H4.
 
-    Across every scanned timeframe, not one. §6.6 counts "`suspect_volume`
-    candle count > 5 in 24h" for the *symbol*, and a symbol scanned on four
-    timeframes produces suspect candles on all four.
+    SLS v1.0.10 (owner ruling 2026-09-17). The count used to span every scanned
+    timeframe. That was harmless while M5 and M15 had no RVOL and so no §6.4
+    candles; once §2.11 read the baseline from history (v1.0.9) they produced
+    most of them -- 2026-09-15: BTCUSDT 6 on M5 and 2 on M15, none on H1 or H4
+    -- and the same "> 5" threshold tagged BTCUSDT and XRPUSDT `wash_risk`,
+    capping their confluence at 50 on every timeframe. A timeframe the counter
+    is given but does not count is skipped, not an error: the worker passes
+    every ingested timeframe.
     """
 
     def __init__(
@@ -218,6 +226,9 @@ class SuspectVolumeCounter:
         total = 0
 
         for timeframe in self._timeframes:
+            if timeframe not in SUSPECT_COUNT_TIMEFRAMES:
+                continue
+
             records = await self._events.list_events(
                 symbol, timeframe, start, end, only_versions=self._only_versions
             )

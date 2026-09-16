@@ -1,4 +1,4 @@
-"""§6.6(4)'s suspect-volume count reads the running participation generation only."""
+"""§6.6(4)'s suspect-volume count: the running participation generation, on H1 and H4."""
 
 from __future__ import annotations
 
@@ -49,3 +49,32 @@ async def test_a_suspect_candle_is_counted_once_across_a_version_bump() -> None:
 
     assert await unpinned.count("BTCUSDT", AT, end) == 2
     assert await pinned.count("BTCUSDT", AT, end) == 1
+
+
+class EveryTimeframe:
+    """One suspect candle on each timeframe."""
+
+    async def list_events(self, symbol, timeframe, start, end, *, only_versions=None):
+        return (
+            EngineEventRecord(
+                event_key=f"suspect-{timeframe.value}",
+                symbol=symbol,
+                timeframe=timeframe,
+                event_type="VOLUME_SUSPECT",
+                event_at=AT,
+                algo_version="s7-new",
+                payload="{}",
+                created_at=AT,
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_only_h1_and_h4_suspect_candles_are_counted() -> None:
+    """SLS v1.0.10 (owner ruling 2026-09-17). Once M5 and M15 had RVOL from
+    history they produced most §6.4 candles, and counted with H1/H4 against the
+    same five they tagged BTCUSDT and XRPUSDT `wash_risk` on 2026-09-15."""
+    ingested = (Timeframe.M5, Timeframe.M15, Timeframe.H1, Timeframe.H4)
+    counter = SuspectVolumeCounter(EveryTimeframe(), ingested)
+
+    assert await counter.count("BTCUSDT", AT, AT + timedelta(days=1)) == 2

@@ -127,6 +127,7 @@ grep -qF 'def apply_recovery' backend/src/scanner/domain/structure/trend.py   ||
 grep -qF '_broken_premise' backend/src/scanner/application/detection/signal_monitor.py   || fail "#200/#204 missing: INVALIDATED_EARLY is unreachable"
 grep -qF 'abs(candles[cursor].high - candidate)' backend/src/scanner/domain/structure/swings.py   || fail "#203 missing: the swing walk-back still consumes higher candles"
 grep -qF 'origin_opens = ob.created_at' backend/src/scanner/application/detection/ict_ob_replay.py   || fail "#222 missing: the OB helpers index the window with frozen offsets"
+grep -qF 'SUSPECT_COUNT_TIMEFRAMES' backend/src/scanner/application/marketdata/fake_volume_job.py   || fail "wash_risk fix missing: the suspect count still spans every timeframe (SLS v1.0.10)"
 test -f backend/src/scanner/infrastructure/persistence/alembic/versions/022_recorded_at.py   || fail "#276 missing: migration 022_recorded_at is not in the tree"
 
 # Owner ruling 2026-09-15 (M8 option B): M15/M5 must not publish. The code defaults to
@@ -269,6 +270,7 @@ docker exec scanner-dev-engine-1 grep -qF 'def apply_recovery' /app/src/scanner/
 docker exec scanner-dev-engine-1 grep -qF '_broken_premise' /app/src/scanner/application/detection/signal_monitor.py   || fail "running engine: INVALIDATED_EARLY is unreachable"
 docker exec scanner-dev-engine-1 grep -qF 'abs(candles[cursor].high - candidate)' /app/src/scanner/domain/structure/swings.py   || fail "running engine: the swing walk-back still consumes higher candles"
 docker exec scanner-dev-engine-1 grep -qF 'origin_opens = ob.created_at' /app/src/scanner/application/detection/ict_ob_replay.py   || fail "running engine: the OB helpers index the window with frozen offsets"
+docker exec scanner-dev-worker-1 grep -qF 'SUSPECT_COUNT_TIMEFRAMES' /app/src/scanner/application/marketdata/fake_volume_job.py   || fail "running worker: the suspect count still spans every timeframe"
 docker exec scanner-dev-engine-1 test -f /app/src/scanner/infrastructure/persistence/alembic/versions/022_recorded_at.py   || fail "running engine image has no migration 022_recorded_at"
 
 schema_now=$($PSQL -c "select version_num from alembic_version;" | tr -d '\r')
