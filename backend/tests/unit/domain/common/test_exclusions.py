@@ -23,10 +23,16 @@ def _reason(base: str, *, flag: bool = False) -> ExclusionReason | None:
     "base",
     # USDC and USD1 were ACTIVE at T1, RLUSD at T2 and FDUSD at T3 in the live
     # registry the day this was written.
-    ["USDC", "USD1", "RLUSD", "FDUSD", "TUSD", "USDP", "USDE", "USDS", "BFUSD", "XUSD", "DAI"],
+    ["USDC", "USD1", "RLUSD", "FDUSD", "TUSD", "USDP", "USDE", "USDS", "BFUSD", "XUSD", "DAI", "U"],
 )
 def test_usd_stablecoins_are_excluded(base: str) -> None:
     assert _reason(base) is ExclusionReason.STABLECOIN
+
+
+@pytest.mark.parametrize("base", ["UNI", "UMA", "USUAL", "UTK"])
+def test_a_one_letter_stablecoin_does_not_catch_names_that_start_with_it(base: str) -> None:
+    """The base U is a whole name, not a prefix: Uniswap and its neighbours still trade."""
+    assert _reason(base) is None
 
 
 @pytest.mark.parametrize("base", ["EUR", "EURI", "AEUR", "GBP", "AUD", "KGST"])

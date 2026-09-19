@@ -55,6 +55,11 @@ STABLECOIN_BASES = frozenset(
         "RLUSD",
         "SUSD",
         "TUSD",
+        # Confirmed by the owner 2026-09-19 on the §1.6 classifier's first flag.
+        # Binance data that day: 30 daily closes 0.9993-1.0004, a quote asset for
+        # 47 pairs (BTCU, ETHU, RLUSDU, USD1U...), fiat pairs UUSD/UTRY/UIDR,
+        # ~25M USD a day. The registry held UUSDT as ACTIVE.
+        "U",
         "USD1",
         "USDC",
         "USDD",
