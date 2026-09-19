@@ -22,10 +22,3 @@
 #
 # Format: pattern | until (UTC date) | why
 # The pattern is matched against the whole violation line as a fixed substring.
-
-# The OTE lateness #289 (s6-ote-v7, SLS v1.0.11) fixes, still firing on the
-# running s6-ote-v6 and blocking post_soak_deploy.sh step 1 for the bundle
-# that ships the fix. This one row only -- never the OTE kind, which stays
-# watched. J3 reads only writes since the engine start, so it stops matching
-# once the bundle runs; delete it in the first PR after that deploy.
-|PUMPUSDT 2026-09-19 07:55:00+00 | 2026-09-20 | OTE interaction at the 10-period edge on s6-ote-v6; fixed by #289, awaiting the #286-#290 deploy
