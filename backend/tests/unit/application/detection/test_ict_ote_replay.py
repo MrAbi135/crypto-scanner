@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -330,6 +332,81 @@ async def test_an_ote_on_an_already_decided_candle_is_not_created_again() -> Non
 
     assert report.otes_detected == 0
     assert not [zone for zone in zones.zones.values() if zone.zone_type == "OTE"]
+
+
+@pytest.mark.asyncio
+async def test_a_leg_is_validated_once_on_the_candle_it_finalizes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SLS v1.0.11 (owner ruling 2026-09-19). §5.8's `leg >= 2 x ATR` was asked
+    on every candle the leg stayed the newest, against that candle's ATR, so a
+    leg too short when it finalized registered once ATR had fallen -- dated to
+    its leg-end, every interaction since written at once. Here ATR is large up
+    to the finalization candle and small after it: the leg fails where it
+    finalizes and gets no OTE."""
+    import scanner.application.detection.ict_ote_replay as ote_module
+    from scanner.domain.structure import detect_external_swings
+
+    # `series()` up to the candle the 98 -> 122 leg finalizes on (index 46),
+    # then four closes that stay inside its dealing range -- in `series()`
+    # price leaves the range at once, so no later candle ever asked about the
+    # leg and the old per-candle validation could not be seen.
+    base = series()[:47]
+    step = base[1].open_time - base[0].open_time
+    candles = [
+        *base,
+        *(
+            replace(
+                base[-1],
+                open_time=base[-1].open_time + step * (offset + 1),
+                open=Decimal(close) - 1,
+                high=Decimal(close) + 1,
+                low=Decimal(close) - 1,
+                close=Decimal(close),
+            )
+            for offset, close in enumerate(("101", "102", "101", "102"))
+        ),
+    ]
+    swings = detect_external_swings(candles)
+    found = ote_module._impulse_leg_at(swings, candles, len(candles) - 1)
+    assert found is not None
+    leg, finalized = found
+
+    # Stated, not taken from the code under test: the leg ends on the 122
+    # high at index 41, and §3.1's k = 5 finalizes it five candles later.
+    assert (leg.end_index, finalized) == (41, 46)
+
+    # The premise: after it finalizes the leg stays the newest one, inside its
+    # dealing range, on every candle to the end.
+    assert finalized < len(candles) - 1
+    for index in range(finalized, len(candles)):
+        again = ote_module._impulse_leg_at(swings, candles, index)
+        assert again is not None and again[0].leg_id == leg.leg_id
+        assert ote_module._dealing_range_at(swings, candles, index) is not None
+
+    small = leg.length / Decimal(4)  # 2 x ATR well inside the leg
+    large = leg.length  # 2 x ATR longer than the leg
+
+    async def otes_for_leg(atrs) -> list[str]:
+        monkeypatch.setattr(ote_module, "wilder_atr_series", lambda series_: atrs)
+        zones = FakeZoneRepository()
+        await IctOteReplayService(
+            FakeCandleRepository(candles),
+            zones,
+            FakeTransitionRepository(),
+            FakeClock(),
+        ).run("OTEUSDT", Timeframe.M5, candles[0].open_time, candles[-1].close_time)
+        return [
+            zone.zone_id
+            for zone in zones.zones.values()
+            if zone.zone_type == "OTE" and json.loads(zone.evidence)["leg_id"] == leg.leg_id
+        ]
+
+    # The premise: at a steady small ATR the leg registers its OTE.
+    assert await otes_for_leg([small] * len(candles))
+
+    drifting = [large if index <= finalized else small for index in range(len(candles))]
+    assert await otes_for_leg(drifting) == []
 
 
 @pytest.mark.asyncio

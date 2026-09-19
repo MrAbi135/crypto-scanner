@@ -56,7 +56,14 @@ from scanner.shared import Timeframe
 # v6: an OTE is created only on a candle no earlier pass has decided (audit M3,
 # owner ruling 2026-09-14): `detect_ote` sizes the band against ATR, which at a
 # window's first candles depends on where the window starts.
-ICT_OTE_ALGO_VERSION = "s6-ote-v6"
+# v7: a leg is validated once, on the candle it finalizes (SLS v1.0.11, owner
+# ruling 2026-09-19). §5.8's `leg >= 2 x ATR` was asked of every later candle
+# while the leg stayed the newest, against that candle's ATR, so a leg that
+# failed when it finalized registered once ATR had fallen -- dated to its
+# leg-end, with every interaction since written at once: on the host ~47% of
+# M5 OTEs registered more than 6 periods after their leg-end, 147 of them 16 or
+# more, and their interactions up to 13 periods late (2026-09-16..19).
+ICT_OTE_ALGO_VERSION = "s6-ote-v7"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")
@@ -157,16 +164,24 @@ class IctOteReplayService:
 
             dealing_ranges += 1
 
-            leg = _impulse_leg_at(
+            found = _impulse_leg_at(
                 external_swings,
                 candles,
                 index,
             )
 
-            if leg is None:
+            if found is None:
                 continue
 
+            leg, finalized = found
+
             impulse_legs += 1
+
+            # §5.8 validates a leg when it finalizes (SLS v1.0.11): on that
+            # candle, against that candle's ATR, once. A later candle it is
+            # still the newest leg on asks nothing new of it.
+            if index != finalized:
+                continue
 
             ote = detect_ote(
                 leg,
@@ -443,7 +458,9 @@ def _impulse_leg_at(
     swings: tuple[SwingPoint, ...],
     candles: list[Candle],
     index: int,
-) -> ImpulseLeg | None:
+) -> tuple[ImpulseLeg, int] | None:
+    """The newest leg whose end swing is confirmed by `index`, and the candle it
+    finalized on: the first on which its end swing's window had closed."""
     eligible = sorted(
         (swing for swing in swings if swing.index + swing_window(swing.strength) <= index),
         key=lambda swing: swing.index,
@@ -465,14 +482,17 @@ def _impulse_leg_at(
     else:
         return None
 
-    return ImpulseLeg(
-        leg_id=_leg_id(origin, extreme),
-        direction=direction,
-        origin_price=origin.price,
-        extreme_price=extreme.price,
-        origin_index=origin.index,
-        end_index=extreme.index,
-        confirmed_at=candles[extreme.index].close_time,
+    return (
+        ImpulseLeg(
+            leg_id=_leg_id(origin, extreme),
+            direction=direction,
+            origin_price=origin.price,
+            extreme_price=extreme.price,
+            origin_index=origin.index,
+            end_index=extreme.index,
+            confirmed_at=candles[extreme.index].close_time,
+        ),
+        extreme.index + swing_window(extreme.strength),
     )
 
 
