@@ -488,6 +488,69 @@ async def test_a_pass_publishes_no_displacement_on_a_candle_it_decided_before(
 
 
 @pytest.mark.asyncio
+async def test_a_pass_does_not_sweep_a_pool_on_a_candle_it_decided_before(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Audit M3 through `run`, in the pool lifecycle. Pass 1 ends on a candle
+    that wicks one tick through a pool at 100 while its ATR puts epsilon above
+    the tick: no sweep. Pass 2, one candle later, reads a lower ATR there (the
+    drift a moved window start brings) and the same wick would sweep. Decided,
+    the pool stays ACTIVE; with no state the same two passes sweep it -- the
+    DOGEUSDT M5 row written 471 periods late on the host (2026-09-18)."""
+    from tests.golden.harness.memory import InMemoryCandleRepository, InMemoryEngineStateStore
+
+    import scanner.application.detection.liquidity_replay as liquidity_module
+    from scanner.application.detection.state import LIQUIDITY_NAMESPACE, EngineStateManager
+
+    candles = [
+        *pad_for_warmup(
+            [
+                bar(0, open_="97", high="99", low="97", close="98"),
+                bar(1, open_="99", high="100.01", low="98", close="99.5"),
+            ]
+        ),
+        bar(2, open_="99.5", high="99.8", low="99", close="99.4"),
+    ]
+    atr = {"value": Decimal("1")}
+
+    def flat_atrs(series):
+        return [atr["value"]] * len(series)
+
+    monkeypatch.setattr(liquidity_module, "wilder_atr_series", flat_atrs)
+
+    async def swept(state: EngineStateManager | None) -> bool:
+        stores = Stores()
+        await stores.pools.upsert(
+            pool("p-current", version=LIQUIDITY_ALGO_VERSION, created_at=candles[-4].close_time)
+        )
+
+        # Epsilon 0.05 on pass 1 (above the tick), 0.005 on pass 2 (below it).
+        for window, value in ((candles[:-1], "1"), (candles, "0.1")):
+            atr["value"] = Decimal(value)
+            await LiquidityReplayService(
+                InMemoryCandleRepository(window),
+                stores.pools,
+                stores.transitions,
+                stores.events,
+                stores.snapshots,
+                stores.evidence,
+                FixedClock(),
+                state=state,
+            ).run(SYMBOL, TF, window[0].open_time, window[-1].open_time + TF.duration)
+
+            if value == "1":
+                # The premise: pass 1 judged the wick and did not sweep.
+                assert stores.pools.pools["p-current"].state == "ACTIVE"
+
+        return stores.pools.pools["p-current"].state == "SWEPT"
+
+    assert await swept(None)
+    assert not await swept(
+        EngineStateManager(InMemoryEngineStateStore(), namespace=LIQUIDITY_NAMESPACE)
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_level_held_by_another_version_does_not_absorb_this_versions_pool() -> None:
     """§4.2's dedup asks whether a level is already this map's. A previous
     version's pool at the same price is not: absorbed into it, this version

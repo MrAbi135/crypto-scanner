@@ -135,7 +135,16 @@ from scanner.shared import Timeframe
 # over two hours after its own sweep and reclaim (2026-09-15). On a decided
 # candle a displacement now exists only where this sweep's stop hunt was
 # published; reclaim and hunt failure read closes alone and replay as before.
-LIQUIDITY_ALGO_VERSION = "s5-v15"
+# v16: a pool's lifecycle decides each candle once too (audit M3). Every pass
+# walked an ACTIVE pool from its creation across the whole window with this
+# window's ATR, so a candle an earlier pass had judged "within epsilon" could
+# sweep it once the window start moved: DOGEUSDT M5 pool fc2d593 (SSL 0.07991)
+# met a one-tick low of 0.07990 on 2026-09-16 23:00 -- epsilon 0.0000112 when
+# that candle was newest, 0.0000099 when it sat at window index 27 -- and the
+# sweep was written 2026-09-18 14:25, 471 periods late. The walk now starts at
+# the first undecided candle; only a marginal penetration left pending on the
+# last decided candle is carried to its confirmation.
+LIQUIDITY_ALGO_VERSION = "s5-v16"
 
 _ATR_PERIOD = 14
 _SWEEP_SCAN_ATR = Decimal("3")
@@ -381,6 +390,7 @@ class LiquidityReplayService:
                 candles,
                 atrs,
                 external_swings,
+                decided_before=decided_before,
             )
 
             if result == "SWEPT":
@@ -613,7 +623,11 @@ class LiquidityReplayService:
         external_swings: Sequence[SwingPoint],
         *,
         expire_only: bool = False,
+        decided_before: int = 0,
     ) -> str | None:
+        """`decided_before` is the first candle of this window no earlier pass
+        has decided (audit M3); 0 walks from the pool's creation, as a version's
+        first pass and the golden harness do."""
         if record.state != "ACTIVE":
             return None
 
@@ -663,6 +677,13 @@ class LiquidityReplayService:
         # shorter than `pool_max_age`, and then the whole window is after it.
         index = 0 if position is None else position + 1
 
+        # A candle an earlier pass decided keeps its answer: the pool survived
+        # it. Judged again, it meets an ATR seeded at a later window start. The
+        # walk enforces that (`decided_before` below); starting it at the last
+        # decided candle -- revisited only for a marginal penetration waiting
+        # on its confirmation -- just saves walking candles it would skip.
+        index = max(index, decided_before - 1)
+
         # Judged stage by stage: each candle meets the pool as it stood when
         # that candle closed, not as a later merge left it.
         terminal, _ = _walk_to_terminal(
@@ -671,6 +692,7 @@ class LiquidityReplayService:
             atrs,
             index,
             len(candles) - 1,
+            decided_before=decided_before,
         )
 
         if terminal is None:
@@ -1259,6 +1281,8 @@ def _walk_to_terminal(
     atrs: Sequence[Decimal | None],
     start: int,
     stop: int,
+    *,
+    decided_before: int = 0,
 ) -> tuple[_Terminal | None, int]:
     """The first candle in [start, stop] that sweeps or breaks the pool (§4.2, §4.6).
 
@@ -1266,6 +1290,10 @@ def _walk_to_terminal(
     the map walk, which asks whether a pool was still alive on a candle. With
     no terminal, the second value is the first candle not yet decided -- a
     marginal penetration on `stop` needs the candle after it.
+
+    A candle before `decided_before` was decided by an earlier pass and ends
+    nothing here; it is only the start of a two-candle sweep whose confirming
+    candle is undecided (audit M3).
     """
     index = start
 
@@ -1284,6 +1312,12 @@ def _walk_to_terminal(
             continue
 
         epsilon = TOLERANCE_ATR * atr
+
+        if index < decided_before and not (
+            index + 1 >= decided_before and _is_marginal_penetration(pool, candle, epsilon)
+        ):
+            index += 1
+            continue
 
         sweep = detect_single_candle_sweep(
             candle,
