@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.10
-**Ratified:** 2026-07-12 · **Last amended:** 2026-09-17 (v1.0.10; see Amendment History)
+**Version:** 1.0.11
+**Ratified:** 2026-07-12 · **Last amended:** 2026-09-19 (v1.0.11; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -593,7 +593,7 @@ Zones and context: where institutional orders were placed, where inefficiency re
 
 **Detection Logic.** After a confirmed BOS/MSS with displacement, define the impulse leg from origin swing to the post-break extreme (leg finalizes when a confirmed internal swing forms at that extreme — the leg-end is then a fact). OTE band = retracement `0.62 → 0.79` of the leg (bullish: measured down from leg high). Registered as a zone object, state `FRESH`, valid only while: trend unchanged, leg-end swing unconsumed, and PD gate (§5.7) satisfied at touch time.
 
-**Validation.** Leg length ≥ `P.ict.ote_min_leg = 2 × ATR` (retracements of noise legs are noise). **Invalidation.** Close beyond 100% retracement (leg origin) ⇒ `DEAD`; trend flip ⇒ `DEAD`; age > `P.ict.ote_max_age = 100` candles ⇒ `EXPIRED`. **Edge cases.** Overlap with OB/FVG inside the band is the *expected* A+ configuration — recorded as zone-stack evidence, §8.6. **Performance.** One live OTE per direction per TF (newest leg replaces prospectively). **Future.** Fib-level sub-grading (70.5% sweet spot) after outcome data.
+**Validation.** Leg length ≥ `P.ict.ote_min_leg = 2 × ATR` (retracements of noise legs are noise), measured **once, with the ATR of the candle on which the leg finalizes**; a leg that fails then registers no OTE. **Invalidation.** Close beyond 100% retracement (leg origin) ⇒ `DEAD`; trend flip ⇒ `DEAD`; age > `P.ict.ote_max_age = 100` candles ⇒ `EXPIRED`. **Edge cases.** Overlap with OB/FVG inside the band is the *expected* A+ configuration — recorded as zone-stack evidence, §8.6. **Performance.** One live OTE per direction per TF (newest leg replaces prospectively). **Future.** Fib-level sub-grading (70.5% sweet spot) after outcome data.
 
 ### 5.9 Rejection, Mitigation, Confirmation (Zone Interaction Grammar)
 
@@ -1158,6 +1158,22 @@ Every parameter change increments `param_set_version` and requires golden-datase
 ---
 
 ## Amendment History
+
+### v1.0.11 — 2026-09-19
+
+One clarification, ruled by the product owner on 2026-09-19 ("Option (A) — leg-finalize
+ke waqt ka ATR, ek hi dafa"). **It changes behaviour.**
+
+| # | Section | Was | Now | Why |
+|---|---|---|---|---|
+| 1 | §5.8 Validation | "Leg length ≥ `P.ict.ote_min_leg = 2 × ATR`" — which candle's ATR was unstated; the implementation asked it of every candle on which the leg was still the newest, against that candle's ATR | Measured **once, with the ATR of the candle on which the leg finalizes**; a leg that fails then registers no OTE. | §5.8 already says the leg-end "is then a fact" when the leg finalizes. Asked again on later candles, a leg too short at finalization registered once ATR had fallen, dated to its leg-end, and every interaction on the candles between was written at once: on the host ~47% of M5 OTEs registered more than 6 periods after their leg-end, 147 of them 16 or more, with interactions up to 13 periods late (2026-09-16..19). That contradicts §0.2's "each candle is decided once" (v1.0.9 #1). |
+
+**Impact review.** OTE s6-ote-v7; no parameter value changes, so no `param_set_version`
+bump. Fewer OTE zones: a leg that qualifies only after it finalizes no longer gets
+one. Golden datasets unchanged (205/205 with and without the version bump). An open
+question is recorded separately and NOT decided here: §5.8 finalizes the leg on "a
+confirmed internal swing", while the implementation uses external (k = 5) swings.
+
 
 ### v1.0.10 — 2026-09-17
 
