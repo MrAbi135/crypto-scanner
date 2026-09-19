@@ -1143,6 +1143,70 @@ async def test_a_pool_older_than_the_window_expires() -> None:
     assert pools.pool.state == "EXPIRED"
 
 
+def _one_tick_series() -> list[Candle]:
+    """A BSL level at 100, then a candle that wicks one tick through it (100.01)
+    and closes back below: a sweep when epsilon < 0.01, nothing when it is not."""
+    return pad_for_warmup(
+        [
+            make_candle(0, open_="98", high="99", low="97", close="98"),
+            make_candle(1, open_="99", high="100.01", low="98", close="99.5"),
+            make_candle(2, open_="99.5", high="99.8", low="99", close="99.4"),
+        ]
+    )
+
+
+def _flat_atrs(candles: list[Candle], atr: str) -> list[Decimal | None]:
+    # Epsilon is TOLERANCE_ATR (0.05) x ATR: 0.1 gives 0.005 < the one tick.
+    return [Decimal(atr)] * len(candles)
+
+
+async def _lifecycle(candles: list[Candle], atrs, *, decided_before: int) -> str | None:
+    pools = FakePools(make_pool())
+    return await _service(candles, pools)._replay_pool_lifecycle(
+        pools.pool, candles, atrs, (), decided_before=decided_before
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_pool_is_not_swept_on_a_candle_an_earlier_pass_decided() -> None:
+    """Audit M3, in the pool lifecycle. The pass on which a candle was newest
+    found its one-tick wick within epsilon; a later pass, its window start moved
+    and its ATR lower, swept the pool on that same candle. On the host that was
+    DOGEUSDT M5 pool fc2d593, epsilon 0.0000112 then and 0.0000099 later, the
+    sweep written 471 periods late (2026-09-18). A decided candle keeps its
+    answer; the same candle undecided is still judged."""
+    candles = _one_tick_series()
+    wick = len(candles) - 2
+    atrs = _flat_atrs(candles, "0.1")
+
+    # The premise: judged, the wick sweeps the pool.
+    assert await _lifecycle(candles, atrs, decided_before=0) == "SWEPT"
+    assert await _lifecycle(candles, atrs, decided_before=wick) == "SWEPT"
+    assert await _lifecycle(candles, atrs, decided_before=wick + 1) is None
+
+
+@pytest.mark.asyncio
+async def test_a_marginal_penetration_on_the_last_decided_candle_still_confirms() -> None:
+    """The one decided candle the walk still reads. A close just above the level
+    (within epsilon) is a two-candle sweep waiting on the next close, so the
+    pass that decided it could not finish it -- the next pass must."""
+    candles = pad_for_warmup(
+        [
+            make_candle(0, open_="98", high="99", low="97", close="98"),
+            # High 100.02 past 100 + epsilon, close 100.003 within it: marginal.
+            make_candle(1, open_="99", high="100.02", low="98", close="100.003"),
+            # The next close back below the level confirms the sweep.
+            make_candle(2, open_="100", high="100.001", low="99", close="99.5"),
+        ]
+    )
+    marginal = len(candles) - 2
+    atrs = _flat_atrs(candles, "0.1")
+
+    # The premise: judged whole, it is a two-candle sweep.
+    assert await _lifecycle(candles, atrs, decided_before=0) == "SWEPT"
+    assert await _lifecycle(candles, atrs, decided_before=marginal + 1) == "SWEPT"
+
+
 @pytest.mark.asyncio
 async def test_a_pool_one_candle_short_of_retirement_survives() -> None:
     """The boundary is `age > 500`, so 500 is still ACTIVE.
