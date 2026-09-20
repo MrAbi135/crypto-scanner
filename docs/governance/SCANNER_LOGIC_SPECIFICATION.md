@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.11
-**Ratified:** 2026-07-12 · **Last amended:** 2026-09-19 (v1.0.11; see Amendment History)
+**Version:** 1.0.12
+**Ratified:** 2026-07-12 · **Last amended:** 2026-09-20 (v1.0.12; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -591,7 +591,7 @@ Zones and context: where institutional orders were placed, where inefficiency re
 
 **Purpose.** The institutional retracement pocket: 62–79% pullback of an impulse leg, in trend direction, inside correct PD context.
 
-**Detection Logic.** After a confirmed BOS/MSS with displacement, define the impulse leg from origin swing to the post-break extreme (leg finalizes when a confirmed internal swing forms at that extreme — the leg-end is then a fact). OTE band = retracement `0.62 → 0.79` of the leg (bullish: measured down from leg high). Registered as a zone object, state `FRESH`, valid only while: trend unchanged, leg-end swing unconsumed, and PD gate (§5.7) satisfied at touch time.
+**Detection Logic.** After a confirmed BOS/MSS with displacement, define the impulse leg from origin swing to the post-break extreme (leg finalizes when a confirmed **external** swing — `k_ext = 5`, §3.1 — forms at that extreme; the leg-end is then a fact). OTE band = retracement `0.62 → 0.79` of the leg (bullish: measured down from leg high). Registered as a zone object, state `FRESH`, valid only while: trend unchanged, leg-end swing unconsumed, and PD gate (§5.7) satisfied at touch time.
 
 **Validation.** Leg length ≥ `P.ict.ote_min_leg = 2 × ATR` (retracements of noise legs are noise), measured **once, with the ATR of the candle on which the leg finalizes**; a leg that fails then registers no OTE. **Invalidation.** Close beyond 100% retracement (leg origin) ⇒ `DEAD`; trend flip ⇒ `DEAD`; age > `P.ict.ote_max_age = 100` candles ⇒ `EXPIRED`. **Edge cases.** Overlap with OB/FVG inside the band is the *expected* A+ configuration — recorded as zone-stack evidence, §8.6. **Performance.** One live OTE per direction per TF (newest leg replaces prospectively). **Future.** Fib-level sub-grading (70.5% sweet spot) after outcome data.
 
@@ -1158,6 +1158,59 @@ Every parameter change increments `param_set_version` and requires golden-datase
 ---
 
 ## Amendment History
+
+### v1.0.12 — 2026-09-20
+
+One clarification, ruled by the product owner on 2026-09-20 after the measurement
+below ("SLS amendment likho, code ko haath mat lagao"). **It changes no
+behaviour** — it is the document moving to the implementation, which is the
+opposite of v1.0.9 through v1.0.11 and is stated plainly for that reason.
+
+| # | Section | Was | Now | Why |
+|---|---|---|---|---|
+| 1 | §5.8 Detection Logic | "leg finalizes when a confirmed **internal** swing forms at that extreme" | "leg finalizes when a confirmed **external** swing — `k_ext = 5`, §3.1 — forms at that extreme" | The open question recorded in v1.0.11 and left undecided there. The implementation has always read external swings (`ict_ote_replay.py` → `detect_external_swings`), so the document and the engine disagreed about which swing makes a leg-end a fact. Measured rather than argued; the measurement is below. |
+
+**What was measured.** A differential replay on production wiring, 300 passes per
+context on BTCUSDT H1 and DOGEUSDT M15, varying one call site only —
+`_impulse_leg_at`. §5.7's dealing range legitimately reads external swings and was
+held fixed; `dealing_ranges` came out identical (514 = 514, 529 = 529), which is
+the control proving the variant did not leak. Steady state, first pass excluded:
+
+* **OTE zone counts are the same**: 20 vs 20 (H1), 27 vs 28 (M15). Internal swings
+  find 5–11% more impulse legs, but the extra legs fail §5.8's 2 × ATR floor and
+  register no zone.
+* **Most zones land in the same pocket of price**: median best band overlap 100%
+  (one band containing the other), 62–71% of zones overlapping at 90% or better.
+* **A real minority does not**: 11% (M15) to 28% (H1) of zones have no
+  same-polarity counterpart at any price in the other variant. The two contexts
+  disagree about that rate by a factor of 2.5, on a sample of two.
+* **No band is ever exactly equal** when the leg anchor differs.
+
+**Why external was chosen, given that.** Not because the difference is nil — it is
+not — but because nothing available says internal is better. There are **zero
+OTE-derived published signals** in the system (all nine to date entered on OB or
+FVG zones), so there is no outcome evidence for OTE at all, and a zone reaching
+`TESTED` is not a trade that made money. Against no evidence, the costs are
+asymmetric: amending this document is a documentation change, while moving the
+engine to internal swings is a new algo version, a soak reset, golden updates and
+a version-pinned migration window. Constitution §43.5 permits scope to shrink and
+forbids quality to; choosing the free option when the evidence is absent shrinks
+neither.
+
+**What this amendment does not claim.** It does not claim the doctrine is now
+ICT-correct. ICT's own hierarchy has no fixed `k`: a short-term high is a
+three-candle formation confirmed one candle either side, and intermediate and
+long-term highs are defined recursively from their neighbours. Both `k_int = 2`
+and `k_ext = 5` are approximations of a structure this engine does not implement,
+and §3.1 remains as it was. It also does not close the question: when OTE-derived
+signals exist with recorded outcomes, this is reopened on evidence rather than on
+cost.
+
+**Impact review.** Documentation only. No detector, engine algo version,
+`param_set_version`, schema, API contract or parameter value changes. No golden
+dataset changes. No deploy and no soak reset — the running release already
+behaves as this text now describes.
+
 
 ### v1.0.11 — 2026-09-19
 
