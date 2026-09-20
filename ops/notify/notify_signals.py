@@ -538,7 +538,17 @@ def main() -> int:
     # Cold start. Without this, a clock or timezone mistake on the first run
     # would push every signal the window happens to catch — and the nine rows
     # already in the table are from retired algorithm versions.
+    #
+    # The marker line is written first and unconditionally, because the ledger's
+    # existence is what ends the cold start. Writing only the per-signal rows
+    # leaves no file at all on a quiet first run -- which is the normal case at
+    # one signal a fortnight -- so every later run cold-starts again, and the
+    # first real signal to arrive is marked seen instead of sent. The tool
+    # would swallow exactly the message it exists to deliver, and the log would
+    # say it had done the right thing.
     if not LEDGER.exists():
+        ledger_append(now, "coldstart", "-")
+
         for row in fresh:
             ledger_append(now, "coldstart", row["signal_id"])
 

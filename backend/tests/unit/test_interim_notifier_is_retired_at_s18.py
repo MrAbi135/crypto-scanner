@@ -35,6 +35,7 @@ The interim notifier must go with it. To retire it:
 
   1. delete ops/notify/ and its crontab entry on the VM
   2. delete backend/tests/integration/test_notify_role_pg.py,
+     backend/tests/unit/test_interim_notifier_behaviour.py,
      backend/tests/support/notify_role.py and the notify_engine_ fixture
   3. DROP ROLE scanner_notify;  (and delete ops/db/notify-role.sql)
   4. delete this test
