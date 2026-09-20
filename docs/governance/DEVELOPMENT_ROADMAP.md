@@ -4,7 +4,7 @@
 
 **Document Status:** Official Development Roadmap — the executable build sequence for the frozen governance stack
 **Authority:** Subordinate to all eight governance documents (Constitution, SLS, TDR, PRD, TAD, DDD, API Specification, UI/UX Blueprint — frozen; each document's current version is stated in its own header); authoritative over build order, sprint scope, and release gating
-**Version:** 2.1.0 | **Ratified:** 2026-07-12 · **Last amended:** 2026-09-12 (§8.1's golden bar amended to covered-or-explained; see Amendment History at the end of this document)
+**Version:** 2.1.1 | **Ratified:** 2026-07-12 · **Last amended:** 2026-09-20 (S18 gains the retirement of an interim notifier built ahead of it; see Amendment History at the end of this document)
 **Sprint IDs are stable identifiers, not an execution order.** S0–S22 keep the numbers they were ratified with — they are cited by the SLS, the ADRs, and code docstrings, and renumbering them would edit a frozen document to no purpose. §7 is the only authority on what runs when. A `b` suffix (S4b) means *reopened*: scope that its original sprint was declared done without.
 **Team model:** One developer + AI assistance (Claude / ChatGPT), full-time equivalent
 **Amendment Rule:** Scope moves between sprints via roadmap revision; governance documents are never modified by scheduling pressure (Constitution §43.5, §46.1)
@@ -460,6 +460,7 @@ None of these are deleted. They re-enter after R1 beta feedback, alongside R2.
 - **Objective:** The always-on watcher: rules → matching → discipline → Telegram/in-app delivery — **J3 closes** (SLS §10; Blueprint §21.10).
 - **Features to build:** FC-7.1, FC-11.1 (delivery log).
 - **Backend work:** Alert worker: subscription compilation (predicates from filter grammar), matching on signal events, priority rules, cooldowns/dedup keys, quiet hours, daily caps, storm mode (digest grouping); channel adapters: Telegram bot (deep-link binding flow, delivery, failure fallback chain), in-app (inbox), email skeleton (digest-class); delivery/suppression ledger; alert-latency instrumentation (≤ 3 s dispatch budget).
+- **Retire the interim notifier — first, before any adapter is written.** `ops/notify/notify_signals.py` (added 2026-09-20, v2.1.1) pushes published signals to Telegram from a cron job. It implements §10.1's grade and tier caps and a daily ceiling; it implements none of §10.1's priority split, §10.2's storm breaker and dispatch-moment freshness, or §10.3's cooldowns. Alongside a real alert worker it is a second delivery path around the discipline layer, and a working one looks like nothing is wrong. Delete: `ops/notify/`, the VM crontab entry, `ops/db/notify-role.sql` with `DROP ROLE scanner_notify`, `backend/tests/integration/test_notify_role_pg.py`, `backend/tests/support/notify_role.py`, the `notify_engine_` fixture, `backend/tests/unit/test_interim_notifier_is_retired_at_s18.py`, and this bullet. That last test fails the build while `infrastructure/channels/` holds code and `ops/notify/` still exists, so this is enforced rather than remembered.
 - **Frontend work:** Alert screens: rule cards + C11 builder (live predicate validation + "would have matched N last 7d" preview), delivery log with suppression rows, quota meter C12, Telegram link flow UI; promote-filter-to-rule completion (S14 stub).
 - **Database work:** T29 rules, T30 alert events (monthly partitions); quota counters (Redis, atomic).
 - **APIs:** §18.10 alerts group complete; Telegram webhook (inbound binding); **§18.2 Telegram-channel link rows completed (deferred from S10 — the bot now exists)**.
@@ -675,6 +676,29 @@ v2.0.0 does not soften that belief; it removes a way of failing it. Doctrine bui
 ---
 
 ## 17. Amendment History
+
+### v2.1.1 — 2026-09-20 — S18 gains the retirement of an interim notifier built ahead of it
+
+**Trigger.** The owner asked whether signals could reach a phone before S18, which sits eight sprints away (§7.2 step 12; the build is at step 9). Measured against the live system the question answers itself in an unexpected direction: nine signals exist in the project's history, the most recent published 2026-09-07, and §10's machinery — storm breaker at 40 signals in five minutes, cooldowns, daily caps — exists to ration attention against a volume that is not there. What *is* there is the part that matters most: §10.3's duplicate key and refresh-merge are already implemented inside the engine, so one setup cannot produce two alerts no matter what reads the table afterwards. A cron job that reads published signals and pushes the ones §10.1 would push is therefore a small, honest thing to build now — and a dangerous one to still have running when the real engine ships.
+
+**Impact review against dependent sections.**
+
+| Section | Change | Nature |
+|---|---|---|
+| Sprint S18 | New first bullet: retire the interim notifier before writing any adapter, with the full deletion list | Additive scope |
+| §17 | This entry | Additive |
+
+**What was NOT changed.** No frozen document was touched. SLS §10 is not amended, softened, or partially implemented — the notifier is not an alert engine and the roadmap now says so in the sprint that builds one. No detector behaviour, schema, API contract, sprint ID, gate boundary or execution order moved. G5 still gates on S18's own DoD.
+
+**Rationale for each judgement call.**
+
+1. *Built now rather than at S18.* The current rate is roughly one signal a fortnight, which is the safest possible conditions to validate a delivery path in, and the worst possible conditions to defer one to — when the rate rises, the tool would be written in a hurry against live traffic. The cost of building it early is one file and a cron line; the cost of building it late is judgement under pressure.
+2. *Read-only database role rather than the REST API.* The API's session model is built for browsers: fifteen-minute access tokens and a rotating refresh token with reuse detection, so an unattended loop must persist a rotated secret every quarter hour or revoke its own family — and the alternative stores the operator's password on disk. A `scanner_notify` role granted `SELECT` on `detection.signals`, `detection.signal_transitions` and three columns of `market.symbols` needs no credential at all and is refused by postgres everywhere else.
+3. *The contract enforced by grant, not by convention.* `GET /api/v1/rankings` serves setups including below-floor candidates, by design — the board reports its own denominator. Those rows never faced §15.3. The notifier must never push one, and "must never" written in a docstring is a wish; `permission denied for table setups` is not.
+4. *A test rather than a note.* Three places record the intention to delete this (here, the module docstring, the session tracker) and none of them is checked by anything. `test_interim_notifier_is_retired_at_s18.py` fails the build the moment `infrastructure/channels/` stops being a stub while `ops/notify/` still exists, and prints the deletion list. The retirement is enforced, not remembered.
+5. *Recorded as an amendment rather than left in the code.* A temporary thing that outlives its reason is the ordinary failure here, and the ordinary way it happens is that nobody wrote down when it should end. S18 is when.
+
+**What this amendment does not excuse.** The notifier implements a strict subset of §10 and the subset is listed in its own docstring, not inferred. It is not a partial delivery of FC-7.1, it does not advance J3, and it closes no gate. While it runs, the project has a delivery path whose discipline is "the rate is near zero" — true today, checked by nobody tomorrow. That is the reason its retirement is the *first* bullet of S18 rather than the last.
 
 ### v2.1.0 — 2026-09-12 — §8.1's golden bar amended to covered-or-explained
 
