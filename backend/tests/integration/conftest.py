@@ -57,6 +57,23 @@ async def app_engine(pg_dsn, engine):
     await restricted.dispose()
 
 
+@pytest.fixture()
+async def notify_engine_(pg_dsn, engine):
+    """A connection as the interim notifier's role. **Deleted at S18.**
+
+    Trailing underscore because `tests.support.notify_role.notify_engine` is
+    the function that builds it, and a fixture sharing that name would shadow
+    the import inside the fixture body.
+    """
+    from tests.support.notify_role import notify_engine
+
+    notifier = await notify_engine(pg_dsn, engine)
+
+    yield notifier
+
+    await notifier.dispose()
+
+
 @pytest.fixture(scope="session")
 def redis_url():
     """One Redis for the suite, on the same reasoning as the database.
