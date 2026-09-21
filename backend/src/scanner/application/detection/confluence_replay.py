@@ -141,6 +141,7 @@ from scanner.domain.structure import (
     SwingStrength,
     TrendState,
     detect_external_swings,
+    detect_internal_swings,
     unbroken_pairs,
 )
 from scanner.domain.volume import (
@@ -211,7 +212,7 @@ from scanner.shared import Timeframe
 # after M8 made RVOL readable there), and on M5 only for a Tier 1 symbol (§0.3,
 # whatever the published set). Suppressed with a recorded reason; setups and
 # the event log are unchanged.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v32"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v33"
 
 # The published set when nothing is configured (owner ruling 2026-09-15). A
 # default that published everything would open M15/M5 the day a setting went
@@ -295,7 +296,14 @@ class _Legs:
     # whichever window recorded them, and `_bos_inside`'s docstring already
     # made this argument for BOS breaks.
     displacement_times: frozenset[datetime]
-    swings: tuple[SwingPoint, ...]
+
+    # §5.7's range swings, and **only** those. They are external by doctrine --
+    # "the range is the most recent confirmed external swing on each side"
+    # (`_read_pd`) -- while §7.5's legs begin and end at *internal* swings. The
+    # two shared one field and one detector until 2026-09-21, so a change meant
+    # for the leg picture silently moved the PD context with it; naming the
+    # field after its consumer is what stops that returning.
+    range_swings: tuple[SwingPoint, ...]
 
     # The window's open times, positionally. Legs are indexed into the current
     # window and so is everything they are compared against -- except a BOS,
@@ -564,7 +572,7 @@ class ConfluenceReplayService:
 
         legs = _read_legs(series)
 
-        pd = _read_pd(series, legs.swings, atr)
+        pd = _read_pd(series, legs.range_swings, atr)
 
         bos_breaks = _bos_break_times(events)
 
@@ -2301,13 +2309,24 @@ def _read_legs(series: list[Candle]) -> _Legs:
         if atr is not None and atr > 0 and detect_displacement(series, index, atr=atr) is not None
     )
 
-    swings = detect_external_swings(series)
+    # SLS §7.5: "A leg begins/ends at confirmed internal swings." The
+    # implementation read external ones from the day it was written, which made
+    # every leg coarser than the doctrine asks for -- and `retracement_leg` is
+    # §8.6's A3 clause, so the coarser picture was the single largest blocker of
+    # archetype assignment on the timeframes that publish (94 of 183 one-clause
+    # near-misses on H1/H4 over six days).
+    internal = detect_internal_swings(series)
+
+    # §5.7's range keeps its external swings. Sharing one set was the confound:
+    # swapping the detector for the legs moved the PD context too, and G3 is the
+    # gate that then dominated every measurement of the change.
+    external = detect_external_swings(series)
 
     return _Legs(
-        legs=segment_legs(series, swings, displacement),
+        legs=segment_legs(series, internal, displacement),
         displacement=displacement,
         displacement_times=frozenset(series[index].open_time for index in displacement),
-        swings=swings,
+        range_swings=external,
         open_times=tuple(candle.open_time for candle in series),
     )
 
