@@ -1,0 +1,33 @@
+{
+  "source": "src/scanner/application/detection/confluence_replay.py",
+  "tests": [
+    "tests/unit/application/detection/test_confluence_replay.py"
+  ],
+  "mutations": [
+    {
+      "name": "the old silent guard: return for every no-payload candidate",
+      "old": "        if candidate.payload is None:\n            if candidate.publishable:",
+      "new": "        if candidate.payload is None:\n            if False:"
+    },
+    {
+      "name": "suppress every no-payload candidate, qualified or not",
+      "old": "        if candidate.payload is None:\n            if candidate.publishable:",
+      "new": "        if candidate.payload is None:\n            if True:"
+    },
+    {
+      "name": "report only the first missing row",
+      "old": "    if invalidation is None:\n        missing.append(\"invalidation\")\n\n    if primary is None:",
+      "new": "    if invalidation is None:\n        missing.append(\"invalidation\")\n\n    elif primary is None:"
+    },
+    {
+      "name": "claim a missing row even when the levels are complete",
+      "old": "        (),\n    )",
+      "new": "        (\"invalidation\",),\n    )"
+    },
+    {
+      "name": "drop payload_unmet from the recorded reason",
+      "old": "        if unmet:\n            detail[\"payload_unmet\"] = list(unmet)",
+      "new": "        if False:\n            detail[\"payload_unmet\"] = list(unmet)"
+    }
+  ]
+}
