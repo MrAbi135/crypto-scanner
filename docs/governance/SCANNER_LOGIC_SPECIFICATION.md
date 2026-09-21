@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.12
-**Ratified:** 2026-07-12 · **Last amended:** 2026-09-20 (v1.0.12; see Amendment History)
+**Version:** 1.0.13
+**Ratified:** 2026-07-12 · **Last amended:** 2026-09-22 (v1.0.13; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -700,7 +700,7 @@ Composite 0–100 recorded per TF: structural quality (count of consecutive unbr
 ### 7.5 Impulse / Retracement Legs
 
 **Purpose.** Segment price into institutional legs so targets, OTE, and trend strength read from the same skeleton.
-**Detection Logic.** A leg begins/ends at confirmed internal swings. **Impulse leg:** contains ≥ 1 displacement candle and net progress ≥ 1.5 × ATR in trend direction. **Retracement leg:** counter-direction leg retracing ≤ 100% of the prior impulse with no counter-displacement. A counter-leg **with** displacement or > 100% retrace is neither — it escalates to structure evaluation (CHoCH territory, §3.6).
+**Detection Logic.** A leg begins/ends at confirmed **external** swings (`k_ext = 5`, §3.1). **Impulse leg:** contains ≥ 1 displacement candle and net progress ≥ 1.5 × ATR in trend direction. **Retracement leg:** counter-direction leg retracing ≤ 100% of the prior impulse with no counter-displacement. A counter-leg **with** displacement or > 100% retrace is neither — it escalates to structure evaluation (CHoCH territory, §3.6).
 **Validation.** Legs finalize only when their terminal swing confirms (closed-candle law). **Invalidation.** None post-finalization. **Edge Cases.** Overlapping micro-legs in chop: legs below 0.75 × ATR net progress are `micro` and excluded from trend-strength and OTE anchoring. **Performance.** Event-driven on swing confirmations. **Future.** Leg-symmetry analytics (measured-move projection) for target refinement.
 
 ---
@@ -1158,6 +1158,60 @@ Every parameter change increments `param_set_version` and requires golden-datase
 ---
 
 ## Amendment History
+
+### v1.0.13 — 2026-09-22
+
+One clarification, ruled by the product owner on 2026-09-22 after the
+measurement below ("§7.5 ko amend kar do, code ko haath mat lagao"). **It
+changes no behaviour** — the document moves to the implementation, as v1.0.12
+did for §5.8.
+
+| # | Section | Was | Now | Why |
+|---|---|---|---|---|
+| 1 | §7.5 Detection Logic | "A leg begins/ends at confirmed **internal** swings" | "A leg begins/ends at confirmed **external** swings (`k_ext = 5`, §3.1)" | `_read_legs` has always read external swings. Unlike §5.8's, this disagreement is on the path of every published signal: §8.6's A3 requires a "retracement leg (§7.5)", and every signal the engine has ever published is A3. It was measured rather than argued, and the measurement refused the reason for raising it. |
+
+**Why it was raised, and what the measurement said.** Not conformance for its
+own sake. Over six days of v32 on the host, the timeframes that publish almost
+never assign an archetype — H1 12 of 413 candidates, H4 **0 of 117** — and of
+the 518 H1/H4 candidates that got none, 183 were exactly one clause short. The
+largest single blocker was A3's `retracement_leg`, 94 of those 183, and eleven
+of the blocked candidates had already cleared A3's confidence floor of 70. So
+the question was direct: does the doctrine's own definition unblock them?
+
+It does not. Replayed on BTCUSDT and BNBUSDT H1 with production wiring and
+§5.7's range held fixed, internal swings **close more of that clause than they
+open** — 55 against 49, and 23 against 14 — and produce no new archetype and no
+new publishable candidate. The stricter reading of §7.5 is not what is holding
+signals back, and adopting it would cost an algo version, a soak reset and a
+slightly smaller candidate set for no measured gain.
+
+**What the measurement cannot say.** The replay scores lower than production on
+the same symbol and timeframe — BTCUSDT H1 averaged 53.2 against the host's 58.7,
+topping out at 69 against 76 — so it never reaches the floor and cannot say
+whether those eleven near-misses would have published under either definition.
+It answers the direction of the clause, not the fate of a signal. An earlier
+attempt at this measurement was worse than limited: it swapped the swing
+detector for the whole module, which moved §5.7's PD context along with the
+legs, and G3 — the PD gate — then dominated every number it produced. That run
+is void and its figures are not cited here.
+
+**What this amendment does not claim.** That the doctrine is ICT-correct: ICT's
+short-term high is a three-candle formation confirmed one candle either side,
+with intermediate and long-term highs defined recursively from their neighbours,
+so neither `k_int = 2` nor `k_ext = 5` is its structure. That the engine's
+silence is explained: it is not. Archetype assignment on H1 and H4 remains rare
+for reasons this amendment does not touch, and H4 has never produced a candidate
+above confidence 69 against a floor of 70. Those are open and recorded
+separately.
+
+**Impact review.** Documentation only. No detector, engine algo version,
+`param_set_version`, schema, API contract or parameter value changes. No golden
+dataset changes. No deploy and no soak reset — the running release already
+behaves as this text now describes. A branch carrying the conformance change
+exists locally and is **not** merged; it also separated `_Legs.swings` into
+`range_swings` so a future change to the leg picture cannot move the PD context
+with it, which is worth doing on its own and is recorded as such.
+
 
 ### v1.0.12 — 2026-09-20
 
