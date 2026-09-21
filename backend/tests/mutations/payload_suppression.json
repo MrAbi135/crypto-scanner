@@ -1,33 +1,53 @@
 {
-  "source": "src/scanner/application/detection/confluence_replay.py",
-  "tests": [
+  "description": "A candidate that clears its gates and archetype floor and then cannot fill a \u00a715.2 row must be recorded as suppressed (INCOMPLETE_PAYLOAD) with the rows it could not fill, and a candidate that never qualified must not be. Found live 2026-09-20: DOGEUSDT M5 A3, target pool swept by its own candle, dropped with nothing written. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/payload_suppression.json",
+  "pytest": [
     "tests/unit/application/detection/test_confluence_replay.py"
   ],
   "mutations": [
     {
-      "name": "the old silent guard: return for every no-payload candidate",
+      "name": "the old silent guard: a no-payload candidate is dropped without a row",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
       "old": "        if candidate.payload is None:\n            if candidate.publishable:",
-      "new": "        if candidate.payload is None:\n            if False:"
+      "new": "        if candidate.payload is None:\n            if False:",
+      "expect_failing": [
+        "test_a_floor_passing_candidate_with_no_payload_is_suppressed_not_dropped"
+      ]
     },
     {
       "name": "suppress every no-payload candidate, qualified or not",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
       "old": "        if candidate.payload is None:\n            if candidate.publishable:",
-      "new": "        if candidate.payload is None:\n            if True:"
+      "new": "        if candidate.payload is None:\n            if True:",
+      "expect_failing": [
+        "test_a_candidate_that_never_qualified_is_not_suppressed_twice"
+      ]
     },
     {
       "name": "report only the first missing row",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
       "old": "    if invalidation is None:\n        missing.append(\"invalidation\")\n\n    if primary is None:",
-      "new": "    if invalidation is None:\n        missing.append(\"invalidation\")\n\n    elif primary is None:"
+      "new": "    if invalidation is None:\n        missing.append(\"invalidation\")\n\n    elif primary is None:",
+      "expect_failing": [
+        "test_levels_report_every_missing_row_not_just_the_first"
+      ]
     },
     {
       "name": "claim a missing row even when the levels are complete",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
       "old": "        (),\n    )",
-      "new": "        (\"invalidation\",),\n    )"
+      "new": "        (\"invalidation\",),\n    )",
+      "expect_failing": [
+        "test_levels_report_nothing_missing_when_they_are_complete"
+      ]
     },
     {
       "name": "drop payload_unmet from the recorded reason",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
       "old": "        if unmet:\n            detail[\"payload_unmet\"] = list(unmet)",
-      "new": "        if False:\n            detail[\"payload_unmet\"] = list(unmet)"
+      "new": "        if False:\n            detail[\"payload_unmet\"] = list(unmet)",
+      "expect_failing": [
+        "test_a_floor_passing_candidate_with_no_payload_is_suppressed_not_dropped"
+      ]
     }
   ]
 }
