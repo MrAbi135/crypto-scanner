@@ -6,6 +6,7 @@ import json
 from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from tests.golden.harness.memory import InMemoryEngineStateStore
@@ -3710,3 +3711,132 @@ async def test_a_confirmed_failure_is_a_fact_even_inside_the_window() -> None:
     f1 = {item["code"]: item["points"] for item in recorded[0]["attribution"]["F1"]}
 
     assert f1.get("clean_record") == "7"
+
+
+def _suppression_payloads(repo) -> list[dict]:
+    return [
+        json.loads(record.payload)
+        for record in repo.appended.values()
+        if record.event_type.startswith("SIGNAL_SUPPRESSED_")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_floor_passing_candidate_with_no_payload_is_suppressed_not_dropped() -> None:
+    """§12.2's funnel loses nothing that reached §15.3.
+
+    Found live on 2026-09-20: a DOGEUSDT M5 A3 candidate at confidence 78
+    cleared every gate and its archetype floor, then found no resting target
+    pool -- the only one below price was swept by the same candle, the
+    liquidity engine having run earlier in the same pass. `_publish` returned
+    on `payload is None` and wrote nothing at all, so the candidate left the
+    funnel with no row naming a reason: ten floor-passing setups against nine
+    suppression events, and no way to ask the database which one vanished.
+    """
+    signals = FakeSignals()
+
+    svc, repo = service(**bullish_setup(), signals=signals, incidents=FakeIncidents())
+
+    candidate = replace(
+        publishable_candidate(),
+        levels=None,
+        payload=None,
+        payload_unmet=("primary_target",),
+    )
+
+    await svc._publish("BTCUSDT", TF, BASE + TF.duration * 10, candidate)
+
+    assert signals.rows == {}, "nothing may publish without a payload"
+    assert _suppression_payloads(repo) == [
+        {"reasons": ["INCOMPLETE_PAYLOAD"], "payload_unmet": ["primary_target"]}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_that_never_qualified_is_not_suppressed_twice() -> None:
+    """The other half, and the one a careless fix gets wrong.
+
+    A candidate that failed its gates or missed its floor also arrives with no
+    payload, and §8.6's verdict is already on its `SETUP_CANDIDATE` event with
+    `failed_gates` and `archetype_unmet`. Recording a suppression for it too
+    would double-count the denominator §14 watches and turn every quiet candle
+    into two rows about nothing.
+    """
+    signals = FakeSignals()
+
+    svc, repo = service(**bullish_setup(), signals=signals, incidents=FakeIncidents())
+
+    candidate = replace(
+        publishable_candidate(),
+        publishable=False,
+        levels=None,
+        payload=None,
+    )
+
+    await svc._publish("BTCUSDT", TF, BASE + TF.duration * 10, candidate)
+
+    assert signals.rows == {}
+    assert _suppression_payloads(repo) == []
+
+
+def test_levels_report_every_missing_row_not_just_the_first() -> None:
+    """A candidate short of both rows must not be filed under one of them.
+
+    Returning at the first absence would report "invalidation" about a
+    candidate that also has no target, and §14's funnel would under-count the
+    second cause for as long as the first kept firing.
+    """
+    from scanner.application.detection.confluence_replay import _levels_for
+    from scanner.domain.confluence.archetypes import Archetype
+
+    zone = SimpleNamespace(
+        zone_id="z1",
+        band_low=Decimal(100),
+        band_high=Decimal(104),
+        refined_low=None,
+        refined_high=None,
+    )
+
+    # A1 wants a swept extreme (none recorded here) and every archetype wants a
+    # target (no pool here).
+    levels, unmet = _levels_for(
+        Archetype.SWEEP_REVERSAL,
+        direction="UP",
+        zone=zone,
+        swept_extreme=None,
+        target_pool=None,
+        pd=None,
+    )
+
+    assert levels is None
+    assert unmet == ("invalidation", "primary_target")
+
+
+def test_levels_report_nothing_missing_when_they_are_complete() -> None:
+    """The control. A reason tuple that is never empty is a reason tuple that
+    says nothing."""
+    from scanner.application.detection.confluence_replay import _levels_for
+    from scanner.domain.confluence.archetypes import Archetype
+
+    zone = SimpleNamespace(
+        zone_id="z1",
+        band_low=Decimal(100),
+        band_high=Decimal(104),
+        refined_low=None,
+        refined_high=None,
+    )
+    pool = SimpleNamespace(
+        pool_id="p1", band_low=Decimal(112), band_high=Decimal(114), strength=Decimal(60)
+    )
+
+    levels, unmet = _levels_for(
+        Archetype.CONTINUATION_PULLBACK,
+        direction="UP",
+        zone=zone,
+        swept_extreme=None,
+        target_pool=pool,
+        pd=None,
+    )
+
+    assert levels is not None
+    assert unmet == ()

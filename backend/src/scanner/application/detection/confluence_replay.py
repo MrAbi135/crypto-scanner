@@ -371,6 +371,13 @@ class SetupCandidate:
     # nothing to guess at.
     payload: SignalPayload | None = None
 
+    # Which §15.2 rows could not be filled, when the candidate cleared its
+    # archetype floor and still produced no payload. Empty for a candidate
+    # that never got that far -- §8.6's own verdict already explains those,
+    # and repeating it here would blur "never qualified" into "qualified and
+    # then could not be priced", which are different facts about the engine.
+    payload_unmet: tuple[str, ...] = ()
+
     # §2.15 flags a zone formed across a DEGRADED gap. §15.3(2) refuses a
     # payload whose evidence chain contains one, so the flag has to travel
     # with the candidate rather than be re-read from a zone the publisher
@@ -1045,7 +1052,7 @@ class ConfluenceReplayService:
             and meets_floor(archetype, confidence.final)
         )
 
-        levels = (
+        levels, payload_unmet = (
             _levels_for(
                 archetype,
                 direction=direction,
@@ -1055,7 +1062,7 @@ class ConfluenceReplayService:
                 pd=pd,
             )
             if publishable and archetype is not None
-            else None
+            else (None, ())
         )
 
         payload = (
@@ -1105,6 +1112,7 @@ class ConfluenceReplayService:
             breakdown=confidence,
             levels=levels,
             payload=payload,
+            payload_unmet=payload_unmet,
             stale_context=best_zone.stale_context,
             zone_id=best_zone.zone_id,
             unreachable=_unreachable(htf, pd),
@@ -1195,12 +1203,38 @@ class ConfluenceReplayService:
     ) -> None:
         """§12.2: evaluate §15.3 once, atomically, and publish or suppress.
 
-        A candidate with no payload never reaches here as a publication: it
-        either failed the gates, missed its floor, or could not fill a §15.2
-        row. All three are already recorded — the event log has the candidate
-        and T16 has the scored one — so there is nothing further to say.
+        A candidate with no payload reaches here for one of three reasons: it
+        failed the gates, it missed its archetype floor, or it cleared both and
+        still could not fill a §15.2 row. The first two are already answered by
+        the `SETUP_CANDIDATE` event, which carries `failed_gates` and §8.6's
+        `archetype_unmet`.
+
+        **The third was not answered anywhere.** An earlier version returned
+        here for all three, on the reasoning that everything was already
+        recorded. It was not: a candidate that passed every gate, cleared its
+        floor and then found no target left the funnel with no row naming a
+        reason, so §12.2's "candidates -> published is a monitored ratio" quietly
+        lost it and §14 counted a denominator it could not explain. Found on
+        2026-09-20 -- a DOGEUSDT M5 A3 setup at confidence 78 whose only resting
+        target pool was swept by the very candle that produced the setup, the
+        liquidity engine having run earlier in the same pass. `INCOMPLETE_PAYLOAD`
+        existed in `SuppressionReason` the whole time; nothing could reach it,
+        because `publication_checks` runs after this guard.
         """
-        if self._signals is None or candidate.payload is None:
+        if self._signals is None:
+            return
+
+        if candidate.payload is None:
+            if candidate.publishable:
+                await self._suppress(
+                    symbol,
+                    timeframe,
+                    event_at,
+                    candidate.direction,
+                    (SuppressionReason.INCOMPLETE_PAYLOAD,),
+                    unmet=candidate.payload_unmet,
+                )
+
             return
 
         payload = candidate.payload
@@ -1246,34 +1280,13 @@ class ConfluenceReplayService:
             return
 
         if not decision.published:
-            # §12.2: "Fail => SUPPRESSED with recorded reason (auditable
-            # funnel: candidates -> published is a monitored ratio, §14)".
-            # The reason rides on the event log rather than T17, because T17
-            # holds published signals and a suppression is the absence of one.
-            await self._events.append(
-                EngineEventRecord(
-                    event_key=build_event_key(
-                        symbol=symbol,
-                        timeframe=timeframe,
-                        event_type=f"SIGNAL_SUPPRESSED_{candidate.direction}",
-                        event_at=event_at,
-                        algo_version=self._algo_version,
-                    ),
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    event_type=f"SIGNAL_SUPPRESSED_{candidate.direction}",
-                    event_at=event_at,
-                    algo_version=self._algo_version,
-                    payload=json.dumps(
-                        {"reasons": [r.value for r in decision.reasons]},
-                        sort_keys=True,
-                    ),
-                    created_at=self._clock.now(),
-                )
+            await self._suppress(
+                symbol,
+                timeframe,
+                event_at,
+                candidate.direction,
+                decision.reasons,
             )
-
-            for reason in decision.reasons:
-                self._metrics.record_publication(reason.value, timeframe=timeframe.value)
 
             return
 
@@ -1375,6 +1388,60 @@ class ConfluenceReplayService:
             return True
 
         return not await self._incidents.list_open(symbol)
+
+    async def _suppress(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        event_at: datetime,
+        direction: str,
+        reasons: Sequence[SuppressionReason],
+        *,
+        unmet: tuple[str, ...] = (),
+    ) -> None:
+        """§12.2: "Fail => SUPPRESSED with recorded reason (auditable funnel:
+        candidates -> published is a monitored ratio, §14)".
+
+        The reason rides on the event log rather than T17, because T17 holds
+        published signals and a suppression is the absence of one.
+
+        One writer for both refusal paths -- §15.3's verdict and a payload that
+        could not be assembled. They were separate once, which is how only one
+        of them ended up writing anything.
+
+        `unmet` names the §15.2 rows that were missing when the reason is
+        `INCOMPLETE_PAYLOAD`. Omitted from the payload when empty rather than
+        written as `[]`, so a reader never has to decide whether an empty list
+        means "nothing missing" or "nobody looked".
+        """
+        detail: dict[str, object] = {"reasons": [reason.value for reason in reasons]}
+
+        if unmet:
+            detail["payload_unmet"] = list(unmet)
+
+        event_type = f"SIGNAL_SUPPRESSED_{direction}"
+
+        await self._events.append(
+            EngineEventRecord(
+                event_key=build_event_key(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    event_type=event_type,
+                    event_at=event_at,
+                    algo_version=self._algo_version,
+                ),
+                symbol=symbol,
+                timeframe=timeframe,
+                event_type=event_type,
+                event_at=event_at,
+                algo_version=self._algo_version,
+                payload=json.dumps(detail, sort_keys=True),
+                created_at=self._clock.now(),
+            )
+        )
+
+        for reason in reasons:
+            self._metrics.record_publication(reason.value, timeframe=timeframe.value)
 
     async def _dedup_blocker(
         self,
@@ -2021,13 +2088,20 @@ def _levels_for(
     swept_extreme: Decimal | None,
     target_pool: LiquidityPoolRecord | None,
     pd: PdContext | None,
-) -> SignalLevels | None:
-    """§15.2's entry, invalidation and targets for one candidate.
+) -> tuple[SignalLevels | None, tuple[str, ...]]:
+    """§15.2's entry, invalidation and targets, and the rows that could not be filled.
 
     Returns None when a required row cannot be filled. §15.3(1) wants every
     field non-null, so an absent target or an A1 with no recorded swept
     extreme is a signal that must not publish -- and inventing either would
     hand a trader a level the doctrine never derived.
+
+    **The reason is returned with the verdict** rather than left for the caller
+    to reconstruct. §12.2 wants every refusal recorded with its reason, and a
+    caller holding only `None` has to re-derive which row was missing from
+    inputs it may no longer hold -- which is how a floor-passing DOGEUSDT M5
+    candidate was dropped on 2026-09-20 with nothing written anywhere, and how
+    answering "why" took a replay rather than a query.
     """
     entry = entry_zone(
         zone_id=zone.zone_id,
@@ -2044,19 +2118,30 @@ def _levels_for(
         swept_extreme=swept_extreme,
     )
 
-    if invalidation is None:
-        return None
-
     primary = _primary_target(archetype, direction=direction, pool=target_pool, pd=pd)
 
-    if primary is None:
-        return None
+    # Both are evaluated before either is reported. Returning at the first
+    # absence would say "no invalidation" about a candidate that also has no
+    # target, and the funnel would then under-count the second cause forever.
+    missing = []
 
-    return SignalLevels(
-        direction=direction,
-        entry=entry,
-        invalidation=invalidation,
-        primary_target=primary,
+    if invalidation is None:
+        missing.append("invalidation")
+
+    if primary is None:
+        missing.append("primary_target")
+
+    if invalidation is None or primary is None:
+        return None, tuple(missing)
+
+    return (
+        SignalLevels(
+            direction=direction,
+            entry=entry,
+            invalidation=invalidation,
+            primary_target=primary,
+        ),
+        (),
     )
 
 
