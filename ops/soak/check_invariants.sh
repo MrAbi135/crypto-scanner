@@ -253,6 +253,54 @@ if [ -z "$SHIFT_ALGO" ]; then
 fi
 IDLE_CANDLES=100          # P.structure.idle_candles, SLS §3.4
 
+# §3.5's `ε`, which this check's break test did not have. See
+# ops/soak/break_tolerance.py for why it cannot be computed in SQL: ATR is a
+# Wilder recurrence, and a second implementation of it here would be a new way
+# for the check and the engine to disagree about what a break is.
+#
+# One run for every context, before the loop, because it is one ATR pass each
+# and a per-context `docker run` would cost sixty container starts an hour.
+TOLERANCE_ROWS=""
+
+if [ ! -f ops/soak/break_tolerance.py ]; then
+  flag "ops/soak/break_tolerance.py is missing -- check A's break test has no tolerance"
+else
+  tnet=$(docker inspect scanner-dev-engine-1 --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' 2>/dev/null)
+
+  TOLERANCE_ROWS=$(docker run --rm --network "$tnet" --env-file ops/env/dev.env \
+                     -e SCANNER_INGEST_SYMBOLS="$INGEST_SYMBOLS" \
+                     --entrypoint python -v "$PWD/ops/soak/break_tolerance.py:/tmp/tol.py:ro" \
+                     -w /app scanner-dev-engine /tmp/tol.py 2>&1)
+  trc=$?
+
+  if [ "$trc" -ne 0 ]; then
+    flag "break_tolerance.py failed (exit $trc) -- check A's break test has no tolerance"
+    echo "$TOLERANCE_ROWS" | sed 's/^/  /'
+    TOLERANCE_ROWS=""
+  fi
+fi
+
+# Whether §3.5 confirms a break for this context. `unknown` when the helper did
+# not run, and an unknown must never silence the alarm -- a check that goes
+# quiet because its own helper broke is the failure mode this suite keeps
+# finding, so the caller treats `unknown` as "flag it".
+tolerance_verdict() {
+  if [ -z "$TOLERANCE_ROWS" ]; then
+    echo "unknown"
+    return
+  fi
+
+  local row
+  row=$(echo "$TOLERANCE_ROWS" | grep -E "^TOLERANCE $1 $2 " | head -1)
+
+  if [ -z "$row" ]; then
+    echo "unknown"
+    return
+  fi
+
+  echo "$row" | awk '{print $6" "$4" "$5}'
+}
+
 tf_seconds() {
   case "$1" in
     M5)  echo 300 ;;
@@ -409,6 +457,36 @@ for key in $keys; do
         why="price closed through its own bracket in the trend's direction and no break was recorded" ;;
       *)
         why="" ;;
+    esac
+
+    # §3.5's `ε`, applied to the break buckets only. The SQL above compares
+    # `close < lo` / `close > hi` flat, and §3.5 edge case (2) says a break of
+    # a level within `ε` is NOT a break -- so without this the check demanded
+    # an event the doctrine forbids. Measured on BNBUSDT M15, 2026-09-24:
+    # penetration 0.06 against `ε` 0.0976, flagged for two runs.
+    #
+    # `inside` is untouched. That bucket is §3.4's containment question, not a
+    # break test, and a tolerance has no business loosening it.
+    #
+    # The fact is printed either way (see `acknowledged.txt`'s first rule:
+    # silencing a count is defensible, silencing the fact is not), and an
+    # `unknown` verdict still flags -- a check that falls silent because its
+    # own helper broke is the defect class this suite exists for.
+    case "${trend}:${bracket}" in
+      BULLISH:above|BULLISH:both|BEARISH:below|BEARISH:both)
+        read -r tverdict tpen teps <<<"$(tolerance_verdict "$symbol" "$timeframe")"
+
+        case "$tverdict" in
+          no)
+            printf '  ~~ %s %s: penetration %s is within §3.5 e=%s -- not a break, not flagged\n' \
+              "$symbol" "$timeframe" "$tpen" "$teps"
+            why="" ;;
+          yes)
+            why="$why (penetration $tpen exceeds §3.5 e=$teps)" ;;
+          *)
+            why="$why (tolerance unknown -- break_tolerance.py gave no verdict for this context)" ;;
+        esac
+        ;;
     esac
 
     if [ -n "$why" ]; then

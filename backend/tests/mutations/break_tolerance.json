@@ -1,0 +1,63 @@
+{
+  "description": "Check A's break test must apply SLS §3.5's epsilon (TOLERANCE_ATR x Wilder ATR at the break candle) and must still catch a decisive penetration. Found live 2026-09-24: BNBUSDT M15, close 765.23 against a confirmed external low of 765.29 -- a penetration of 0.06 where epsilon was 0.0976 -- flagged as a missing BOS_DOWN for two hourly runs. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/break_tolerance.json",
+  "pytest": [
+    "tests/unit/test_check_a_break_tolerance.py"
+  ],
+  "mutations": [
+    {
+      "name": "the defect itself: no tolerance, a plain close-beyond-level comparison",
+      "file": "ops/soak/break_tolerance.py",
+      "old": "        eps = TOLERANCE_ATR * atr if atr is not None else Decimal(0)",
+      "new": "        eps = Decimal(0)",
+      "expect_failing": [
+        "test_a_penetration_inside_epsilon_is_not_a_break",
+        "test_it_is_the_epsilon_that_makes_the_difference"
+      ]
+    },
+    {
+      "name": "tolerance so wide that a real break is silenced",
+      "file": "ops/soak/break_tolerance.py",
+      "old": "        eps = TOLERANCE_ATR * atr if atr is not None else Decimal(0)",
+      "new": "        eps = TOLERANCE_ATR * atr * 100 if atr is not None else Decimal(0)",
+      "expect_failing": [
+        "test_a_penetration_beyond_epsilon_is_a_break"
+      ]
+    },
+    {
+      "name": "read the whole window instead of only closes after the level existed",
+      "file": "ops/soak/break_tolerance.py",
+      "old": "    start = max(level.index + 1, len(series) - IDLE_CANDLES)",
+      "new": "    start = 0",
+      "expect_failing": [
+        "test_the_series_is_the_one_the_assertions_assume"
+      ]
+    },
+    {
+      "name": "take the oldest confirmed level instead of the most recent",
+      "file": "ops/soak/break_tolerance.py",
+      "old": "    level = max(levels, key=lambda s: s.index)",
+      "new": "    level = min(levels, key=lambda s: s.index)",
+      "expect_failing": [
+        "test_a_penetration_inside_epsilon_is_not_a_break"
+      ]
+    },
+    {
+      "name": "open a gate for every state, including RANGING",
+      "file": "ops/soak/break_tolerance.py",
+      "old": "    gate = GATES.get(trend)\n\n    if gate is None:\n        return Decimal(0), Decimal(0), False",
+      "new": "    gate = GATES.get(trend, (BreakDirection.DOWN, SwingKind.LOW))\n\n    if gate is None:\n        return Decimal(0), Decimal(0), False",
+      "expect_failing": [
+        "test_a_state_with_no_open_gate_yields_no_verdict"
+      ]
+    },
+    {
+      "name": "count an unconfirmed swing as a level",
+      "file": "ops/soak/break_tolerance.py",
+      "old": "        if swing.kind is kind and swing.index + K_EXTERNAL <= last",
+      "new": "        if swing.kind is kind",
+      "expect_failing": [
+        "test_the_series_is_the_one_the_assertions_assume"
+      ]
+    }
+  ]
+}
