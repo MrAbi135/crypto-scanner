@@ -194,3 +194,112 @@ def test_a_close_that_does_not_reach_the_level_is_not_a_penetration() -> None:
 
     assert pen == Decimal(0)
     assert broke is False
+
+
+# A walked-up structure: an old deep low, a high, then a NEWER and HIGHER low,
+# and closes from the first trough that sit below that newer low. This is the
+# shape #220 was written for -- one side of the comparison being "now" and the
+# other "the last hundred candles" -- and it is the only shape that can tell
+# `max(level)` from `min(level)` and `start = level.index + 1` from `start = 0`.
+# The single-trough series above cannot: with one confirmed low, both choices
+# agree, and no close can sit below the series minimum.
+WALKED_UP = (
+    [112, 111, 110, 109, 108, 107, 106, 105, 104]
+    + [105, 106, 107, 108, 109, 110, 111, 112, 113]
+    + [112, 111, 110, 109, 108]
+    + [109, 110, 111, 112, 113]
+)
+
+OLD_LOW = Decimal("102")  # low of the p=104 candle, index 8
+
+NEW_LOW = Decimal("106")  # low of the p=108 candle, index 22
+
+
+def _walked_up(final_close: Decimal) -> list:
+    base = Timeframe.H1
+    start = make_candle(timeframe=base).open_time
+
+    out = []
+
+    for index, level in enumerate(WALKED_UP):
+        p = Decimal(level)
+        out.append(
+            make_candle(
+                symbol="TOLUSDT",
+                timeframe=base,
+                open_time=start + base.duration * index,
+                open_=p - Decimal("0.25"),
+                close=p + Decimal("0.25"),
+                high=p + Decimal("2"),
+                low=p - Decimal("2"),
+            )
+        )
+
+    p = Decimal("106")
+    out.append(
+        make_candle(
+            symbol="TOLUSDT",
+            timeframe=base,
+            open_time=start + base.duration * len(WALKED_UP),
+            open_=p - Decimal("0.25"),
+            close=final_close,
+            high=p + Decimal("2"),
+            low=p - Decimal("2"),
+        )
+    )
+
+    return out
+
+
+def test_the_walked_up_series_is_the_one_these_assertions_assume() -> None:
+    series = _walked_up(Decimal("105.85"))
+
+    lows = [s for s in detect_external_swings(series) if s.kind is SwingKind.LOW]
+
+    assert [(s.index, s.price) for s in lows] == [(8, OLD_LOW), (22, NEW_LOW)], (
+        "expected two confirmed external swing lows, the newer one higher; got "
+        f"{[(s.index, str(s.price)) for s in lows]}"
+    )
+
+    early = [c.close for c in series[:22] if c.close < NEW_LOW]
+
+    assert early, (
+        "the point of this series is that closes from the first trough sit "
+        "below the NEWER low -- without them `start = 0` is indistinguishable"
+    )
+
+
+def test_the_level_is_the_most_recent_confirmed_swing_not_the_oldest() -> None:
+    """Penetration is measured against the newer low, so it is 0.15 and not nothing.
+
+    Deliberately no assertion on `ε` here: this series is not flat-ATR (the
+    final candle steps further than the recipe allows), and the tolerance has
+    its own tests above. What matters is which level was chosen.
+    """
+    module = _module()
+
+    pen, _, broke = module._verdict(_walked_up(Decimal("105.85")), "BEARISH")
+
+    assert pen == Decimal("0.15"), (
+        f"expected 0.15 against the newer low {NEW_LOW}; got {pen}. Measured "
+        f"against the older low {OLD_LOW} the close is above it and there is "
+        "no penetration at all"
+    )
+    assert broke is False
+
+
+def test_closes_made_before_the_level_existed_are_not_penetrations_of_it() -> None:
+    """#220's defect, in a unit test: the level is new, the closes are old.
+
+    With the whole window read, the first trough's closes -- 104.25 against a
+    level of 106 -- would report a 1.75 penetration and a confirmed break,
+    for a level that did not exist when they were made.
+    """
+    module = _module()
+
+    pen, _, broke = module._verdict(_walked_up(Decimal("105.85")), "BEARISH")
+
+    assert pen == Decimal("0.15") and broke is False, (
+        f"pen={pen} broke={broke}: old closes from below the level are being "
+        "counted against it"
+    )

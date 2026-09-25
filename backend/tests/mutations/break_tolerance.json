@@ -1,5 +1,5 @@
 {
-  "description": "Check A's break test must apply SLS §3.5's epsilon (TOLERANCE_ATR x Wilder ATR at the break candle) and must still catch a decisive penetration. Found live 2026-09-24: BNBUSDT M15, close 765.23 against a confirmed external low of 765.29 -- a penetration of 0.06 where epsilon was 0.0976 -- flagged as a missing BOS_DOWN for two hourly runs. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/break_tolerance.json",
+  "description": "Check A's break test must apply SLS §3.5's epsilon (TOLERANCE_ATR x Wilder ATR at the break candle) and must still catch a decisive penetration. Found live 2026-09-24: BNBUSDT M15, close 765.23 against a confirmed external low of 765.29 -- a penetration of 0.06 where epsilon was 0.0976 -- flagged as a missing BOS_DOWN for two hourly runs. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/break_tolerance.json  NOT covered, and deliberately not claimed: the `swing.index + K_EXTERNAL <= last` filter in _verdict. `detect_external_swings` already emits only confirmed swings by construction (it needs k candles on both sides), so removing the filter changes nothing and no test can catch it. It is kept for symmetry with structure_replay.py, where the same guard IS load-bearing because the comparison index moves per candle.",
   "pytest": [
     "tests/unit/test_check_a_break_tolerance.py"
   ],
@@ -29,7 +29,8 @@
       "old": "    start = max(level.index + 1, len(series) - IDLE_CANDLES)",
       "new": "    start = 0",
       "expect_failing": [
-        "test_the_series_is_the_one_the_assertions_assume"
+        "test_closes_made_before_the_level_existed_are_not_penetrations_of_it",
+        "test_the_level_is_the_most_recent_confirmed_swing_not_the_oldest"
       ]
     },
     {
@@ -38,7 +39,8 @@
       "old": "    level = max(levels, key=lambda s: s.index)",
       "new": "    level = min(levels, key=lambda s: s.index)",
       "expect_failing": [
-        "test_a_penetration_inside_epsilon_is_not_a_break"
+        "test_the_level_is_the_most_recent_confirmed_swing_not_the_oldest",
+        "test_closes_made_before_the_level_existed_are_not_penetrations_of_it"
       ]
     },
     {
@@ -48,15 +50,6 @@
       "new": "    gate = GATES.get(trend, (BreakDirection.DOWN, SwingKind.LOW))\n\n    if gate is None:\n        return Decimal(0), Decimal(0), False",
       "expect_failing": [
         "test_a_state_with_no_open_gate_yields_no_verdict"
-      ]
-    },
-    {
-      "name": "count an unconfirmed swing as a level",
-      "file": "ops/soak/break_tolerance.py",
-      "old": "        if swing.kind is kind and swing.index + K_EXTERNAL <= last",
-      "new": "        if swing.kind is kind",
-      "expect_failing": [
-        "test_the_series_is_the_one_the_assertions_assume"
       ]
     }
   ]
