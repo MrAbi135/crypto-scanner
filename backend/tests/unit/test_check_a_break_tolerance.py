@@ -49,8 +49,8 @@ def _module():
 # `p` walks down to 106 and back up, then down again to sit on the level, so a
 # single swing low confirms with five strictly higher lows on each side.
 LEVELS = (
-    [112, 111, 110, 109, 108, 107, 106, 107, 108, 109, 110, 111, 112]
-    + [111, 110, 109, 108, 107, 106, 105]
+    *[112, 111, 110, 109, 108, 107, 106, 107, 108, 109, 110, 111, 112],
+    *[111, 110, 109, 108, 107, 106, 105],
 )
 
 SWING_INDEX = 6
@@ -204,10 +204,10 @@ def test_a_close_that_does_not_reach_the_level_is_not_a_penetration() -> None:
 # The single-trough series above cannot: with one confirmed low, both choices
 # agree, and no close can sit below the series minimum.
 WALKED_UP = (
-    [112, 111, 110, 109, 108, 107, 106, 105, 104]
-    + [105, 106, 107, 108, 109, 110, 111, 112, 113]
-    + [112, 111, 110, 109, 108]
-    + [109, 110, 111, 112, 113]
+    *[112, 111, 110, 109, 108, 107, 106, 105, 104],
+    *[105, 106, 107, 108, 109, 110, 111, 112, 113],
+    *[112, 111, 110, 109, 108],
+    *[109, 110, 111, 112, 113],
 )
 
 OLD_LOW = Decimal("102")  # low of the p=104 candle, index 8
@@ -300,6 +300,5 @@ def test_closes_made_before_the_level_existed_are_not_penetrations_of_it() -> No
     pen, _, broke = module._verdict(_walked_up(Decimal("105.85")), "BEARISH")
 
     assert pen == Decimal("0.15") and broke is False, (
-        f"pen={pen} broke={broke}: old closes from below the level are being "
-        "counted against it"
+        f"pen={pen} broke={broke}: old closes from below the level are being counted against it"
     )
