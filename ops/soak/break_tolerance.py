@@ -39,12 +39,13 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from decimal import Decimal
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from scanner.application.detection.state import EngineStateManager
+from scanner.application.detection.state import SHIFT_NAMESPACE, EngineStateManager
 from scanner.application.detection.structure_shift_replay import (
     STRUCTURE_SHIFT_ALGO_VERSION,
 )
@@ -196,7 +197,19 @@ def _verdict(series: list[Candle], trend: str) -> tuple[Decimal, Decimal, bool]:
 async def main() -> None:
     engine = create_async_engine(_dsn())
     redis = build_redis(os.environ["SCANNER_REDIS_URL"])
-    states = EngineStateManager(RedisEngineStateStore(redis))
+
+    # `namespace=SHIFT_NAMESPACE`, and not the default. The first draft of this
+    # used the default `structure` namespace, so every `load` looked for
+    # `engine-state:structure:s6-structure-shift-v5:...` -- a key that does not
+    # exist -- and returned None for all sixty contexts. It printed nothing,
+    # exited 0, and check A would have read `unknown` everywhere: more noise
+    # rather than less, from a helper that looked like it worked. Caught by
+    # running it against the live state, which no unit test here would have.
+    states = EngineStateManager(
+        RedisEngineStateStore(redis), namespace=SHIFT_NAMESPACE
+    )
+
+    emitted = 0
 
     async with engine.connect() as conn:
         for symbol in await _symbols(conn):
@@ -215,6 +228,8 @@ async def main() -> None:
 
                 pen, eps, broke = _verdict(series, saved.trend_state)
 
+                emitted += 1
+
                 print(
                     f"TOLERANCE {symbol} {timeframe.value} {pen} {eps} "
                     f"{'yes' if broke else 'no'}"
@@ -222,6 +237,18 @@ async def main() -> None:
 
     await engine.dispose()
     await redis.aclose()
+
+    # A verdict for nothing is not a clean run. Exiting 0 with no rows is how
+    # the namespace bug above hid, and check A would have read it as "no
+    # context has a verdict" rather than "the helper is broken".
+    if emitted == 0:
+        print(
+            "ERROR: no context produced a verdict -- scope, Redis namespace or "
+            "candle coverage is wrong, and check A has no tolerance",
+            file=sys.stderr,
+        )
+
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
