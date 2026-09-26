@@ -78,6 +78,17 @@ class StructureReplayReport:
     trend_state: str
     last_processed_open_time: datetime | None
     warmup_satisfied: bool = True
+    idle_by_34: bool = False
+    """Whether SLS §3.4's idle condition holds over this window.
+
+    The condition only -- not the edge. `application/detection/pipeline.py`
+    applies it to the authoritative trend, because this engine is the only one
+    that holds the bracket, the closes and the breaks, and the engine that holds
+    the trend cannot ask this engine for them (`idle_condition` says why).
+
+    Defaults False so a report built before the window is warm, or by a caller
+    that does not compute it, claims nothing.
+    """
     """False when SLS §1.9's closed-candle floor was not met.
 
     Reported rather than raised: §1.9 calls warm-up "visible, honest, not
@@ -326,14 +337,30 @@ class StructureReplayService:
 
         index_of = {candle.open_time: index for index, candle in enumerate(candles)}
 
+        broke_at = frozenset(index_of[at] for at in breaks if at in index_of)
+
+        # §3.4's condition on its own, reported so the pipeline can apply the
+        # edge to the authoritative trend. This engine holds the only copy of
+        # all three inputs -- see `idle_condition`.
+        idle_by_34 = idle_condition(
+            candles=candles,
+            external_swings=external_swings,
+            broke_at=broke_at,
+        )
+
         # The state the gate actually used, not a fresh re-derivation. Reporting
         # one thing while the BOS gate acted on another is how the engine came to
         # log `trend: BULLISH` on a series where no break had fired in eight days.
+        #
+        # Left as it was on purpose: this field has no production consumer and is
+        # mis-filled for a separate reason (the tracker's row 20 -- `trend_value`
+        # is a one-shot machine, not the authoritative trend). Changing it is its
+        # own decision and would rewrite 24 golden datasets.
         trend_state = _idle_adjusted(
             trend_value,
             candles=candles,
             external_swings=external_swings,
-            broke_at=frozenset(index_of[at] for at in breaks if at in index_of),
+            broke_at=broke_at,
         )
 
         last_open_time = candles[-1].open_time
@@ -367,6 +394,7 @@ class StructureReplayService:
             events_inserted=inserted,
             trend_state=trend_state,
             last_processed_open_time=last_open_time,
+            idle_by_34=idle_by_34,
         )
 
     async def _recheck_watches(
@@ -1062,25 +1090,58 @@ def _idle_adjusted(
     if trend_state not in {TrendState.BULLISH.value, TrendState.BEARISH.value}:
         return trend_state
 
+    idle = idle_condition(
+        candles=candles,
+        external_swings=external_swings,
+        broke_at=broke_at,
+    )
+
+    return TrendState.RANGING.value if idle else trend_state
+
+
+def idle_condition(
+    *,
+    candles: Sequence[Candle],
+    external_swings: Sequence[SwingPoint],
+    broke_at: frozenset[int],
+) -> bool:
+    """§3.4's idle *condition*, without the state it would be applied to.
+
+    Split out of `_idle_adjusted` so the pipeline can apply the edge to the
+    authoritative trend while the condition itself has exactly one
+    implementation. §3.4's own two terms and nothing else: every close of the
+    last `IDLE_CANDLES` inside the current external bracket, and no external
+    BOS in that span.
+
+    This engine is the only one that holds all three inputs. The shift engine
+    detects CHoCH and MSS and **no BOS at all**, and it reads no events, so it
+    cannot answer this question -- and it must not import this module, because
+    this one already imports `trend_after` from it. Hence the split: the facts
+    are computed where they live, the edge is applied where the authoritative
+    trend is known (`application/detection/pipeline.py`).
+
+    The "no BOS" term is not decoration. Measured over 91,591 replayed passes,
+    the containment term alone held 2,273 times and a BOS sat inside the span in
+    981 of them (43.2%) -- dropping it would idle a market that was still
+    breaking levels.
+    """
     highs = [s for s in external_swings if s.kind is SwingKind.HIGH]
     lows = [s for s in external_swings if s.kind is SwingKind.LOW]
 
     if not highs or not lows:
-        return trend_state
+        return False
 
     high = max(highs, key=lambda s: s.index)
     low = max(lows, key=lambda s: s.index)
 
     if high.price < low.price:
-        return trend_state
+        return False
 
     window_start = len(candles) - IDLE_CANDLES
 
-    idle = structure_is_idle(
+    return structure_is_idle(
         [candle.close for candle in candles],
         range_low=low.price,
         range_high=high.price,
         broke_externally=any(index >= window_start for index in broke_at),
     )
-
-    return TrendState.RANGING.value if idle else trend_state
