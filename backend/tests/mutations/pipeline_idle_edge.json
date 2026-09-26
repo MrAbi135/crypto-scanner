@@ -56,8 +56,8 @@
     {
       "name": "§3.4's no-BOS term dropped from the condition",
       "file": "backend/src/scanner/application/detection/structure_replay.py",
-      "old": "        broke_externally=any(index >= window_start for index in broke_at),\n    )\n\n\ndef _is_outside_bar(",
-      "new": "        broke_externally=False,\n    )\n\n\ndef _is_outside_bar(",
+      "old": "        broke_externally=any(index >= window_start for index in broke_at),",
+      "new": "        broke_externally=False,",
       "expect_failing": [
         "test_a_break_inside_the_window_denies_it_even_when_every_close_is_inside"
       ]
