@@ -17,18 +17,18 @@ arithmetic. `idle_condition` has its own tests below it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from tests.support.builders import make_candle
 
 from scanner.application.detection.pipeline import DetectionPipeline
 from scanner.application.detection.structure_replay import idle_condition
 from scanner.domain.structure import SwingKind, SwingPoint, SwingStrength, TrendState
 from scanner.shared import Timeframe
-from tests.support.builders import make_candle
 
-START = datetime(2026, 1, 1, tzinfo=timezone.utc)
+START = datetime(2026, 1, 1, tzinfo=UTC)
 
 END = START + timedelta(hours=8)
 
@@ -251,9 +251,9 @@ def test_a_missing_side_of_the_bracket_denies_it() -> None:
     series = _series(["100"] * 120, low="90", high="110")
     lows_only = (_swings(low="90", high="110", count=len(series))[0],)
 
-    assert not idle_condition(
-        candles=series, external_swings=lows_only, broke_at=frozenset()
-    ), "with no confirmed high there is no dealing range to be inside of"
+    assert not idle_condition(candles=series, external_swings=lows_only, broke_at=frozenset()), (
+        "with no confirmed high there is no dealing range to be inside of"
+    )
 
 
 def test_an_inverted_bracket_denies_it() -> None:
