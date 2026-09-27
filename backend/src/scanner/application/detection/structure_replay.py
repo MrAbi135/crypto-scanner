@@ -76,6 +76,34 @@ class StructureReplayReport:
     classified_events: int
     events_inserted: int
     trend_state: str
+    """**Not reliable in production. Never consume this.** See tracker row 20.
+
+    In production this is not the market's trend. `run` fills it from
+    `walk.machine_state` whenever `known is None`, and `known` is None on every
+    pass by construction: this engine runs *before* the shift engine
+    (`application/detection/pipeline.py`) and reads its snapshot from the
+    previous close, so `trend_at` is asked about a candle beyond that snapshot
+    and correctly declines. The fallback is a `TrendStateMachine` constructed
+    fresh for the pass, seeded RANGING (`domain/structure/trend.py`), and on a
+    resumed pass it sees **one** candle -- so it usually stays RANGING and
+    occasionally earns a direction of its own, unrelated to the real trend.
+    Measured 2026-09-26: reproduced in 60 of 60 live contexts, while the idle
+    rule was false in 25 of 25, and structure read RANGING in 50 of 60 against
+    a shift engine that was directional.
+
+    The one-candle staleness itself is deliberate and right for the BOS gate --
+    §3.5 wants the trend prevailing *before* the break candle -- so the bug is
+    not the staleness; it is reusing that accessor to decide what to report.
+
+    **Where the trend actually is:** `DetectionPipelineReport.trend_state`, which
+    is the shift engine's trend with §3.4's idle edge applied. This field is left
+    as it is on purpose: the dataclass it is saved through
+    (`StructureEngineState`) is shared with the shift engine, which resumes from
+    it, and 24 golden datasets assert this value -- where it IS meaningful,
+    because the golden harness runs a full pass with no shift state wired
+    (tracker row 21).
+    """
+
     last_processed_open_time: datetime | None
     warmup_satisfied: bool = True
     idle_by_34: bool = False

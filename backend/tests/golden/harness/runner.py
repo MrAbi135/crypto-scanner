@@ -130,6 +130,12 @@ async def _run_structure(dataset: GoldenDataset) -> dict[str, Any]:
             "external_swings": report.external_swings,
             "classified_events": report.classified_events,
             "events_inserted": report.events_inserted,
+            # Meaningful HERE and not in production. This harness builds
+            # `StructureReplayService` with no `shift_state`, so the pass is a
+            # full one and this value is §3.4's entry-edge machine over the whole
+            # dataset. The engine runs the resumed, shift-wired path instead,
+            # where the same field is an order artifact -- tracker rows 20 and
+            # 21, the second being that this path has no golden coverage.
             "trend_state": report.trend_state,
         },
         "events": sorted(
