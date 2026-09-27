@@ -211,7 +211,7 @@ from scanner.shared import Timeframe
 # after M8 made RVOL readable there), and on M5 only for a Tier 1 symbol (§0.3,
 # whatever the published set). Suppressed with a recorded reason; setups and
 # the event log are unchanged.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v32"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v33"
 
 # The published set when nothing is configured (owner ruling 2026-09-15). A
 # default that published everything would open M15/M5 the day a setting went

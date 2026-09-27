@@ -95,7 +95,9 @@ class TrailingWindowRunner:
             window_candles=self._window,
             candles=report.structure.candles,
             events_inserted=report.structure.events_inserted,
-            trend=report.structure_shift.trend_state,
+            # §3.4's authoritative state, not the shift engine's pre-edge value:
+            # the log said `trend: BEARISH` on a context the pipeline had idled.
+            trend=report.trend_state or report.structure_shift.trend_state,
             pools_upserted=report.liquidity.pools_upserted,
             sweeps=report.liquidity.sweeps,
             elapsed_seconds=round(elapsed, 3),

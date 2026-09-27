@@ -27,6 +27,8 @@ class RecordingPipeline:
             structure = type("S", (), {"candles": 0, "events_inserted": 0})()
             structure_shift = type("T", (), {"trend_state": "RANGING"})()
             liquidity = type("L", (), {"pools_upserted": 0, "sweeps": 0})()
+            # §3.4's authoritative state, as DetectionPipelineReport carries it.
+            trend_state = "RANGING"
 
         return _Report()
 

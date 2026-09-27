@@ -53,6 +53,7 @@ from scanner.application.detection.structure_replay import StructureReplayServic
 from scanner.application.detection.structure_shift_replay import (
     StructureShiftReplayService,
 )
+from scanner.domain.structure import TrendState
 from scanner.shared import Timeframe
 
 
@@ -71,6 +72,17 @@ class DetectionPipelineReport:
     # None when no monitor is wired -- absent rather than an empty report, so
     # a caller cannot read "nothing moved" out of "nobody looked".
     monitor: MonitorReport | None = None
+
+    trend_state: str = ""
+    """§3.4's one authoritative directional state for this pass.
+
+    The shift engine's trend with §3.4's idle edge applied (see `run`). Readers
+    that want "the trend" want this one: `structure_shift.trend_state` is the
+    same value before the edge, and `structure.trend_state` is a different field
+    with no production consumer (the tracker's row 20).
+
+    Empty string when the pipeline did not get far enough to decide.
+    """
 
 
 class DetectionPipeline:
@@ -131,6 +143,30 @@ class DetectionPipeline:
 
         participation = await self._participation.run(symbol, timeframe, start, end)
 
+        # §3.4's `BULLISH --> RANGING: structure idle 100 candles`, applied here
+        # and nowhere else.
+        #
+        # §3.4 calls for "one authoritative directional state per symbol per TF",
+        # and neither engine can produce it alone. The shift engine holds the
+        # trend (§3.6's transitions are edges *in* §3.4's machine, which is why
+        # §3.6 lists "Trend state" as an input) but detects no BOS and reads no
+        # events. The structure engine holds the bracket, the closes and the
+        # breaks, but its own `trend_state` is not the authoritative trend. So
+        # the condition is computed where its facts live and the edge is applied
+        # where the trend is known -- one implementation of each, and no import
+        # between the two engines in either direction.
+        #
+        # Only BULLISH and BEARISH, because those are the two edges §3.4 draws:
+        # RANGING is the destination and the CAUTION states are mid-transition,
+        # so idling out of one would discard the CHoCH that put it there.
+        trend_state = structure_shift.trend_state
+
+        if structure.idle_by_34 and trend_state in {
+            TrendState.BULLISH.value,
+            TrendState.BEARISH.value,
+        }:
+            trend_state = TrendState.RANGING.value
+
         # The trend comes from the engine that owns it. Confluence inferring
         # it from the last BOS in the window is how §8.2 G2 came to grade a
         # 58-confidence UP candidate on a context §3.7 had ruled BEARISH.
@@ -139,7 +175,7 @@ class DetectionPipeline:
             timeframe,
             start,
             end,
-            trend_state=structure_shift.trend_state,
+            trend_state=trend_state,
         )
 
         # §12.3 monitors live signals "per closed candle on the signal's TF",
@@ -163,4 +199,5 @@ class DetectionPipeline:
             ict_interaction=ict_interaction,
             participation=participation,
             confluence=confluence,
+            trend_state=trend_state,
         )

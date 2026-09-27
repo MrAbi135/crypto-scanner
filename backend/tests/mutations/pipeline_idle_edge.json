@@ -1,0 +1,85 @@
+{
+  "description": "SLS §3.4's idle edge is applied once, at the pipeline layer, to the shift engine's trend, using the structure engine's reported condition — and only on the two edges §3.4 draws. Neither engine can do it alone: shift holds the trend but detects no BOS and reads no events; structure holds the bracket, closes and breaks but its own trend_state has no production consumer; and shift cannot import structure (structure_replay.py:17 already imports trend_after from it). Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/pipeline_idle_edge.json",
+  "pytest": [
+    "tests/unit/application/detection/test_pipeline_idle_edge.py"
+  ],
+  "mutations": [
+    {
+      "name": "the edge is never applied — confluence gets the pre-edge trend",
+      "file": "backend/src/scanner/application/detection/pipeline.py",
+      "old": "        if structure.idle_by_34 and trend_state in {",
+      "new": "        if False and structure.idle_by_34 and trend_state in {",
+      "expect_failing": [
+        "test_an_idle_directional_trend_reaches_confluence_as_ranging",
+        "test_the_shift_engines_own_report_is_left_untouched"
+      ]
+    },
+    {
+      "name": "the edge ignores §3.4's eligibility — a CAUTION state is idled too",
+      "file": "backend/src/scanner/application/detection/pipeline.py",
+      "old": "        if structure.idle_by_34 and trend_state in {\n            TrendState.BULLISH.value,\n            TrendState.BEARISH.value,\n        }:",
+      "new": "        if structure.idle_by_34:",
+      "expect_failing": [
+        "test_only_the_two_edges_34_draws_are_eligible"
+      ]
+    },
+    {
+      "name": "the condition is ignored — every directional trend is idled",
+      "file": "backend/src/scanner/application/detection/pipeline.py",
+      "old": "        if structure.idle_by_34 and trend_state in {",
+      "new": "        if True or structure.idle_by_34 and trend_state in {",
+      "expect_failing": [
+        "test_a_directional_trend_that_is_not_idle_passes_through",
+        "test_only_the_two_edges_34_draws_are_eligible"
+      ]
+    },
+    {
+      "name": "the trend is taken from the structure engine's own field (row 20's broken one)",
+      "file": "backend/src/scanner/application/detection/pipeline.py",
+      "old": "        trend_state = structure_shift.trend_state\n\n        if structure.idle_by_34",
+      "new": "        trend_state = structure.trend_state\n\n        if structure.idle_by_34",
+      "expect_failing": [
+        "test_a_directional_trend_that_is_not_idle_passes_through",
+        "test_only_the_two_edges_34_draws_are_eligible"
+      ]
+    },
+    {
+      "name": "the report publishes the pre-edge trend while confluence gets the edged one",
+      "file": "backend/src/scanner/application/detection/pipeline.py",
+      "old": "            confluence=confluence,\n            trend_state=trend_state,",
+      "new": "            confluence=confluence,\n            trend_state=structure_shift.trend_state,",
+      "expect_failing": [
+        "test_an_idle_directional_trend_reaches_confluence_as_ranging",
+        "test_the_shift_engines_own_report_is_left_untouched"
+      ]
+    },
+    {
+      "name": "§3.4's no-BOS term dropped from the condition",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "        broke_externally=any(index >= window_start for index in broke_at),",
+      "new": "        broke_externally=False,",
+      "expect_failing": [
+        "test_a_break_inside_the_window_denies_it_even_when_every_close_is_inside"
+      ]
+    },
+    {
+      "name": "a missing side of the bracket reads as idle",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "    if not highs or not lows:\n        return False",
+      "new": "    if not highs or not lows:\n        return True",
+      "expect_failing": [
+        "test_a_missing_side_of_the_bracket_denies_it"
+      ]
+    },
+    {
+      "name": "an inverted bracket reads as idle",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "    if high.price < low.price:\n        return False\n\n    window_start",
+      "new": "    if high.price > low.price:\n        return False\n\n    window_start",
+      "expect_failing": [
+        "test_an_inverted_bracket_denies_it",
+        "test_the_condition_holds_when_every_close_is_inside_and_nothing_broke"
+      ]
+    }
+  ]
+}
