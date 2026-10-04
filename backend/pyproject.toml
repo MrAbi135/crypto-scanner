@@ -26,7 +26,9 @@ dependencies = [
   # inventive.
   "argon2-cffi>=23.1",
   # Access tokens per TAD §20 ("access JWT <= 15 min").
-  "pyjwt>=2.8",
+  # >=2.15 and not >=2.14: PYSEC-2026-4141 is only fixed in 2.15.0, while the
+  # other twelve advisories against 2.13.0 are fixed in 2.14.0.
+  "pyjwt>=2.15",
 ]
 
 [dependency-groups]
