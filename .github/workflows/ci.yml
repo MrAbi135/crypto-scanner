@@ -104,7 +104,22 @@ jobs:
         run: |
           corepack enable
           pnpm install --frozen-lockfile
-          pnpm audit --audit-level high
+          # `--prod`, matching the backend step's `--no-dev` above. The two
+          # halves of this job disagreed: pip-audit has always audited only
+          # what ships, while this one audited the lint toolchain too, and on
+          # 2026-10-04 that made the gate unpassable rather than strict --
+          # `braces` <=3.0.3 reports `Patched versions: <0.0.0`, so no upgrade
+          # exists. Every one of those nine findings reached the tree through
+          # eslint-plugin-boundaries -> micromatch -> braces; the frontend's
+          # production dependencies are react, react-dom and @sentry/react.
+          pnpm audit --prod --audit-level high
+          # Dev dependencies still get looked at -- they just do not fail the
+          # build. Dropping them from the output entirely is how a real finding
+          # in the toolchain would become invisible, which is the failure mode
+          # this repository keeps re-learning. Read it; do not rely on it going
+          # red.
+          echo "--- dev dependencies (advisory only, does not fail the build) ---"
+          pnpm audit --audit-level high || true
 
   docker:
     runs-on: ubuntu-latest
