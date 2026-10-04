@@ -49,6 +49,10 @@ from scanner.application.detection.signal_monitor import (
     MonitorReport,
     SignalMonitorService,
 )
+from scanner.application.detection.state import (
+    EngineStateManager,
+    StructureEngineState,
+)
 from scanner.application.detection.structure_replay import StructureReplayService
 from scanner.application.detection.structure_shift_replay import (
     StructureShiftReplayService,
@@ -100,6 +104,8 @@ class DetectionPipeline:
         participation: ParticipationReplayService,
         confluence: ConfluenceReplayService,
         monitor: SignalMonitorService | None = None,
+        authoritative_state: EngineStateManager | None = None,
+        authoritative_version: str | None = None,
     ) -> None:
         self._structure = structure
         self._liquidity = liquidity
@@ -111,6 +117,13 @@ class DetectionPipeline:
         self._participation = participation
         self._confluence = confluence
         self._monitor = monitor
+        # Where §3.4's authoritative state is published for the readers that
+        # cannot be inside this pass: check A, and F6's read of the rung above.
+        # Optional so the golden harness and `engine run` can drive the pipeline
+        # without a store; absent, the value is reported and not persisted, and
+        # every reader falls back to the shift trend exactly as before.
+        self._authoritative_state = authoritative_state
+        self._authoritative_version = authoritative_version
 
     async def run(
         self,
@@ -166,6 +179,33 @@ class DetectionPipeline:
             TrendState.BEARISH.value,
         }:
             trend_state = TrendState.RANGING.value
+
+        # Published for the readers that cannot be inside this pass: check A,
+        # and F6's read of the rung above (tracker rows 22 and 23). Written
+        # after the edge and before confluence, so F6 reading another timeframe
+        # takes a value the edge has already been applied to.
+        #
+        # Keyed by the shift version, because that is whose trend this is; the
+        # edge only ever turns it to RANGING. Every pass overwrites it, so it
+        # can never be more than one pass stale, and absence means "fall back
+        # to the shift trend" rather than "RANGING".
+        if self._authoritative_state is not None and self._authoritative_version is not None:
+            await self._authoritative_state.save(
+                StructureEngineState(
+                    symbol=symbol,
+                    timeframe=timeframe.value,
+                    algo_version=self._authoritative_version,
+                    # The shift report carries no marker of its own; the
+                    # structure report does, and both engines walk the same
+                    # window, so this is the candle the pass covered.
+                    last_processed_open_time=(
+                        structure.last_processed_open_time.isoformat()
+                        if structure.last_processed_open_time is not None
+                        else None
+                    ),
+                    trend_state=trend_state,
+                )
+            )
 
         # The trend comes from the engine that owns it. Confluence inferring
         # it from the last BOS in the window is how §8.2 G2 came to grade a

@@ -28,6 +28,7 @@ from scanner.application.detection.participation_replay import (
 from scanner.application.detection.pipeline import DetectionPipeline
 from scanner.application.detection.signal_monitor import SignalMonitorService
 from scanner.application.detection.state import (
+    AUTHORITATIVE_NAMESPACE,
     ICT_INTERACTION_NAMESPACE,
     ICT_NAMESPACE,
     ICT_OB_NAMESPACE,
@@ -228,6 +229,13 @@ def build_detection_pipeline(
                 namespace=SHIFT_NAMESPACE,
             ),
             shift_algo_version=STRUCTURE_SHIFT_ALGO_VERSION,
+            # §3.4's authoritative state for the rung above, which the
+            # pipeline publishes below. Without it F6 reads the shift trend
+            # before the idle edge -- tracker row 23.
+            authoritative_state=EngineStateManager(
+                RedisEngineStateStore(redis_client),
+                namespace=AUTHORITATIVE_NAMESPACE,
+            ),
             setups=PgSetupRepository(sessions),
             signals=PgSignalRepository(sessions),
             incidents=PgIncidentRepository(sessions),
@@ -246,4 +254,12 @@ def build_detection_pipeline(
             setups=PgSetupRepository(sessions),
             events=events,
         ),
+        # The single writer of §3.4's authoritative state. Keyed by the shift
+        # version because the trend is the shift engine's; the edge only ever
+        # turns it to RANGING.
+        authoritative_state=EngineStateManager(
+            RedisEngineStateStore(redis_client),
+            namespace=AUTHORITATIVE_NAMESPACE,
+        ),
+        authoritative_version=STRUCTURE_SHIFT_ALGO_VERSION,
     )

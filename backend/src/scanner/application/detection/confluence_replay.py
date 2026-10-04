@@ -211,7 +211,7 @@ from scanner.shared import Timeframe
 # after M8 made RVOL readable there), and on M5 only for a Tier 1 symbol (§0.3,
 # whatever the published set). Suppressed with a recorded reason; setups and
 # the event log are unchanged.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v33"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v34"
 
 # The published set when nothing is configured (owner ruling 2026-09-15). A
 # default that published everything would open M15/M5 the day a setting went
@@ -415,6 +415,7 @@ class ConfluenceReplayService:
         shift_state: EngineStateManager,
         *,
         shift_algo_version: str,
+        authoritative_state: EngineStateManager | None = None,
         algo_version: str = CONFLUENCE_ALGO_VERSION,
         setups: SetupRepository | None = None,
         signals: SignalRepository | None = None,
@@ -434,6 +435,10 @@ class ConfluenceReplayService:
         self._clock = clock
         self._shift_state = shift_state
         self._shift_algo_version = shift_algo_version
+        # §3.4's authoritative state for the rung above, where the pipeline
+        # publishes it. Optional, and absence falls back to the shift trend, so
+        # the golden harness and a first pass after a deploy behave as before.
+        self._authoritative_state = authoritative_state
         self._algo_version = algo_version
         self._setups = setups
         self._signals = signals
@@ -1666,11 +1671,36 @@ class ConfluenceReplayService:
         if above is None:
             return None
 
-        state = await self._shift_state.load(
-            symbol,
-            above.value,
-            self._shift_algo_version,
-        )
+        # §3.4's authoritative state for that rung if the pipeline has published
+        # one, the shift engine's own trend otherwise. Both live under the shift
+        # version, because the trend is the shift engine's; the authoritative
+        # copy is that trend with §3.4's idle edge applied.
+        #
+        # Reading the shift value alone was tracker row 23: an idle rung still
+        # contributed its pre-edge direction to the rung below, so F6 could
+        # score 100 for an alignment §3.4 had already withdrawn, and
+        # `htf_aligned` could hold for a market the doctrine calls ranging.
+        #
+        # The fallback is deliberate and is not the same as RANGING: an absent
+        # record means nobody has published one yet (a first pass after a
+        # deploy, the golden harness), and inventing RANGING there would deny
+        # every alignment on exactly the passes that have no evidence either
+        # way.
+        state = None
+
+        if self._authoritative_state is not None:
+            state = await self._authoritative_state.load(
+                symbol,
+                above.value,
+                self._shift_algo_version,
+            )
+
+        if state is None:
+            state = await self._shift_state.load(
+                symbol,
+                above.value,
+                self._shift_algo_version,
+            )
 
         if state is None:
             return None
