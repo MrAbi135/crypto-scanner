@@ -71,11 +71,16 @@ class _Confluence:
         return object()
 
 
-def _manager() -> EngineStateManager:
-    return EngineStateManager(
-        InMemoryEngineStateStore(),
-        namespace=AUTHORITATIVE_NAMESPACE,
-    )
+def _manager() -> tuple[EngineStateManager, InMemoryEngineStateStore]:
+    """The manager and its store, because one test asserts on EVERY key.
+
+    Checking only the expected key let a mutation through: a write under a
+    different key (a missing version) is invisible to `load(..., SHIFT_VERSION)`
+    yet is exactly the bug worth catching -- a record nobody will ever read.
+    """
+    store = InMemoryEngineStateStore()
+
+    return EngineStateManager(store, namespace=AUTHORITATIVE_NAMESPACE), store
 
 
 async def _run(
@@ -111,7 +116,7 @@ async def _run(
 @pytest.mark.asyncio
 async def test_the_published_value_is_the_one_confluence_was_given() -> None:
     """The edged value, not the shift engine's own."""
-    state = _manager()
+    state, _ = _manager()
 
     seen, _ = await _run(idle=True, shift_trend="BEARISH", state=state)
 
@@ -127,7 +132,7 @@ async def test_the_published_value_is_the_one_confluence_was_given() -> None:
 
 @pytest.mark.asyncio
 async def test_a_trend_that_was_not_idled_is_published_unchanged() -> None:
-    state = _manager()
+    state, _ = _manager()
 
     seen, _ = await _run(idle=False, shift_trend="BULLISH", state=state)
 
@@ -150,11 +155,15 @@ async def test_without_a_store_the_pass_still_runs_and_reports() -> None:
 @pytest.mark.asyncio
 async def test_a_store_without_a_version_writes_nothing() -> None:
     """Both halves or neither -- a record under the wrong key is worse than none."""
-    state = _manager()
+    state, store = _manager()
 
     await _run(idle=True, shift_trend="BEARISH", state=state, version=None)
 
     assert await state.load("BTCUSDT", Timeframe.M15.value, SHIFT_VERSION) is None
+    assert store.values == {}, (
+        f"wrote under an unreadable key: {sorted(store.values)} -- a record no "
+        "reader will ever ask for is worse than no record"
+    )
 
 
 # --- F6's side of it -----------------------------------------------------
