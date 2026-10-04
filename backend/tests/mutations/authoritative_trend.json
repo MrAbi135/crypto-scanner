@@ -1,0 +1,63 @@
+{
+  "description": "SLS §3.4's authoritative state is published by the pipeline and preferred by F6 over the shift engine's pre-edge record, with an absent record falling back rather than reading as RANGING. Closes tracker rows 22 (check A) and 23 (F6/HTF) left open by #299, which applied the edge in memory only. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/authoritative_trend.json",
+  "pytest": [
+    "tests/unit/application/detection/test_authoritative_trend.py"
+  ],
+  "mutations": [
+    {
+      "name": "the pipeline publishes the pre-edge trend instead of the edged one",
+      "file": "backend/src/scanner/application/detection/pipeline.py",
+      "old": "                    trend_state=trend_state,\n                )\n            )\n\n        # The trend comes from the engine that owns it.",
+      "new": "                    trend_state=structure_shift.trend_state,\n                )\n            )\n\n        # The trend comes from the engine that owns it.",
+      "expect_failing": [
+        "test_the_published_value_is_the_one_confluence_was_given"
+      ]
+    },
+    {
+      "name": "the pipeline publishes nothing at all",
+      "file": "backend/src/scanner/application/detection/pipeline.py",
+      "old": "        if self._authoritative_state is not None and self._authoritative_version is not None:",
+      "new": "        if False and self._authoritative_state is not None and self._authoritative_version is not None:",
+      "expect_failing": [
+        "test_the_published_value_is_the_one_confluence_was_given",
+        "test_a_trend_that_was_not_idled_is_published_unchanged"
+      ]
+    },
+    {
+      "name": "a store with no version still writes, under whatever key",
+      "file": "backend/src/scanner/application/detection/pipeline.py",
+      "old": "        if self._authoritative_state is not None and self._authoritative_version is not None:",
+      "new": "        if self._authoritative_state is not None:",
+      "expect_failing": [
+        "test_a_store_without_a_version_writes_nothing"
+      ]
+    },
+    {
+      "name": "F6 reads the shift record first, so the edge is invisible to it",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        state = None\n\n        if self._authoritative_state is not None:",
+      "new": "        state = None\n\n        if False and self._authoritative_state is not None:",
+      "expect_failing": [
+        "test_f6_prefers_the_authoritative_value_over_the_shift_record"
+      ]
+    },
+    {
+      "name": "F6 treats an unpublished rung as RANGING instead of falling back",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        if state is None:\n            state = await self._shift_state.load(\n                symbol,\n                above.value,\n                self._shift_algo_version,\n            )",
+      "new": "        if state is None and self._authoritative_state is None:\n            state = await self._shift_state.load(\n                symbol,\n                above.value,\n                self._shift_algo_version,\n            )",
+      "expect_failing": [
+        "test_f6_falls_back_when_the_store_is_wired_but_the_rung_is_unpublished"
+      ]
+    },
+    {
+      "name": "F6 claims a bias at the top of the ladder",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        above = higher_timeframe(timeframe)\n\n        if above is None:\n            return None",
+      "new": "        above = higher_timeframe(timeframe)\n\n        if above is None:\n            above = timeframe",
+      "expect_failing": [
+        "test_f6_reports_nothing_at_the_top_of_the_ladder"
+      ]
+    }
+  ]
+}

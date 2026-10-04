@@ -329,7 +329,25 @@ for key in $keys; do
   # -- golden fixtures among them -- and a context nobody scans cannot be
   # behind on anything.
   case ",$INGEST_SYMBOLS," in *",$symbol,"*) ;; *) continue ;; esac
-  trend=$(echo "$raw" | grep -oE '"trend_state":"[A-Z_]+"' | cut -d'"' -f4)
+
+  # §3.4's AUTHORITATIVE state where the pipeline publishes it, the shift
+  # engine's own trend otherwise.
+  #
+  # This check asserts §3.4, and §3.4's idle edge is applied in the pipeline,
+  # not in either engine -- so reading the shift record alone asked one engine
+  # about a rule it does not own. That was tracker row 22: once the edge fired,
+  # this check would report `holds BEARISH with no BOS_DOWN ... 3.4 should have
+  # idled it to RANGING` about a context the pipeline HAD idled.
+  #
+  # The scan above deliberately stays on the shift keys: those exist for every
+  # context, while the authoritative key only appears after a pass of the
+  # publishing build, so scanning them would silently narrow the universe.
+  auth=$($C exec -T redis redis-cli GET "scanner:engine-state:authoritative:${SHIFT_ALGO}:${symbol}:${timeframe}" 2>/dev/null | tr -d '')
+  trend=$(echo "${auth:-$raw}" | grep -oE '"trend_state":"[A-Z_]+"' | cut -d'"' -f4)
+
+  # Absent is not RANGING: nobody has published one yet. Fall back rather than
+  # assert against a value that does not exist.
+  [ -z "$trend" ] && trend=$(echo "$raw" | grep -oE '"trend_state":"[A-Z_]+"' | cut -d'"' -f4)
 
   # Only the two states §3.4 draws the idle edge out of. RANGING opens no gate
   # at all, and the CAUTION states are mid-transition -- §3.4 will not idle out

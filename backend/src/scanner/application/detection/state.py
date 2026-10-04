@@ -20,6 +20,17 @@ from scanner.shared import Timeframe
 # a single field two writers, and whichever ran last would win silently.
 STRUCTURE_NAMESPACE = "structure"
 SHIFT_NAMESPACE = "shift"
+# §3.4's ONE authoritative directional state, written by the pipeline -- the
+# only thing that knows it, because it is the shift engine's trend with §3.4's
+# idle edge applied and neither engine can compute that alone (see
+# `application/detection/pipeline.py`). Its own namespace rather than a field on
+# the shift record: the shift engine resumes its machine from `trend_state`, so
+# an idled value written back there would feed into the machine, latch it (the
+# only exit is §3.4's two-pair entry edge) and shut structure's BOS gate --
+# measured as 195 consecutive passes before the pipeline route was chosen.
+# Readers treat an absent value as "fall back to the shift trend", so a first
+# pass after a deploy, the golden harness and `engine run` all keep working.
+AUTHORITATIVE_NAMESPACE = "authoritative"
 # The last candle each engine decided (audit M3): a pass creates facts only
 # about candles after it. One namespace per engine, so no two share a marker.
 PARTICIPATION_NAMESPACE = "participation"
