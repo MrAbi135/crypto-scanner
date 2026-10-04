@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.13
-**Ratified:** 2026-07-12 · **Last amended:** 2026-09-22 (v1.0.13; see Amendment History)
+**Version:** 1.0.14
+**Ratified:** 2026-07-12 · **Last amended:** 2026-10-05 (v1.0.14; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -41,10 +41,10 @@ All subsequent sections depend on the definitions in this section. They are bind
 
 | Code | Interval | Role |
 |---|---|---|
-| M5 | 5 min | Execution-refinement TF (Tier 1 symbols only) |
+| M5 | 5 min | Execution-refinement TF |
 | M15 | 15 min | Lowest general scanning TF |
 | H1 | 1 hour | Core intraday structure TF |
-| H4 | 4 hours | Primary institutional structure TF (**default signal TF**) |
+| H4 | 4 hours | Primary institutional structure TF (**primary signal TF**) |
 | D1 | 1 day | Bias and dealing-range TF |
 | W1 | 1 week | Macro bias TF (context only, no signals) |
 
@@ -1158,6 +1158,46 @@ Every parameter change increments `param_set_version` and requires golden-datase
 ---
 
 ## Amendment History
+
+### v1.0.14 — 2026-10-05
+
+**§0.3: M5 no longer publishes for Tier 1 symbols only, and H4 is the primary
+signal timeframe rather than the default one.**
+
+The M5 row read "Execution-refinement TF (Tier 1 symbols only)". That clause was
+a publication restriction on top of `P.signal.timeframes`, enforced separately
+in the code, so adding M5 to the published set could still never publish a Tier
+2 or Tier 3 signal there. The owner has ruled it removed: **M5 now publishes on
+the same terms as every other published timeframe**, and which timeframes publish
+is `P.signal.timeframes` alone. The parallel H4 wording moves from "default
+signal TF" to "primary signal TF" for the same reason — the published set is
+configuration, and H4's standing is about where the doctrine expects the best
+signals, not about what the engine is allowed to emit.
+
+**What the owner was told before ruling, measured over 18 days (2026-09-16 to
+2026-10-04) on suppressions whose only blocker was a publication gate:**
+
+| opening | signals in 18 days | grade |
+|---|---|---|
+| M15 | 21 | all B, confidence 70–74 |
+| M5, tier clause kept | 18 | all B, confidence 70–78 |
+| M5, tier clause removed | 52 | all B, confidence 70–76 |
+
+So the clause was worth 34 signals over those 18 days. Six of the fifteen
+scanned symbols are Tier 1 (BTC, ETH, SOL, SUI, XRP, ZEC) against 23 Tier 2 and
+39 Tier 3, which is why 44 of 62 M5 candidates met it.
+
+**What this amendment does not claim.** That these signals are good. Every one
+of the 73 that M5 and M15 would have published is **grade B**, none reached A or
+S, and §10.1 pushes only S and A — so none of them would have alerted anyone.
+The amendment widens what the engine may publish; it does not raise confidence,
+and it is not the lever for the archetype-zero problem recorded against H1 and
+H4.
+
+**Tier remains doctrine elsewhere.** §10.1's alert priorities are still
+tier-ordered, and the universe tiers themselves are unchanged. What is retired
+is one publication gate, named `TIER_NOT_PERMITTED`; the suppression reason
+stays in the enum so historical events remain readable.
 
 ### v1.0.13 — 2026-09-22
 
