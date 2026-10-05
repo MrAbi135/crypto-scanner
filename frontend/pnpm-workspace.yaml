@@ -6,7 +6,22 @@ packages:
   - "."
   # - "packages/*"   # future: shared design-system / entities / services extraction
 
+# Security pins, and they are DUPLICATED in package.json's `pnpm.overrides` on
+# purpose. The two homes are read by different pnpm majors, and only one of them
+# is live here: pnpm 9 -- which this repository pins through `packageManager`
+# and whose format the lockfile carries (`lockfileVersion: 9.0`) -- reads
+# package.json and ignores this block; pnpm 10+ reads this block and warns that
+# the package.json field is dead.
+#
+# Proved by control on 2026-10-05, not inferred. Forcing js-yaml to 4.3.0 from
+# THIS file changed nothing (pnpm did not even re-resolve); the same change in
+# package.json moved the lockfile to 4.3.0. So with the pins in one home each,
+# CI and a contributor on a newer pnpm honoured DIFFERENT sets of them.
+#
+# Keep the two lists identical. If they ever drift, the one that binds is
+# whichever home the running pnpm reads -- which neither file makes obvious.
 overrides:
-  "nanoid@<3.3.18": "3.3.18"
+  "js-yaml@<4.3.2": "4.3.2"
   "micromatch@<4.0.8": "4.0.8"
+  "nanoid@<3.3.18": "3.3.18"
   
