@@ -82,12 +82,23 @@ def test_structure_does_not_seed_from_its_own_namespace() -> None:
     assert own != seed
 
 
-def test_confluence_publishes_h1_and_h4_when_nothing_is_configured() -> None:
-    """Owner ruling 2026-09-15. A builder that forgot the setting must fail
-    closed, not open M15/M5 publishing."""
+def test_confluence_falls_back_to_the_doctrine_default_when_nothing_is_configured() -> None:
+    """A builder that forgot the setting lands on DEFAULT_SIGNAL_TIMEFRAMES.
+
+    That default is the four scanned timeframes since the owner's 2026-10-05
+    ruling (SLS v1.0.14); it was H1,H4 before it. The point of the assertion is
+    that the two defaults stay in step -- `EngineSettings.signal_timeframes` is
+    what drives a running engine, and this one catches a caller that passes
+    none.
+    """
     from scanner.shared import Timeframe
 
-    assert build()._confluence._signal_timeframes == {Timeframe.H1, Timeframe.H4}
+    assert build()._confluence._signal_timeframes == {
+        Timeframe.M5,
+        Timeframe.M15,
+        Timeframe.H1,
+        Timeframe.H4,
+    }
 
 
 def test_the_configured_published_set_reaches_confluence() -> None:

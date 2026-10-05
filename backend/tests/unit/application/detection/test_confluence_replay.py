@@ -951,13 +951,25 @@ def _suppression_reasons(repo) -> list[list[str]]:
 
 @pytest.mark.asyncio
 async def test_a_candidate_on_an_unpublished_timeframe_is_suppressed_with_its_reason() -> None:
-    """Owner ruling 2026-09-15: M8 made RVOL readable on M15/M5, and publishing
-    there is a separate decision -- H1 and H4 publish for now. The candidate is
-    refused with its reason on the event log, like any other suppression, and
-    no universe state is read for a timeframe §0.3 does not restrict."""
+    """A candidate on a timeframe outside the published set is refused with its
+    reason on the event log, like any other suppression.
+
+    The published set is passed explicitly rather than relying on the default.
+    This test used to lean on M15 being unpublished by default, which made it a
+    test of the default as much as of the gate -- and it broke the day the owner
+    widened it (SLS v1.0.14). Naming the set keeps it about the gate.
+
+    No universe state is read at all: the tier gate that used to read it for M5
+    was retired by that same amendment.
+    """
     signals = FakeSignals()
 
-    svc, repo = service(**bullish_setup(), signals=signals, incidents=FakeIncidents())
+    svc, repo = service(
+        **bullish_setup(),
+        signals=signals,
+        incidents=FakeIncidents(),
+        signal_timeframes=frozenset({Timeframe.H1, Timeframe.H4}),
+    )
 
     await svc._publish("BTCUSDT", Timeframe.M15, BASE + TF.duration * 10, publishable_candidate())
 
@@ -967,13 +979,21 @@ async def test_a_candidate_on_an_unpublished_timeframe_is_suppressed_with_its_re
 
 
 @pytest.mark.asyncio
-async def test_m5_never_publishes_below_tier_1_even_when_m5_is_published() -> None:
-    """§0.3: M5 is for Tier 1 symbols only. Doctrine, not configuration: it
-    holds after an operator opens M5, and a symbol with no recorded tier is not
-    Tier 1."""
+async def test_m5_publishes_at_any_tier_once_m5_is_published() -> None:
+    """SLS v1.0.14 retired §0.3's Tier-1-only clause for M5.
+
+    The old rule held after an operator opened M5, so this test used to assert
+    the opposite: a T2 symbol, or one with no recorded tier, was suppressed with
+    TIER_NOT_PERMITTED. It now publishes, because which timeframes publish is
+    `P.signal.timeframes` alone.
+
+    Both a lower tier and an unrecorded one are covered -- the retired rule
+    treated "unknown" as not-Tier-1, so an unrecorded symbol is exactly where a
+    surviving remnant of it would show.
+    """
     published = frozenset({Timeframe.M5, Timeframe.H1, Timeframe.H4})
 
-    for tier in ("T2", None):
+    for tier in ("T2", "T3", None):
         signals = FakeSignals()
         svc, repo = service(
             **bullish_setup(),
@@ -987,14 +1007,19 @@ async def test_m5_never_publishes_below_tier_1_even_when_m5_is_published() -> No
             "BTCUSDT", Timeframe.M5, BASE + TF.duration * 10, publishable_candidate()
         )
 
-        assert signals.rows == {}, tier
-        assert _suppression_reasons(repo) == [["TIER_NOT_PERMITTED"]], tier
+        assert signals.rows, tier
+        assert _suppression_reasons(repo) == [], tier
 
 
 @pytest.mark.asyncio
 async def test_a_tier_1_m5_candidate_publishes_once_m5_is_published() -> None:
-    """The premise of the test above: the same candidate on M5 does publish for
-    a Tier 1 symbol, so the refusal there is the tier and nothing else."""
+    """A Tier 1 M5 candidate publishes, and no tier is read to decide it.
+
+    `tier_reads == 0` is the point now. Before SLS v1.0.14 this asserted 1: the
+    gate read the universe state for every M5 candidate. The amendment retired
+    the gate, so that round trip is gone -- and an assertion of 0 is what keeps
+    it gone.
+    """
     signals = FakeSignals()
 
     svc, _ = service(
@@ -1008,7 +1033,7 @@ async def test_a_tier_1_m5_candidate_publishes_once_m5_is_published() -> None:
     await svc._publish("BTCUSDT", Timeframe.M5, BASE + TF.duration * 10, publishable_candidate())
 
     assert len(signals.rows) == 1
-    assert svc._symbols.tier_reads == 1
+    assert svc._symbols.tier_reads == 0
 
 
 @pytest.mark.asyncio

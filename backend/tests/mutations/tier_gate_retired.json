@@ -1,0 +1,68 @@
+{
+  "description": "SLS v1.0.14 retired §0.3's Tier-1-only publication clause for M5, and widened the published set to all four scanned timeframes. The gate must be gone rather than permanently open: a `tier_permitted` argument has to be refused, not accepted and ignored, and no universe state may be read to decide a publication. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/tier_gate_retired.json",
+  "pytest": [
+    "tests/unit/domain/lifecycle/test_payload.py",
+    "tests/unit/application/detection/test_confluence_replay.py",
+    "tests/unit/config/test_signal_timeframes.py",
+    "tests/unit/runtime/test_detection_wiring.py"
+  ],
+  "mutations": [
+    {
+      "name": "a retired suppression reason is appended again, unconditionally",
+      "file": "backend/src/scanner/domain/lifecycle/payload.py",
+      "old": "    return PublicationDecision(published=not reasons, reasons=tuple(reasons))",
+      "new": "    reasons.append(SuppressionReason.TIER_NOT_PERMITTED)\n\n    return PublicationDecision(published=not reasons, reasons=tuple(reasons))",
+      "expect_failing": [
+        "test_a_complete_payload_with_fresh_feeds_publishes",
+        "test_m5_publishes_at_any_tier_once_m5_is_published",
+        "test_a_tier_1_m5_candidate_publishes_once_m5_is_published"
+      ]
+    },
+    {
+      "name": "the published-timeframe gate stops being enforced at all",
+      "file": "backend/src/scanner/domain/lifecycle/payload.py",
+      "old": "    if not timeframe_published:\n        reasons.append(SuppressionReason.TIMEFRAME_NOT_PUBLISHED)",
+      "new": "    if False:\n        reasons.append(SuppressionReason.TIMEFRAME_NOT_PUBLISHED)",
+      "expect_failing": [
+        "test_a_candidate_on_an_unpublished_timeframe_is_suppressed_with_its_reason",
+        "test_a_timeframe_outside_the_published_set_is_suppressed_with_its_reason"
+      ]
+    },
+    {
+      "name": "the config default narrows back to H1,H4",
+      "file": "backend/src/scanner/config/processes.py",
+      "old": "    signal_timeframes: str = \"M5,M15,H1,H4\"",
+      "new": "    signal_timeframes: str = \"H1,H4\"",
+      "expect_failing": [
+        "test_the_engine_publishes_every_scanned_timeframe_unless_told_otherwise"
+      ]
+    },
+    {
+      "name": "the fail-closed default narrows back, drifting from the config one",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "    {Timeframe.M5, Timeframe.M15, Timeframe.H1, Timeframe.H4}\n)",
+      "new": "    {Timeframe.H1, Timeframe.H4}\n)",
+      "expect_failing": [
+        "test_confluence_falls_back_to_the_doctrine_default_when_nothing_is_configured"
+      ]
+    },
+    {
+      "name": "D1 dropped from the ingest ladder",
+      "file": "backend/src/scanner/config/processes.py",
+      "old": "    # its lower neighbour too.\n    ingest_timeframes: str = \"M5,M15,H1,H4,D1\"",
+      "new": "    # its lower neighbour too.\n    ingest_timeframes: str = \"M5,M15,H1,H4\"",
+      "expect_failing": [
+        "test_the_engine_ingests_every_scanned_timeframe_including_d1"
+      ]
+    },
+    {
+      "name": "the worker's ladder drifts from ingest's, undercounting §6.6",
+      "file": "backend/src/scanner/config/processes.py",
+      "old": "    # crashing, which is why the two are worth keeping visibly identical.\n    ingest_timeframes: str = \"M5,M15,H1,H4,D1\"",
+      "new": "    # crashing, which is why the two are worth keeping visibly identical.\n    ingest_timeframes: str = \"M5,M15,H1,H4\"",
+      "expect_failing": [
+        "test_the_engine_ingests_every_scanned_timeframe_including_d1"
+      ]
+    }
+  ]
+}
