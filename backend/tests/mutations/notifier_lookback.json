@@ -1,0 +1,71 @@
+{
+  "description": "The interim notifier's five-minute window on `published_at` could never fire: `published_at` is the candle's OPEN time, so a signal is already one full period old the instant it exists. Measured live 2026-10-05 -- SUIUSDT M5, published_at 04:20:00Z, written by a pass that finished 04:25:17.1Z, an age of 317s against a 300s window. The window is now a scan bound, the ledger decides what has been handled, and §10.2's freshness is the signal's own TTL. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/notifier_lookback.json",
+  "pytest": [
+    "tests/unit/test_interim_notifier_behaviour.py"
+  ],
+  "mutations": [
+    {
+      "name": "the scan bound goes back to the five minutes that could never be met",
+      "file": "ops/notify/notify_signals.py",
+      "old": "LOOKBACK = timedelta(hours=24)",
+      "new": "LOOKBACK = timedelta(minutes=5)",
+      "expect_failing": [
+        "test_the_scan_bound_clears_a_whole_candle_on_every_signal_timeframe"
+      ]
+    },
+    {
+      "name": "the scan bound exactly equals H4's period, leaving no room for the pass",
+      "file": "ops/notify/notify_signals.py",
+      "old": "LOOKBACK = timedelta(hours=24)",
+      "new": "LOOKBACK = timedelta(hours=4)",
+      "expect_failing": [
+        "test_the_scan_bound_clears_a_whole_candle_on_every_signal_timeframe"
+      ]
+    },
+    {
+      "name": "the dispatch freshness test never suppresses, so an outage pushes expired signals",
+      "file": "ops/notify/notify_signals.py",
+      "old": "        if age > lifetime:",
+      "new": "        if False and age > lifetime:",
+      "expect_failing": [
+        "test_a_signal_past_its_own_ttl_is_suppressed_and_said_so"
+      ]
+    },
+    {
+      "name": "freshness is measured against one candle period instead of the TTL -- the same defect, moved",
+      "file": "ops/notify/notify_signals.py",
+      "old": "        lifetime = dispatch_lifetime_seconds(row)",
+      "new": "        lifetime = TIMEFRAME_SECONDS[row[\"timeframe\"]]",
+      "expect_failing": [
+        "test_the_measured_317_second_signal_is_dispatched"
+      ]
+    },
+    {
+      "name": "an absent ttl_candles reads as a zero lifetime rather than two candles",
+      "file": "ops/notify/notify_signals.py",
+      "old": "TTL_FALLBACK_CANDLES = 2",
+      "new": "TTL_FALLBACK_CANDLES = 0",
+      "expect_failing": [
+        "test_an_absent_ttl_falls_back_to_two_candles_not_to_forever"
+      ]
+    },
+    {
+      "name": "an unknown timeframe is guessed at instead of raising",
+      "file": "ops/notify/notify_signals.py",
+      "old": "    if period is None:\n        raise NotifierContractError(",
+      "new": "    if period is None and False:\n        raise NotifierContractError(",
+      "expect_failing": [
+        "test_an_unknown_timeframe_raises_instead_of_guessing_a_lifetime"
+      ]
+    },
+    {
+      "name": "ttl_candles is dropped from the SELECT, so zip silently shifts every later field",
+      "file": "ops/notify/notify_signals.py",
+      "old": "               s.ttl_candles,\n",
+      "new": "",
+      "expect_failing": [
+        "test_every_selected_column_is_given_a_name"
+      ]
+    }
+  ]
+}
