@@ -352,7 +352,7 @@ def test_every_selected_column_is_given_a_name(notifier, monkeypatch) -> None:
     columns = _select_columns(captured["sql"])
 
     assert len(columns) == 15, f"the SELECT list changed shape: {columns}"
-    assert len(columns) == len(_signal("SIG_X")) , (
+    assert len(columns) == len(_signal("SIG_X")), (
         f"{len(columns)} columns selected but the row fixture has "
         f"{len(_signal('SIG_X'))} keys -- zip would drop the difference in silence"
     )
