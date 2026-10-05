@@ -123,7 +123,6 @@ from scanner.domain.lifecycle import (
     SignalState,
     SuppressionReason,
     publication_checks,
-    tier_permits_publication,
 )
 from scanner.domain.liquidity import SWEEP_SETUP_EXPIRY_CANDLES
 from scanner.domain.momentum import (
@@ -211,12 +210,18 @@ from scanner.shared import Timeframe
 # after M8 made RVOL readable there), and on M5 only for a Tier 1 symbol (§0.3,
 # whatever the published set). Suppressed with a recorded reason; setups and
 # the event log are unchanged.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v34"
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v35"
 
 # The published set when nothing is configured (owner ruling 2026-09-15). A
 # default that published everything would open M15/M5 the day a setting went
 # missing; this one fails closed.
-DEFAULT_SIGNAL_TIMEFRAMES: frozenset[Timeframe] = frozenset({Timeframe.H1, Timeframe.H4})
+# Owner ruling 2026-10-05, with SLS v1.0.14: M5 and M15 publish too, and M5 no
+# longer carries §0.3's Tier-1-only clause. Kept in step with
+# `EngineSettings.signal_timeframes`, which is what actually drives a running
+# engine -- this value is the fail-closed default for callers that pass none.
+DEFAULT_SIGNAL_TIMEFRAMES: frozenset[Timeframe] = frozenset(
+    {Timeframe.M5, Timeframe.M15, Timeframe.H1, Timeframe.H4}
+)
 
 # Import-time, not call-time: a zone type with no version entry is invisible
 # to scoring, and that must refuse to boot rather than run quietly blind.
@@ -1250,7 +1255,6 @@ class ConfluenceReplayService:
             feeds_fresh=await self._feeds_clean(symbol, candidate),
             dedup_clear=blocker is None,
             timeframe_published=timeframe in self._signal_timeframes,
-            tier_permitted=await self._tier_permits(symbol, timeframe),
         )
 
         # §10.3: "merged as a refresh event on the existing signal (evidence
@@ -1357,20 +1361,6 @@ class ConfluenceReplayService:
             )
 
         self._metrics.record_publication("published", timeframe=timeframe.value)
-
-    async def _tier_permits(self, symbol: str, timeframe: Timeframe) -> bool:
-        """§0.3: M5 publishes for Tier 1 symbols only.
-
-        The universe state is read only for an M5 candidate, so no other
-        timeframe pays a round trip for a rule that cannot apply to it. A symbol
-        with no recorded state is not Tier 1.
-        """
-        if timeframe is not Timeframe.M5:
-            return True
-
-        state = await self._symbols.get_universe_state(symbol)
-
-        return tier_permits_publication(timeframe, state.tier if state is not None else None)
 
     async def _feeds_clean(self, symbol: str, candidate: SetupCandidate) -> bool:
         """§15.3(2): "all feeds fresh at publish moment; no DEGRADED input in

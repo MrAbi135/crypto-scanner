@@ -6,7 +6,8 @@ import json
 from dataclasses import replace
 from decimal import Decimal
 
-from scanner.domain.common.universe import UniverseTier
+import pytest
+
 from scanner.domain.confluence import (
     ZONE_DISTAL_EDGE,
     SignalLevels,
@@ -18,12 +19,11 @@ from scanner.domain.lifecycle import (
     SignalPayload,
     SuppressionReason,
     publication_checks,
-    tier_permits_publication,
 )
-from scanner.shared import Timeframe
 
-# Both publication gates open, for tests about §15.3's own checks.
-GATES_OPEN = {"timeframe_published": True, "tier_permitted": True}
+# The publication gate open, for tests about §15.3's own checks. There were two
+# until SLS v1.0.14 retired §0.3's Tier-1-only clause for M5.
+GATES_OPEN = {"timeframe_published": True}
 
 
 def levels(
@@ -212,45 +212,54 @@ def test_incoherent_levels_are_caught_separately_from_the_rr_floor() -> None:
 
 
 def test_a_timeframe_outside_the_published_set_is_suppressed_with_its_reason() -> None:
-    """Owner ruling 2026-09-15: M15/M5 publishing is a separate decision. A
-    complete payload on such a timeframe is refused with its own reason, so the
-    §14 funnel says why rather than calling it a routine suppression."""
+    """A complete payload on an unpublished timeframe is refused with its own
+    reason, so the §14 funnel says why rather than calling it a routine
+    suppression. Which timeframes publish is `P.signal.timeframes` alone since
+    SLS v1.0.14."""
     decision = publication_checks(
         payload(),
         feeds_fresh=True,
         dedup_clear=True,
         timeframe_published=False,
-        tier_permitted=True,
     )
 
     assert not decision.published
     assert decision.reasons == (SuppressionReason.TIMEFRAME_NOT_PUBLISHED,)
 
 
-def test_a_tier_the_timeframe_does_not_permit_is_suppressed_with_its_reason() -> None:
+def test_the_tier_gate_is_retired_and_nothing_can_reintroduce_it() -> None:
+    """SLS v1.0.14: §0.3 no longer restricts M5 to Tier 1.
+
+    Two halves, and the second is the one that matters. A complete payload on a
+    published timeframe now publishes with no tier asked about at all -- and
+    `publication_checks` must *refuse* a `tier_permitted` argument, so a caller
+    that still passes one fails loudly instead of having it silently ignored.
+    That is what a retired gate looks like; a parameter quietly accepted and
+    dropped would read as protection while providing none.
+
+    `SuppressionReason.TIER_NOT_PERMITTED` stays in the enum on purpose: events
+    written before the amendment carry it and must remain readable.
+    """
     decision = publication_checks(
         payload(),
         feeds_fresh=True,
         dedup_clear=True,
         timeframe_published=True,
-        tier_permitted=False,
     )
 
-    assert not decision.published
-    assert decision.reasons == (SuppressionReason.TIER_NOT_PERMITTED,)
+    assert decision.published
+    assert decision.reasons == ()
 
+    with pytest.raises(TypeError):
+        publication_checks(
+            payload(),
+            feeds_fresh=True,
+            dedup_clear=True,
+            timeframe_published=True,
+            tier_permitted=False,
+        )
 
-def test_m5_publishes_for_tier_1_only_and_every_other_timeframe_is_open() -> None:
-    """§0.3: M5 is "Execution-refinement TF (Tier 1 symbols only)". Doctrine,
-    so it holds whatever the published set is; an unknown tier is not Tier 1."""
-    assert tier_permits_publication(Timeframe.M5, UniverseTier.T1)
-
-    for tier in (UniverseTier.T2, UniverseTier.T3, UniverseTier.INELIGIBLE, None):
-        assert not tier_permits_publication(Timeframe.M5, tier), tier
-
-    for timeframe in (Timeframe.M15, Timeframe.H1, Timeframe.H4, Timeframe.D1):
-        for tier in (UniverseTier.T1, UniverseTier.T2, None):
-            assert tier_permits_publication(timeframe, tier), (timeframe, tier)
+    assert SuppressionReason.TIER_NOT_PERMITTED.value == "TIER_NOT_PERMITTED"
 
 
 def test_the_dedup_key_survives_a_sub_cent_symbol() -> None:

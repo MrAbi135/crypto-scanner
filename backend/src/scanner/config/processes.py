@@ -63,7 +63,7 @@ class IngestSettings(BaseProcessSettings):
     # (SLS §5.9 via `_lower_timeframe`), so subscribing to H1 without M15 yields
     # zero confirmations, silently and forever. Whatever is listed here, list
     # its lower neighbour too.
-    ingest_timeframes: str = "M5,M15,H1,H4"
+    ingest_timeframes: str = "M5,M15,H1,H4,D1"
 
     # Enough history for the SLS §1.9 detection gate (300) with headroom, so a
     # fresh deployment warms itself instead of waiting days for live closes.
@@ -78,10 +78,15 @@ class EngineSettings(BaseProcessSettings):
     health_port: int = Field(default=8002, gt=0, le=65535)
 
     # Timeframes whose candidates may publish a signal. Owner ruling
-    # 2026-09-15: H1 and H4 only for now -- M15 and M5 compute RVOL, volume and
-    # momentum facts and record setups, but publishing on them is a separate
-    # decision. §0.3's Tier-1-only rule for M5 applies whatever is listed here.
-    signal_timeframes: str = "H1,H4"
+    # 2026-10-05, with SLS v1.0.14: all four scanned timeframes publish. The
+    # 2026-09-15 ruling had held this at H1,H4 while M15 and M5 only recorded
+    # setups; the amendment also retired §0.3's Tier-1-only clause for M5, so
+    # nothing narrows M5 behind this setting any more.
+    #
+    # Measured before the ruling, over 18 days: opening M15 was worth 21
+    # signals and M5 another 52, all of them grade B -- so §10.1, which pushes
+    # S and A only, alerts on none of them.
+    signal_timeframes: str = "M5,M15,H1,H4"
 
 
 class WorkerSettings(BaseProcessSettings):
@@ -92,7 +97,7 @@ class WorkerSettings(BaseProcessSettings):
     # default and same meaning as `IngestSettings.ingest_timeframes` -- an
     # operator narrowing one and not the other undercounts rather than
     # crashing, which is why the two are worth keeping visibly identical.
-    ingest_timeframes: str = "M5,M15,H1,H4"
+    ingest_timeframes: str = "M5,M15,H1,H4,D1"
 
     # Sprint S3 — daily universe/liquidity evaluation.
     binance_base_url: str = "https://api.binance.com"

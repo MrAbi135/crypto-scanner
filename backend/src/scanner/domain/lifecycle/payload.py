@@ -23,9 +23,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
 
-from scanner.domain.common.universe import UniverseTier
 from scanner.domain.confluence import SignalLevels
-from scanner.shared import Timeframe
 
 
 class SuppressionReason(str, Enum):
@@ -40,20 +38,9 @@ class SuppressionReason(str, Enum):
     # 2026-09-15: H1 and H4 publish; M15/M5 publishing is a separate decision).
     TIMEFRAME_NOT_PUBLISHED = "TIMEFRAME_NOT_PUBLISHED"
     # §0.3: M5 is "Execution-refinement TF (Tier 1 symbols only)".
+    # Retired by SLS v1.0.14 (2026-10-05): §0.3 no longer restricts M5 to Tier 1.
+    # Kept so events written before that ruling stay readable. Nothing writes it.
     TIER_NOT_PERMITTED = "TIER_NOT_PERMITTED"
-
-
-def tier_permits_publication(timeframe: Timeframe, tier: UniverseTier | None) -> bool:
-    """§0.3: a signal on M5 is for Tier 1 symbols only; other timeframes are open.
-
-    Doctrine, not configuration: it holds whatever set of timeframes the
-    operator publishes, so opening M5 later can never publish a Tier 2 signal
-    there. An unknown tier (no universe state recorded yet) is not Tier 1.
-    """
-    if timeframe is not Timeframe.M5:
-        return True
-
-    return tier is UniverseTier.T1
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,7 +216,6 @@ def publication_checks(
     feeds_fresh: bool,
     dedup_clear: bool,
     timeframe_published: bool,
-    tier_permitted: bool,
 ) -> PublicationDecision:
     """§15.3, evaluated exactly once, plus the two publication gates.
 
@@ -239,11 +225,18 @@ def publication_checks(
     function of the payload plus stated facts, which is what makes the verdict
     reproducible from a stored row months later.
 
-    `timeframe_published` is the operator's published-timeframe set (owner
-    ruling 2026-09-15: H1 and H4) and `tier_permitted` is §0.3's Tier-1-only
-    rule for M5 (`tier_permits_publication`). Both are required arguments, not
-    defaults: a caller that forgot one would otherwise leave that gate open
-    without a trace.
+    `timeframe_published` is the operator's published-timeframe set
+    (`P.signal.timeframes`; owner ruling 2026-10-05: M5, M15, H1 and H4). It is
+    a required argument, not a default: a caller that forgot it would otherwise
+    leave the gate open without a trace.
+
+    There was a second gate here until SLS v1.0.14 -- §0.3's "M5 publishes for
+    Tier 1 symbols only" -- and the amendment retired it, so M5 now publishes on
+    the same terms as any other published timeframe.
+    `SuppressionReason.TIER_NOT_PERMITTED` stays in the enum because events
+    written before that ruling carry it and must remain readable; nothing
+    produces it any more. Tier is still doctrine in §10.1's alert priorities,
+    which this function never touched.
 
     **Every failing check is reported, not just the first.** §12.2 records a
     suppression reason for the funnel in §14, and "it failed on freshness"
@@ -269,9 +262,6 @@ def publication_checks(
 
     if not timeframe_published:
         reasons.append(SuppressionReason.TIMEFRAME_NOT_PUBLISHED)
-
-    if not tier_permitted:
-        reasons.append(SuppressionReason.TIER_NOT_PERMITTED)
 
     return PublicationDecision(published=not reasons, reasons=tuple(reasons))
 
