@@ -309,10 +309,17 @@ cat <<NEXT
         docker exec scanner-dev-redis-1 redis-cli XPENDING scanner:stream:candle-closed engine
           -- want: a first field of 0
 
-   3. The signal gate, for as long as the M5/M15 ruling stands:
+   3. The signal gate. SLS v1.0.14 opened M5 and M15, so this reads the
+      opposite way round to every deploy before 2026-10-05: a count here is
+      correct, and a long run of zero is what deserves a look.
 
         $PSQL -c "select count(*) from detection.signals where timeframe in ('M5','M15') and published_at >= '$new_started';"
-          -- was: $pre_low_tf in all history   want: 0 new, ever
+          -- was: $pre_low_tf before this deploy
+          -- want: rising. Measured over 18 days before the ruling, M5 and M15
+             together were worth ~4 a day, so a 2-4 hour shakedown may well
+             show none -- judge it over a day, not over the shakedown.
+          -- all of them are grade B, and 10.1 pushes S and A only, so no
+             Telegram alert is expected from them either.
 
    4. Invariants, then a 2-4 hour shakedown. The :17 cron keeps running;
       read ~/soak-logs/alerts.log before trusting anything:
