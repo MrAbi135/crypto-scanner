@@ -182,6 +182,18 @@ if [ "${INVARIANTS_LIB_ONLY:-}" = "1" ]; then
   return 0 2>/dev/null || exit 0
 fi
 
+# Fixed, not relative to this file: cron needs one known directory, and the
+# compose project, the env file and the two mounted helpers are all resolved
+# from here.
+#
+# The consequence is worth stating, because it cost an hour on 2026-10-06. Run
+# this script from a git worktree and you get a MIXED build: bash has already
+# read the shell from the worktree, but everything after this line -- including
+# `-v $PWD/ops/soak/break_tolerance.py` and `--env-file ops/env/dev.env`, which
+# is untracked and exists only here -- comes from the live checkout. The run
+# looks clean and proves only half of what it appears to. A worktree can test
+# the shell in this file; it cannot test the Python helpers, which have to be
+# verified from this directory after a merge.
 cd ~/crypto-scanner || exit 2
 C="docker compose -f ops/compose/docker-compose.dev.yml"
 PSQL="docker exec -i scanner-dev-db-1 psql -U scanner -d scanner"
