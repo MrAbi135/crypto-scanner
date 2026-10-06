@@ -1,0 +1,26 @@
+{
+  "description": "break_tolerance.py's CONTEXTS is check A's measurable scope, and check A picks up new timeframes by itself from Redis. #304 added D1 and this list did not, so the next two runs printed 'tolerance unknown' on ADAUSDT and PUMPUSDT D1 -- a context the check could not measure, reported as a problem. The list is now bound to the engine's ingest_timeframes. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/break_tolerance_scope.json",
+  "pytest": [
+    "tests/unit/test_check_a_break_tolerance.py"
+  ],
+  "mutations": [
+    {
+      "name": "D1 is dropped again, which is the exact state that produced the two alarms",
+      "file": "ops/soak/break_tolerance.py",
+      "old": "    Timeframe.H4,\n    Timeframe.D1,\n)",
+      "new": "    Timeframe.H4,\n)",
+      "expect_failing": [
+        "test_the_scanned_contexts_track_the_engines_ingested_timeframes"
+      ]
+    },
+    {
+      "name": "a timeframe the engine does not ingest is scanned, so the helper asks about contexts that cannot exist",
+      "file": "ops/soak/break_tolerance.py",
+      "old": "    Timeframe.D1,\n)",
+      "new": "    Timeframe.D1,\n    Timeframe.W1,\n)",
+      "expect_failing": [
+        "test_the_scanned_contexts_track_the_engines_ingested_timeframes"
+      ]
+    }
+  ]
+}

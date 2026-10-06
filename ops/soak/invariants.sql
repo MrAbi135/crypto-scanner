@@ -286,9 +286,18 @@ group by 1, 2, 3;
 -- newest pass in the log, so one context can stop being detected while the
 -- others keep the aggregate looking fresh.
 
+-- This list is the check's scope, not a lookup: a timeframe absent here is
+-- dropped by the join below and is therefore NOT CHECKED. D1 was missing for
+-- the two runs after #304 began ingesting it, so D1 detection could have
+-- stopped dead and nothing here would have said so. Measured before adding it:
+-- all 15 symbols carry D1 engine_events, LITEBUSDT included on 98 candles, so
+-- the `last_event is null` arm raises nothing. W1 is listed for the same
+-- reason the tables at the bottom of this file list it -- it costs nothing and
+-- a timeframe with no candles produces no rows.
 with tf(name, step) as (
     values ('M5', interval '5 min'), ('M15', interval '15 min'),
-           ('H1', interval '1 hour'), ('H4', interval '4 hours')
+           ('H1', interval '1 hour'), ('H4', interval '4 hours'),
+           ('D1', interval '1 day'), ('W1', interval '7 days')
 ),
 newest as (
     select c.symbol, c.timeframe,

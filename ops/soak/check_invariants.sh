@@ -182,6 +182,18 @@ if [ "${INVARIANTS_LIB_ONLY:-}" = "1" ]; then
   return 0 2>/dev/null || exit 0
 fi
 
+# Fixed, not relative to this file: cron needs one known directory, and the
+# compose project, the env file and the two mounted helpers are all resolved
+# from here.
+#
+# The consequence is worth stating, because it cost an hour on 2026-10-06. Run
+# this script from a git worktree and you get a MIXED build: bash has already
+# read the shell from the worktree, but everything after this line -- including
+# `-v $PWD/ops/soak/break_tolerance.py` and `--env-file ops/env/dev.env`, which
+# is untracked and exists only here -- comes from the live checkout. The run
+# looks clean and proves only half of what it appears to. A worktree can test
+# the shell in this file; it cannot test the Python helpers, which have to be
+# verified from this directory after a merge.
 cd ~/crypto-scanner || exit 2
 C="docker compose -f ops/compose/docker-compose.dev.yml"
 PSQL="docker exec -i scanner-dev-db-1 psql -U scanner -d scanner"
@@ -307,7 +319,16 @@ tf_seconds() {
     M15) echo 900 ;;
     H1)  echo 3600 ;;
     H4)  echo 14400 ;;
-    *)   echo 3600 ;;
+    D1)  echo 86400 ;;
+    W1)  echo 604800 ;;
+    # No silent default. D1 fell through a `*) echo 3600` for the two runs
+    # after #304 began ingesting it, and check A reported ADAUSDT D1's last
+    # BOS_UP as "3552 candles ago" -- 3552 HOURS, which is 148 D1 candles.
+    # The number was plausible, cited a real timestamp, and was wrong by 24x,
+    # which is worse than no number: it crossed the hundred-candle threshold
+    # and raised a problem that the right arithmetic does not raise (PUMPUSDT
+    # D1's 144 "candles" are 6). 0 means unknown and the caller flags it.
+    *)   echo 0 ;;
   esac
 }
 
@@ -342,7 +363,8 @@ for key in $keys; do
   # The scan above deliberately stays on the shift keys: those exist for every
   # context, while the authoritative key only appears after a pass of the
   # publishing build, so scanning them would silently narrow the universe.
-  auth=$($C exec -T redis redis-cli GET "scanner:engine-state:authoritative:${SHIFT_ALGO}:${symbol}:${timeframe}" 2>/dev/null | tr -d '')
+  auth=$($C exec -T redis redis-cli GET "scanner:engine-state:authoritative:${SHIFT_ALGO}:${symbol}:${timeframe}" 2>/dev/null | tr -d '
+')
   trend=$(echo "${auth:-$raw}" | grep -oE '"trend_state":"[A-Z_]+"' | cut -d'"' -f4)
 
   # Absent is not RANGING: nobody has published one yet. Fall back rather than
@@ -415,6 +437,11 @@ for key in $keys; do
   [ "${labels:-0}" -lt 5 ] && continue
 
   step=$(tf_seconds "$timeframe")
+
+  if [ "$step" -eq 0 ]; then
+    flag "$symbol $timeframe has no period in tf_seconds -- check A cannot count candles here, so this context is UNMEASURED rather than clean"
+    continue
+  fi
 
   if [ "${last_break:-0}" -eq 0 ]; then
     since="never"

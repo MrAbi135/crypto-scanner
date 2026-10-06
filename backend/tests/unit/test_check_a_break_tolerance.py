@@ -99,6 +99,33 @@ def _series(final_close: Decimal | None) -> list:
     return out
 
 
+def test_the_scanned_contexts_track_the_engines_ingested_timeframes() -> None:
+    """The list is scope, not taste -- and check A picks contexts up by itself.
+
+    Check A scans whatever shift-engine state exists in Redis, so the moment
+    the engine ingests a new timeframe, check A starts asking about it. This
+    helper does not, unless somebody remembers. Nobody did: #304 added D1 on
+    2026-10-05 and the next two runs reported `tolerance unknown` on ADAUSDT
+    and PUMPUSDT D1 -- a context the check could not measure, printed as a
+    problem.
+
+    Binding the two lists means the next timeframe fails here instead, loudly,
+    before it can produce a plausible wrong verdict in production.
+    """
+    from scanner.config.processes import IngestSettings
+
+    ingested = {
+        Timeframe.parse(raw.strip())
+        for raw in IngestSettings.model_fields["ingest_timeframes"].default.split(",")
+        if raw.strip()
+    }
+
+    assert set(_module().CONTEXTS) == ingested, (
+        "break_tolerance.py's CONTEXTS and the engine's ingest_timeframes have "
+        "diverged; check A will report 'tolerance unknown' for the difference"
+    )
+
+
 def test_the_series_is_the_one_the_assertions_assume() -> None:
     """Assert the premise before the claim -- the BPR fixture lesson."""
     series = _series(Decimal("103.85"))
