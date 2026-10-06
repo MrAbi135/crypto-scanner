@@ -23,7 +23,9 @@ What it deliberately does NOT implement, so a reader knows what is missing:
 
 What it does implement, because skipping these would make it lie:
 
-* Only signals published in the last five minutes (see PUBLISH_WINDOW).
+* Only signals the ledger has not already decided, scanned over a bounded
+  `LOOKBACK`. Freshness at dispatch is a TTL test, not a window test -- see
+  `LOOKBACK` for the measurement showing why a window could never be one.
 * Only grades S and A. §10.1 puts grade B on the dashboard, never on a push.
 * Only tiers 1–3, which is §10.1's cap. Two symbols in the scanned set are
   INELIGIBLE (LISTAUSDT, LITEBUSDT — they are there to prove G1b's
@@ -66,17 +68,57 @@ from pathlib import Path
 
 # §15.3(2) checks freshness at the *publication* moment; §10.2 wants it at the
 # *dispatch* moment. Those are different instants and nothing in the row
-# reconciles them, so the window is how we keep them close: a signal dispatched
-# five minutes after publication was published on a feed that was fresh five
-# minutes ago, which is the most this design can honestly claim.
+# reconciles them. This file used to reconcile them with a five-minute window
+# on `published_at`, and that window could never be satisfied.
 #
-# Five, not two. `published_at` is the candle CLOSE time (confluence_replay.py
-# writes `published_at=event_at`), and the row appears afterwards. Measured over
-# three hours of live engine logs, close -> row written was at worst 68.7s on
-# H1 and 58.2s on H4 — the only two timeframes that publish. With a one-minute
-# cron the worst case age at first sight is 68.7 + 60 = ~129s, so a 120s window
-# would drop signals silently. 300s leaves ~2.5x margin.
-PUBLISH_WINDOW = timedelta(minutes=5)
+# `published_at` is the candle's **OPEN** time. `confluence_replay.py:617`
+# passes `series[-1].open_time` as `event_at`, line 1330 writes
+# `published_at=event_at`, and line 1353 names the same value
+# `at_candle_open_time`. The comment that stood here asserted it was the CLOSE
+# time and sized 300s against a measured ~69s write lag. Both halves were
+# honest; the premise joining them was wrong, so the number came out
+# unreachable -- a signal cannot exist until its candle has closed, so the
+# moment it first exists its `published_at` is already one whole period old.
+#
+# Measured, 2026-10-05, not inferred. SUIUSDT M5: `published_at` 04:20:00Z, and
+# the pass carrying `open_time 04:20:00` completed at 04:25:17.1Z -- an age at
+# first sight of **317s** against a 300s window. Seventeen seconds too old, so
+# the row was never once visible to this file, which logged nothing all day
+# about a signal that sat in the table the whole time. On M15/H1/H4 the
+# shortfall is 15, 60 and 240 minutes, so no timeframe could ever have pushed.
+# The push path has therefore never run in production: the last grade S or A
+# signal was 2026-09-07, which is why four weeks of silence read as a quiet
+# market rather than as a broken notifier.
+#
+# The window is now only a **scan bound**: wide enough that nothing can fall
+# outside it (24h clears H4's 4h period six times over and survives a cron
+# outage of nearly a day), narrow enough to keep the query and the cold start
+# bounded. What has already been handled is the ledger's question -- which is
+# the question that was always really being asked -- and whether a signal is
+# still worth sending is `dispatch_lifetime_seconds` below.
+LOOKBACK = timedelta(hours=24)
+
+# Seconds per candle on every timeframe the engine can emit (SLS §0.2; M1 is
+# deliberately absent there, so it is absent here). A timeframe missing from
+# this map is a code defect rather than something to guess at, and
+# `dispatch_lifetime_seconds` raises instead of inventing a lifetime for it.
+TIMEFRAME_SECONDS = {
+    "M5": 300,
+    "M15": 900,
+    "H1": 3_600,
+    "H4": 14_400,
+    "D1": 86_400,
+    "W1": 604_800,
+}
+
+# §10.2 wants freshness at dispatch, and a 24-hour scan bound would otherwise
+# let a cron outage push signals whose setups expired hours ago. A signal's own
+# `ttl_candles` is the doctrine's measure of how long it stays relevant (§12),
+# so dispatch uses exactly that and invents nothing. The fallback exists only
+# so that a null or zero cannot silently mean "immortal"; two candles is the
+# shortest span that cannot suppress a signal on first sight, which is already
+# about one period old by the paragraph above.
+TTL_FALLBACK_CANDLES = 2
 
 # §10.1: High is grade S, Medium is grade A, and "Low | Grade B | No push;
 # dashboard feed + optional digest".
@@ -253,7 +295,9 @@ def published_since(cutoff: datetime) -> list[dict[str, str]]:
                s.invalidation_level,
                s.published_at,
                coalesce(y.tier, 'UNKNOWN'),
-               coalesce((s.payload::jsonb -> 'risk' -> 'condition_tags')::text, '[]')
+               coalesce((s.payload::jsonb -> 'risk' -> 'condition_tags')::text, '[]'),
+               s.ttl_candles,
+               greatest(0, round(extract(epoch from now() - s.published_at)))::bigint
           from detection.signals s
           left join market.symbols y on y.exchange_symbol = s.symbol
          where s.published_at >= timestamptz '{cutoff.isoformat()}'
@@ -275,6 +319,8 @@ def published_since(cutoff: datetime) -> list[dict[str, str]]:
         "published_at",
         "tier",
         "condition_tags",
+        "ttl_candles",
+        "age_seconds",
     )
 
     return [dict(zip(fields, row)) for row in rows]
@@ -339,6 +385,40 @@ def assert_tier_readable() -> None:
 
     if not rows:
         raise NotifierSetupError("market.symbols returned nothing; refusing to run")
+
+
+# --------------------------------------------------------------------------
+# Dispatch freshness. `LOOKBACK` above is a scan bound and answers nothing
+# about relevance; this does.
+# --------------------------------------------------------------------------
+
+
+def dispatch_lifetime_seconds(row: dict[str, str]) -> int:
+    """How long after its candle opened a signal is still worth sending.
+
+    `ttl_candles` x the timeframe's period, which is §12's own measure and not
+    a number invented here.
+
+    It raises rather than guessing when the timeframe is not one the engine
+    emits. A new timeframe string reaching this file means the scanned set and
+    `TIMEFRAME_SECONDS` have diverged, and a guess in either direction is
+    silently wrong forever: too short suppresses every signal on that
+    timeframe, too long pushes expired ones. The cron log is where that belongs.
+    """
+    period = TIMEFRAME_SECONDS.get(row["timeframe"])
+
+    if period is None:
+        raise NotifierContractError(
+            f"timeframe {row['timeframe']!r} is not in TIMEFRAME_SECONDS; "
+            "refusing to guess a dispatch lifetime"
+        )
+
+    try:
+        candles = int(row["ttl_candles"])
+    except (TypeError, ValueError):
+        candles = 0
+
+    return (candles if candles > 0 else TTL_FALLBACK_CANDLES) * period
 
 
 # --------------------------------------------------------------------------
@@ -532,7 +612,7 @@ def main() -> int:
 
     token, chat = ("", "") if dry_run else load_env()
 
-    fresh = published_since(now - PUBLISH_WINDOW)
+    fresh = published_since(now - LOOKBACK)
     decided, pushed = load_ledger()
 
     # Cold start. Without this, a clock or timezone mistake on the first run
@@ -569,6 +649,21 @@ def main() -> int:
         if row["tier"] not in PUSH_TIERS:
             log(f"suppressed tier={row['tier']} {row['symbol']} {row['signal_id'][:12]} (§10.1)")
             ledger_append(now, "suppressed-tier", row["signal_id"])
+            continue
+
+        # §10.2's freshness, now that `LOOKBACK` is only a scan bound. A signal
+        # first seen on time is ~1 period old and nowhere near its TTL; this
+        # only bites after an outage, which is exactly when a burst of expired
+        # pushes would otherwise arrive.
+        age = int(row["age_seconds"] or 0)
+        lifetime = dispatch_lifetime_seconds(row)
+
+        if age > lifetime:
+            log(
+                f"suppressed stale age={age}s > ttl={lifetime}s "
+                f"{row['symbol']} {row['timeframe']} {row['signal_id'][:12]} (§10.2)"
+            )
+            ledger_append(now, "suppressed-stale", row["signal_id"])
             continue
 
         pending.append(("signal", row["signal_id"], format_signal(row)))

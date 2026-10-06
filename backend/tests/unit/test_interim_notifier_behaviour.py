@@ -70,11 +70,27 @@ def _offline(notifier, monkeypatch, rows: list[dict[str, str]]) -> None:
     )
 
 
-def _signal(signal_id: str, grade: str = "A", tier: str = "T1") -> dict[str, str]:
+def _signal(
+    signal_id: str,
+    grade: str = "A",
+    tier: str = "T1",
+    timeframe: str = "H1",
+    ttl_candles: str = "12",
+    age_seconds: str = "3660",
+) -> dict[str, str]:
+    """A row as `published_since` returns it, defaulted to a signal at FIRST SIGHT.
+
+    `age_seconds` defaults to 3660 -- one H1 period plus a minute -- because
+    that is the youngest such a row can ever be. `published_at` is the candle's
+    OPEN time, so a signal does not exist until it is already a full period
+    old. Defaulting this to something smaller would make every test here run
+    against a row production cannot produce, which is how the five-minute
+    window survived review.
+    """
     return {
         "signal_id": signal_id,
         "symbol": "BTCUSDT",
-        "timeframe": "H1",
+        "timeframe": timeframe,
         "direction": "UP",
         "archetype": "A3",
         "grade": grade,
@@ -85,6 +101,8 @@ def _signal(signal_id: str, grade: str = "A", tier: str = "T1") -> dict[str, str
         "published_at": NOW.isoformat(),
         "tier": tier,
         "condition_tags": "[]",
+        "ttl_candles": ttl_candles,
+        "age_seconds": age_seconds,
     }
 
 
@@ -200,15 +218,164 @@ def test_the_daily_cap_counts_deliveries_and_nothing_else(notifier) -> None:
     assert notifier.ledger_count_today(NOW) == 2
 
 
-def test_the_publication_window_is_the_measured_five_minutes(notifier) -> None:
-    """Two minutes was the first proposal and would have dropped signals.
+def test_the_scan_bound_clears_a_whole_candle_on_every_signal_timeframe(notifier) -> None:
+    """The structural reason the old five-minute window could never fire.
 
-    `published_at` is the candle close time, and close-to-row was at worst
-    68.7s on H1 over three hours of live logs. With a one-minute cron the worst
-    case age at first sight is ~129s.
+    `published_at` is the candle's OPEN time, so a signal is already one full
+    period old the first instant it exists. Any bound shorter than a period is
+    therefore unreachable on that timeframe -- which is what 300s was against
+    M5's 300s, by seventeen seconds, measured live on 2026-10-05.
     """
-    assert timedelta(minutes=5) == notifier.PUBLISH_WINDOW
-    assert notifier.PUBLISH_WINDOW.total_seconds() > 129
+    bound = notifier.LOOKBACK.total_seconds()
+
+    for timeframe in ("M5", "M15", "H1", "H4"):
+        period = notifier.TIMEFRAME_SECONDS[timeframe]
+
+        assert bound > period, (
+            f"a signal on {timeframe} is {period}s old at first sight and the "
+            f"scan bound is {bound}s, so it can never be seen"
+        )
+
+    assert bound >= 2 * notifier.TIMEFRAME_SECONDS["H4"], (
+        "the bound must leave room for a late pass on the slowest signal "
+        "timeframe, not merely equal one period"
+    )
+
+
+def test_the_measured_317_second_signal_is_dispatched(notifier, monkeypatch) -> None:
+    """The exact row the old window dropped, as a regression test.
+
+    SUIUSDT M5, `published_at` 04:20:00Z, written by a pass that finished at
+    04:25:17.1Z: an age of 317s against a 300s window. It sat in the table all
+    day and this file never logged a word about it.
+    """
+    _offline(notifier, monkeypatch, [])
+    notifier.main()
+
+    _offline(
+        notifier,
+        monkeypatch,
+        [_signal("SIG_317", timeframe="M5", age_seconds="317", ttl_candles="12")],
+    )
+    notifier.main()
+
+    log = notifier.LOG.read_text(encoding="utf-8")
+
+    assert "DRY RUN would send signal SIG_317" in log, (
+        "the 317-second signal was dropped again; log was: " + log
+    )
+
+
+def test_a_signal_past_its_own_ttl_is_suppressed_and_said_so(notifier, monkeypatch) -> None:
+    """§10.2 at dispatch. A 24h bound must not push what expired hours ago.
+
+    §10.1's "honest suppression, never silent" is why this asserts the log line
+    and not merely the absence of a send.
+    """
+    _offline(notifier, monkeypatch, [])
+    notifier.main()
+
+    # H1, ttl 2 candles = 7200s of relevance, seen at 20000s.
+    _offline(
+        notifier,
+        monkeypatch,
+        [_signal("SIG_STALE", ttl_candles="2", age_seconds="20000")],
+    )
+    notifier.main()
+
+    log = notifier.LOG.read_text(encoding="utf-8")
+
+    assert "DRY RUN would send signal SIG_STALE" not in log, "an expired signal was pushed"
+    assert "suppressed stale" in log, "it was dropped without saying why: " + log
+    assert "ttl=7200s" in log, "the log must show the lifetime it was measured against"
+
+
+def test_an_absent_ttl_falls_back_to_two_candles_not_to_forever(notifier) -> None:
+    """A null or zero `ttl_candles` must not read as immortal."""
+    period = notifier.TIMEFRAME_SECONDS["H1"]
+
+    for absent in ("0", "", "None"):
+        row = _signal("SIG_X", ttl_candles=absent)
+
+        assert notifier.dispatch_lifetime_seconds(row) == 2 * period, (
+            f"ttl_candles={absent!r} did not fall back to two candles"
+        )
+
+    assert notifier.dispatch_lifetime_seconds(_signal("SIG_X", ttl_candles="12")) == 12 * period
+
+
+def _select_columns(sql: str) -> list[str]:
+    """The top-level expressions of the SELECT list, split on depth-0 commas."""
+    body = sql.split("select", 1)[1].split("from detection.signals", 1)[0]
+
+    parts: list[str] = []
+    depth = 0
+    current = ""
+
+    for char in body:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+
+        if char == "," and depth == 0:
+            parts.append(current.strip())
+            current = ""
+        else:
+            current += char
+
+    if current.strip():
+        parts.append(current.strip())
+
+    return parts
+
+
+def test_every_selected_column_is_given_a_name(notifier, monkeypatch) -> None:
+    """`dict(zip(...))` truncates in silence, so the two lists must be pinned together.
+
+    Adding a column to the SELECT without adding its name here does not raise:
+    `zip` stops at the shorter list, so the new column is simply discarded and
+    every field after it keeps working. That is invisible in every other test,
+    because they all bypass this query entirely.
+    """
+    captured: dict[str, str] = {}
+
+    def fake_psql(sql: str) -> list[tuple[str, ...]]:
+        captured["sql"] = sql
+
+        return []
+
+    monkeypatch.setattr(notifier, "_psql", fake_psql)
+
+    notifier.published_since(NOW)
+
+    columns = _select_columns(captured["sql"])
+
+    assert len(columns) == 15, f"the SELECT list changed shape: {columns}"
+    assert len(columns) == len(_signal("SIG_X")), (
+        f"{len(columns)} columns selected but the row fixture has "
+        f"{len(_signal('SIG_X'))} keys -- zip would drop the difference in silence"
+    )
+    assert "s.ttl_candles" in columns, "the TTL test has nothing to read"
+    assert any("epoch" in column for column in columns), (
+        "the age is computed by postgres on purpose: one clock for both sides "
+        "of the subtraction, and no timestamp parsing in this file"
+    )
+
+
+def test_an_unknown_timeframe_raises_instead_of_guessing_a_lifetime(notifier) -> None:
+    """Divergence between the scanned set and the map is a defect, not a default.
+
+    Guessing is silently wrong forever in whichever direction it guesses: too
+    short suppresses every signal on that timeframe, too long pushes expired
+    ones. Raising puts it in the cron log on the first occurrence.
+    """
+    with pytest.raises(notifier.NotifierContractError):
+        notifier.dispatch_lifetime_seconds(_signal("SIG_X", timeframe="M3"))
+
+    assert set(notifier.TIMEFRAME_SECONDS) == {"M5", "M15", "H1", "H4", "D1", "W1"}, (
+        "SLS §0.2's scanned set changed; this map and the engine's config have diverged"
+    )
 
 
 def test_the_contract_guard_refuses_the_rankings_source(notifier) -> None:
