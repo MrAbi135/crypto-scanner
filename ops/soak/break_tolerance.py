@@ -69,9 +69,23 @@ WINDOW = 500
 
 K_EXTERNAL = swing_window(SwingStrength.EXTERNAL)
 
-# The same four check A walks. Unlike the leg check this is one ATR pass per
-# context, so there is no reason to narrow it.
-CONTEXTS = (Timeframe.M5, Timeframe.M15, Timeframe.H1, Timeframe.H4)
+# The same contexts check A walks, and this list must track the engine's
+# `ingest_timeframes` rather than being written once. D1 was absent for the two
+# runs after #304 started ingesting it, and check A -- which scans whatever
+# shift-engine state exists, so it picked D1 up by itself -- reported
+# "tolerance unknown" on ADAUSDT and PUMPUSDT D1. A context this file cannot
+# measure is printed as a problem, which is the same fault in a new place: a
+# check whose verdict does not come from the thing it names.
+#
+# Unlike the leg check this is one ATR pass per context, so there is no reason
+# to narrow it.
+CONTEXTS = (
+    Timeframe.M5,
+    Timeframe.M15,
+    Timeframe.H1,
+    Timeframe.H4,
+    Timeframe.D1,
+)
 
 # Check A reads the shift engine's trend, and this must read the same one or
 # the two would disagree about which gate is open. Whether that is the right
