@@ -68,11 +68,8 @@ def test_migration_025_installs_what_the_models_declare() -> None:
     """The database is built by the migration, not the model. A model that
     allows a state the migration's constraint refuses passes every unit test
     and fails on the first insert."""
-    migration = _load(
-        BACKEND
-        / "src/scanner/infrastructure/persistence/alembic/versions/025_closed_flat_and_realised_r.py",
-        "migration_025",
-    )
+    versions = BACKEND / "src/scanner/infrastructure/persistence/alembic/versions"
+    migration = _load(versions / "025_closed_flat_and_realised_r.py", "migration_025")
 
     assert _quoted(migration._NEW_STATES) == ALL_STATES
     assert _quoted(migration._NEW_OUTCOMES) == OUTCOME_STATES
