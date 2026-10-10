@@ -37,7 +37,14 @@ const GROUP = {
   group_by: 'archetype',
   key: 'A3',
   algo_version: 's8-confluence-v22',
-  counts: { resolved: 1, success: 1, failed: 0, expired: 0, invalidated_early: 0 },
+  counts: {
+    resolved: 1,
+    success: 1,
+    failed: 0,
+    expired: 0,
+    invalidated_early: 0,
+    closed_flat: 0,
+  },
   hit_rate: {
     rated: 1,
     rate_pct: '100',
@@ -233,5 +240,61 @@ describe('HistoryScreen', () => {
     const violations = await axeViolations(container)
 
     expect(violations, describeViolations(violations)).toEqual([])
+  })
+})
+
+describe('HistoryScreen, SLS v1.0.15', () => {
+  it('shows what a laddered signal booked beside its outcome', async () => {
+    stub({
+      rows: [
+        { ...RESOLVED, outcome: { ...RESOLVED.outcome, outcome: 'CLOSED_FLAT', realised_r: '0' } },
+      ],
+    })
+
+    render(<HistoryScreen />)
+
+    expect((await screen.findByTestId('realised-sig-1')).textContent).toBe(' (0R)')
+  })
+
+  it('shows no realised R for a pool-exit signal, which has none', async () => {
+    render(<HistoryScreen />)
+
+    await screen.findByTestId('archived-sig-1')
+
+    expect(screen.queryByTestId('realised-sig-1')).toBeNull()
+  })
+
+  it('reports flat closes beside the rest of the counts', async () => {
+    // Reported, never rated (§12.4): they appear here and stay out of the rate.
+    stub({
+      groups: [{ ...GROUP, counts: { ...GROUP.counts, resolved: 3, closed_flat: 2 } }],
+    })
+
+    render(<HistoryScreen />)
+
+    expect((await screen.findByTestId('stats-A3')).textContent).toContain('2 closed flat')
+  })
+
+  it('says nothing about flat closes in a group that has none', async () => {
+    render(<HistoryScreen />)
+
+    expect((await screen.findByTestId('stats-A3')).textContent).not.toContain('closed flat')
+  })
+
+  it('can filter to every outcome the engine records', async () => {
+    render(<HistoryScreen />)
+
+    await screen.findByTestId('history-table')
+
+    for (const outcome of [
+      'SUCCESS',
+      'FAILED',
+      'CLOSED_FLAT',
+      'EXPIRED_UNTOUCHED',
+      'EXPIRED_ACTIVE',
+      'INVALIDATED_EARLY',
+    ]) {
+      expect(screen.getByTestId(`outcome-${outcome}`)).toBeDefined()
+    }
   })
 })

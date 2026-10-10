@@ -482,6 +482,17 @@ def _elapsed(signal: SignalRecord, at: datetime, timeframe: Timeframe) -> int:
     return int((at - signal.published_at) // timeframe.duration)
 
 
+def levels_from_record(signal: SignalRecord) -> SignalLevels:
+    """A sealed signal's §15.2 levels -- the one reconstruction, shared.
+
+    The monitor reads them to watch the signal; the API reads them to show the
+    ladder's rung prices. Both go through here so there is a single way to
+    rebuild a signal's levels from its record -- a second one in the API is
+    exactly how the three R computations of part 1 came to exist.
+    """
+    return _levels_of(signal)
+
+
 def _levels_of(signal: SignalRecord) -> SignalLevels:
     """The levels this signal was published with, from its own columns.
 

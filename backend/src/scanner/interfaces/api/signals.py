@@ -65,6 +65,7 @@ from scanner.interfaces.api.query import (
     parse_sort,
 )
 from scanner.interfaces.api.security import CurrentUser, require_user
+from scanner.interfaces.api.targets import targets_view
 
 router = APIRouter(prefix="/api/v1/signals", tags=["signals"])
 
@@ -116,7 +117,7 @@ def _summary(signal: SignalRecord, state: str | None) -> dict[str, Any]:
             "distal": str(signal.entry_distal),
         },
         "invalidation": str(signal.invalidation_level),
-        "targets": json.loads(signal.target_bands),
+        "targets": targets_view(signal),
         "published_at": signal.published_at.isoformat(),
         "ttl_candles": signal.ttl_candles,
         "lifecycle_state": state,

@@ -86,6 +86,26 @@ export interface TargetBand {
   readonly strength: string
 }
 
+/** One priced rung of SLS v1.0.15's target ladder. Priced by the backend's
+ * domain, never here -- a second R calculation in the browser is exactly the
+ * drift that change existed to remove. */
+export interface LadderRung {
+  readonly n: number
+  readonly r: string
+  readonly price: string
+}
+
+/** SLS v1.0.15 §15.2: on a laddered signal the exit is this ladder and the
+ * pool target is evidence only. The rungs listed are the first few; the ladder
+ * has no last rung. */
+export interface TargetLadder {
+  readonly start_r: string
+  readonly step_r: string
+  readonly unbounded: boolean
+  readonly rungs: readonly LadderRung[]
+  readonly trailing: string
+}
+
 /** One row of §18.4's live feed — the `summary` projection, ranked. */
 export interface FeedRow {
   readonly rank: number
@@ -105,6 +125,8 @@ export interface FeedRow {
   readonly targets: {
     readonly primary: TargetBand | null
     readonly secondary: TargetBand | null
+    /** Present only when the exit is a ladder (SLS v1.0.15, M5). */
+    readonly ladder?: TargetLadder
   }
   readonly published_at: string
   readonly ttl_candles: number
@@ -206,6 +228,8 @@ export interface SignalOutcome {
   readonly elapsed_candles: number
   readonly mfe_r: string
   readonly mae_r: string
+  /** SLS v1.0.15: what a laddered signal booked; null for a pool exit. */
+  readonly realised_r?: string | null
 }
 
 /** §18.8's detail row (`projection=full`), which is the feed row plus the seal. */
@@ -222,6 +246,8 @@ export interface SignalDetail {
   readonly targets: {
     readonly primary: TargetBand | null
     readonly secondary: TargetBand | null
+    /** Present only when the exit is a ladder (SLS v1.0.15, M5). */
+    readonly ladder?: TargetLadder
   }
   readonly published_at: string
   readonly ttl_candles: number
@@ -282,6 +308,8 @@ export interface ArchivedSignal {
     readonly elapsed_candles: number | null
     readonly mfe_r: string | null
     readonly mae_r: string | null
+    /** SLS v1.0.15: what a laddered signal booked; null for a pool exit. */
+    readonly realised_r?: string | null
     /** PRD FC-10.1: in the archive, out of the statistics. */
     readonly excluded_from_stats: boolean
   }
@@ -298,6 +326,8 @@ export interface StatsGroup {
     readonly failed: number
     readonly expired: number
     readonly invalidated_early: number
+    /** SLS v1.0.15: reached TP1, stopped at the entry. Reported, never rated. */
+    readonly closed_flat: number
   }
   readonly hit_rate: {
     readonly rated: number

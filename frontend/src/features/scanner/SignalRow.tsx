@@ -67,8 +67,16 @@ export function SignalRow({ row, onOpenChart, onOpenSignal }: SignalRowProps) {
             <dd>{row.invalidation}</dd>
           </div>
           <div>
-            <dt>target</dt>
-            <dd>{row.targets.primary === null ? '—' : row.targets.primary.high}</dd>
+            {/* SLS v1.0.15: a laddered signal exits on its rungs, so the row
+                shows TP1 -- the pool is evidence there, not the exit. */}
+            <dt>{row.targets.ladder !== undefined ? 'TP1' : 'target'}</dt>
+            <dd data-testid="signal-row-target">
+              {row.targets.ladder !== undefined
+                ? (row.targets.ladder.rungs[0]?.price ?? '—')
+                : row.targets.primary === null
+                  ? '—'
+                  : row.targets.primary.high}
+            </dd>
           </div>
         </dl>
       </td>
