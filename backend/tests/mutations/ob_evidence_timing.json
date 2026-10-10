@@ -1,0 +1,68 @@
+{
+  "description": "s6-ob-v9: an order block, breaker, mitigation block and failure swing are decided with the evidence recorded by the deciding candle. Each mutation puts back one way a whole-window replay read evidence a live pass never had, or decided a displacement before its deciding candle closed. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/ob_evidence_timing.json",
+  "pytest": [
+    "tests/unit/application/detection/test_ob_evidence_timing.py",
+    "tests/unit/application/detection/test_ict_replay_coverage.py"
+  ],
+  "mutations": [
+    {
+      "name": "a swing record counts from its pivot's own time (v8)",
+      "file": "backend/src/scanner/application/detection/ict_ob_replay.py",
+      "old": "    return tuple(swing for swing in swings if swing.at + recorded_after <= decided_at)",
+      "new": "    return tuple(swings)",
+      "expect_failing": [
+        "test_a_pivot_not_yet_confirmed_at_the_decision_is_not_evidence",
+        "test_the_same_pivot_counts_once_it_is_confirmed",
+        "test_every_swing_record_exists_from_its_fifth_right_hand_candle",
+        "test_the_ob_grade_ignores_a_pivot_recorded_after_the_ob_was_decided"
+      ]
+    },
+    {
+      "name": "an internal record counts from k = 2, the swing definition rather than the record timing",
+      "file": "backend/src/scanner/application/detection/ict_ob_replay.py",
+      "old": "    recorded_after = timeframe.duration * swing_window(SwingStrength.EXTERNAL)",
+      "new": "    recorded_after = timeframe.duration * swing_window(SwingStrength.INTERNAL)",
+      "expect_failing": [
+        "test_a_pivot_not_yet_confirmed_at_the_decision_is_not_evidence",
+        "test_the_same_pivot_counts_once_it_is_confirmed",
+        "test_every_swing_record_exists_from_its_fifth_right_hand_candle"
+      ]
+    },
+    {
+      "name": "an OB is decided on the displacement candle itself, not d+1",
+      "file": "backend/src/scanner/application/detection/ict_ob_replay.py",
+      "old": "    return displacement_candle.open_time + displacement_candle.timeframe.duration",
+      "new": "    return displacement_candle.open_time",
+      "expect_failing": [
+        "test_an_ob_is_decided_on_the_candle_after_its_displacement"
+      ]
+    },
+    {
+      "name": "an MSS confirmed after the OB was decided still grades it OB_A",
+      "file": "backend/src/scanner/application/detection/ict_ob_replay.py",
+      "old": "        start <= at <= end and (decided_at is None or end <= decided_at)",
+      "new": "        start <= at <= end",
+      "expect_failing": [
+        "test_an_mss_confirmed_after_the_ob_was_decided_does_not_grade_it"
+      ]
+    },
+    {
+      "name": "the OB grade reads every swing, recorded or not",
+      "file": "backend/src/scanner/application/detection/ict_ob_replay.py",
+      "old": "            _known_by(swings, decided_at, candles[0].timeframe),",
+      "new": "            swings,",
+      "expect_failing": [
+        "test_the_ob_grade_ignores_a_pivot_recorded_after_the_ob_was_decided"
+      ]
+    },
+    {
+      "name": "a displacement on the newest candle is decided before its FVG candle closes (v8)",
+      "file": "backend/src/scanner/application/detection/ict_ob_replay.py",
+      "old": "            if displacement.candle_index + 1 >= len(candles):\n                continue\n",
+      "new": "",
+      "expect_failing": [
+        "test_a_displacement_on_the_newest_candle_is_not_decided_yet"
+      ]
+    }
+  ]
+}
