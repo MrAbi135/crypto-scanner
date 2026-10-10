@@ -63,14 +63,6 @@ RISK_STOP = "risk_stop"
 # which the untouched golden suite is the evidence for.
 RISK_STOP_PCT: dict[Timeframe, Decimal] = {}
 
-# SLS v1.0.15 §15.2: the timeframes whose exit is an unbounded R-ladder
-# (`P.risk.tp_ladder_start`, `P.risk.tp_ladder_step`) instead of the nearest
-# liquidity pool. Empty for the same reason, and it must be populated in the
-# same change as `RISK_STOP_PCT` -- a ladder behind a zone stop was measured
-# worse than no ladder at all. A test holds the two mappings to the same keys,
-# so one cannot be switched on without the other.
-TP_LADDER: dict[Timeframe, TargetLadder] = {}
-
 
 @dataclass(frozen=True, slots=True)
 class EntryZone:
@@ -157,6 +149,22 @@ class TargetLadder:
             raise ValueError(f"rungs count from 1, got {n}")
 
         return self.start_r + self.step_r * Decimal(n - 1)
+
+
+# SLS v1.0.15 §15.2: the timeframes whose exit is an unbounded R-ladder
+# (`P.risk.tp_ladder_start`, `P.risk.tp_ladder_step`) instead of the nearest
+# liquidity pool. Empty for the same reason as `RISK_STOP_PCT`, and it must be
+# populated in the same change -- a ladder behind a zone stop was measured
+# worse than no ladder at all. A test holds the two mappings to the same keys,
+# so one cannot be switched on without the other.
+#
+# Defined BELOW `TargetLadder`, not beside `RISK_STOP_PCT`, and that is not
+# tidiness. The first draft sat up there, where an empty dict imports fine --
+# but the change that populates it writes `TargetLadder(...)` as a value, and
+# at that position the class does not exist yet, so the module would have
+# failed to import at the very moment M5 was switched on. The part-2 mutation
+# battery is what found it, by populating the mapping in place.
+TP_LADDER: dict[Timeframe, TargetLadder] = {}
 
 
 @dataclass(frozen=True, slots=True)
