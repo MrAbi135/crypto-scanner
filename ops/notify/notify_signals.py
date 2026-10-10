@@ -59,6 +59,7 @@ import sys
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 # --------------------------------------------------------------------------
@@ -302,7 +303,9 @@ def published_since(cutoff: datetime) -> list[dict[str, str]]:
                coalesce(y.tier, 'UNKNOWN'),
                coalesce((s.payload::jsonb -> 'risk' -> 'condition_tags')::text, '[]'),
                s.ttl_candles,
-               greatest(0, round(extract(epoch from now() - s.published_at)))::bigint
+               greatest(0, round(extract(epoch from now() - s.published_at)))::bigint,
+               s.target_bands,
+               coalesce(s.payload::jsonb -> 'invalidation' ->> 'rule', '')
           from detection.signals s
           left join market.symbols y on y.exchange_symbol = s.symbol
          where s.published_at >= timestamptz '{cutoff.isoformat()}'
@@ -326,6 +329,8 @@ def published_since(cutoff: datetime) -> list[dict[str, str]]:
         "condition_tags",
         "ttl_candles",
         "age_seconds",
+        "target_bands",
+        "invalidation_rule",
     )
 
     return [dict(zip(fields, row)) for row in rows]
@@ -354,7 +359,8 @@ def terminal_transitions(signal_ids: list[str]) -> list[dict[str, str]]:
         select t.transition_id,
                t.signal_id,
                t.to_state,
-               t.at_candle_open_time
+               t.at_candle_open_time,
+               t.trigger_evidence
           from detection.signal_transitions t
          where t.signal_id in ({quoted})
            and t.to_state in ({states})
@@ -363,7 +369,7 @@ def terminal_transitions(signal_ids: list[str]) -> list[dict[str, str]]:
         """
     )
 
-    fields = ("transition_id", "signal_id", "to_state", "at")
+    fields = ("transition_id", "signal_id", "to_state", "at", "trigger_evidence")
 
     return [dict(zip(fields, row)) for row in rows]
 
@@ -587,23 +593,119 @@ def send(token: str, chat: str, text: str) -> None:
         raise NotifierSetupError(f"telegram unreachable: {exc.reason}") from None
 
 
+# SLS v1.0.15 §15.2: the rule name a risk stop is sealed under. Such a signal's
+# R is measured from the entry's PROXIMAL edge; every other rule measures it
+# from the mid (`SignalLevels.anchor` in the domain).
+RISK_STOP_RULE = "risk_stop"
+
+# The owner's ruling named three -- "TP1 2R, TP2 3R, TP3 4R" -- and no cap
+# after them; the API prices the same three (`interfaces/api/targets.py`).
+RUNGS_SHOWN = 3
+
+
+def _json_object(text: str | None) -> dict:
+    """A sealed JSON column as a dict, or {} if it is absent or not an object."""
+    try:
+        value = json.loads(text or "")
+    except ValueError:
+        return {}
+
+    return value if isinstance(value, dict) else {}
+
+
+def ladder_of(row: dict[str, str]) -> dict | None:
+    """The signal's sealed TP ladder, or None for a pool-exit signal."""
+    ladder = _json_object(row.get("target_bands")).get("ladder")
+
+    return ladder if isinstance(ladder, dict) and ladder else None
+
+
+def rung_prices(row: dict[str, str], ladder: dict) -> list[tuple[int, Decimal, Decimal]]:
+    """(n, R-multiple, price) for the first rungs, from the sealed row.
+
+    This file is standard-library only and cannot import the domain, so the
+    arithmetic is restated here -- the one copy outside the domain, held to
+    `SignalLevels.rung_price` on longs, shorts and both anchors by
+    `test_the_notifier_prices_the_rungs_as_the_domain_does`.
+    """
+    proximal = Decimal(row["entry_proximal"])
+    distal = Decimal(row["entry_distal"])
+    invalidation = Decimal(row["invalidation"])
+
+    if row.get("invalidation_rule") == RISK_STOP_RULE:
+        anchor = proximal
+    else:
+        anchor = (proximal + distal) / 2
+
+    unit = abs(anchor - invalidation)
+    sign = 1 if row["direction"] == "UP" else -1
+    start = Decimal(str(ladder["start_r"]))
+    step = Decimal(str(ladder["step_r"]))
+
+    rungs = []
+
+    for n in range(1, RUNGS_SHOWN + 1):
+        r = start + step * (n - 1)
+        rungs.append((n, r, anchor + sign * r * unit))
+
+    return rungs
+
+
+def _plain(value: Decimal) -> str:
+    """A number without numeric(38,18)'s trailing zeros and never as an exponent."""
+    return format(value.normalize(), "f")
+
+
 def format_signal(row: dict[str, str]) -> str:
     tags = ""
 
     if "wash_risk" in row["condition_tags"]:
         tags = "\n⚠ wash_risk"
 
+    ladder = ladder_of(row)
+
+    if ladder is None:
+        exit_lines = f"invalidation {row['invalidation']} (close beyond, not touch)\n"
+    else:
+        # SLS v1.0.15 §12.3: on a laddered signal the stop is a TOUCH, and it
+        # trails. "close beyond, not touch" -- the pool-exit rule -- would tell
+        # the trader the opposite of what the engine does.
+        try:
+            rungs = " · ".join(
+                f"TP{n} {_plain(price)} ({_plain(r)}R)" for n, r, price in rung_prices(row, ladder)
+            )
+        except (KeyError, InvalidOperation):
+            rungs = "TP prices unavailable -- see the dashboard"
+
+        exit_lines = (
+            f"stop {row['invalidation']} (touch, not close)\n"
+            f"{rungs} · no cap\n"
+            "stop moves to entry at TP1, then trails one TP behind\n"
+        )
+
     return (
         f"{row['symbol']} {row['timeframe']} {row['direction']}\n"
         f"{row['archetype']} · grade {row['grade']} · confidence {row['confidence']}\n"
         f"entry {row['entry_proximal']} → {row['entry_distal']}\n"
-        f"invalidation {row['invalidation']} (close beyond, not touch)\n"
+        f"{exit_lines}"
         f"published {row['published_at']}{tags}"
     )
 
 
 def format_transition(row: dict[str, str]) -> str:
-    return f"{row['signal_id'][:12]}… → {row['to_state']}\nat {row['at']}"
+    message = f"{row['signal_id'][:12]}… → {row['to_state']}\nat {row['at']}"
+
+    # SLS v1.0.15: a laddered signal books what its trailing stop locked in,
+    # so SUCCESS alone does not say whether that was 2R or 6R.
+    realised = _json_object(row.get("trigger_evidence")).get("realised_r")
+
+    if realised not in (None, ""):
+        try:
+            message += f"\nrealised {_plain(Decimal(str(realised)))}R"
+        except InvalidOperation:
+            pass
+
+    return message
 
 
 # --------------------------------------------------------------------------
