@@ -324,6 +324,11 @@ class LiquidityReplayService:
 
         cluster_count = 0
 
+        # Built in walk order and written as one batch: nothing in this loop
+        # reads a pool back, so one write leaves exactly what the sequential
+        # upserts did (2026-10-11 speed work: ~130 round trips -> 1).
+        persisted: list[LiquidityPoolRecord] = []
+
         for level in levels:
             # A level held from before this window is persistence's record; it
             # is rewritten only when a cluster in this window merged into it.
@@ -332,13 +337,15 @@ class LiquidityReplayService:
 
             liquidity_class = extremes.classify(level.stage.price, level.class_fallback)
 
-            await self._persist_level(
-                symbol,
-                timeframe,
-                level,
-                candles,
-                atrs,
-                liquidity_class=liquidity_class,
+            persisted.append(
+                self._level_record(
+                    symbol,
+                    timeframe,
+                    level,
+                    candles,
+                    atrs,
+                    liquidity_class=liquidity_class,
+                )
             )
 
             by_class[liquidity_class] += 1
@@ -346,6 +353,8 @@ class LiquidityReplayService:
 
             if level.stage.source is PoolSource.CLUSTER:
                 cluster_count += 1
+
+        await self._pools.upsert_many(persisted)
 
         lifecycle_pools = await self._pools.list_active(
             symbol,
@@ -375,14 +384,18 @@ class LiquidityReplayService:
         # loops above only reach pools whose swing is still inside the window,
         # so without this a pool keeps the label it was born with while the
         # range moves out from under it.
+        relabelled: list[LiquidityPoolRecord] = []
+
         for pool in lifecycle_pools:
             current = LiquidityClass(pool.liquidity_class)
             positional = extremes.classify(pool.price, current)
 
             if positional is not current:
-                await self._pools.upsert(replace(pool, liquidity_class=positional.value))
+                relabelled.append(replace(pool, liquidity_class=positional.value))
 
                 reclassified += 1
+
+        await self._pools.upsert_many(relabelled)
 
         for pool in lifecycle_pools:
             result = await self._replay_pool_lifecycle(
@@ -477,6 +490,16 @@ class LiquidityReplayService:
             symbol, timeframe, candles[0].open_time, end, only_version=self._algo_version
         )
 
+        # One read for every ended pool the active list does not hold, instead
+        # of one per ledger row.
+        fetched = await self._pools.get_many(
+            [
+                row.pool_id
+                for row in ledger
+                if row.to_state in _TERMINAL_POOL_STATES and row.pool_id not in records
+            ]
+        )
+
         for row in ledger:
             if row.to_state not in _TERMINAL_POOL_STATES:
                 continue
@@ -486,7 +509,7 @@ class LiquidityReplayService:
             )
 
             if row.pool_id not in records:
-                record = await self._pools.get(row.pool_id)
+                record = fetched.get(row.pool_id)
 
                 if record is not None and record.created_at < horizon:
                     records[row.pool_id] = record
@@ -500,7 +523,7 @@ class LiquidityReplayService:
 
         return seeds, known
 
-    async def _persist_level(
+    def _level_record(
         self,
         symbol: str,
         timeframe: Timeframe,
@@ -509,7 +532,7 @@ class LiquidityReplayService:
         atrs: Sequence[Decimal | None],
         *,
         liquidity_class: LiquidityClass,
-    ) -> None:
+    ) -> LiquidityPoolRecord:
         stage = level.stage
         timeframe_rank, max_rank = _timeframe_rank(timeframe)
         evidence: dict[str, object]
@@ -594,25 +617,23 @@ class LiquidityReplayService:
             }
         )
 
-        await self._pools.upsert(
-            LiquidityPoolRecord(
-                pool_id=level.pool_id,
-                symbol=symbol,
-                timeframe=timeframe,
-                side=level.side.value,
-                liquidity_class=liquidity_class.value,
-                source=stage.source.value,
-                price=stage.price,
-                band_low=stage.band_low,
-                band_high=stage.band_high,
-                strength=strength.total,
-                state="ACTIVE",
-                member_count=stage.member_count,
-                created_index=created_index,
-                created_at=created_at,
-                updated_at=self._clock.now(),
-                evidence=json.dumps(evidence, sort_keys=True, separators=(",", ":")),
-            )
+        return LiquidityPoolRecord(
+            pool_id=level.pool_id,
+            symbol=symbol,
+            timeframe=timeframe,
+            side=level.side.value,
+            liquidity_class=liquidity_class.value,
+            source=stage.source.value,
+            price=stage.price,
+            band_low=stage.band_low,
+            band_high=stage.band_high,
+            strength=strength.total,
+            state="ACTIVE",
+            member_count=stage.member_count,
+            created_index=created_index,
+            created_at=created_at,
+            updated_at=self._clock.now(),
+            evidence=json.dumps(evidence, sort_keys=True, separators=(",", ":")),
         )
 
     async def _replay_pool_lifecycle(

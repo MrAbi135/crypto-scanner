@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -50,10 +51,29 @@ class LiquidityPoolRepository(Protocol):
         pool: LiquidityPoolRecord,
     ) -> None: ...
 
+    async def upsert_many(
+        self,
+        pools: Sequence[LiquidityPoolRecord],
+    ) -> None:
+        """`upsert` for each pool, as one write.
+
+        The same rule per row -- the mutable subset changes only while the
+        pool is ACTIVE -- and an id given twice ends as its last occurrence,
+        as two sequential upserts would leave it.
+        """
+        ...
+
     async def get(
         self,
         pool_id: str,
     ) -> LiquidityPoolRecord | None: ...
+
+    async def get_many(
+        self,
+        pool_ids: Sequence[str],
+    ) -> dict[str, LiquidityPoolRecord]:
+        """`get` for each id, as one read; an id with no row is absent."""
+        ...
 
     async def list_active(
         self,

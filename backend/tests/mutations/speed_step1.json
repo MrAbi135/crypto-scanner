@@ -1,0 +1,75 @@
+{
+  "description": "Speed step 1 (2026-10-11): the liquidity pass writes and reads its pools in batches, and a pass reads its candle window once. Each mutation is a way the faster path could stop being the same path: a batch that revives a terminal pool or chokes on a repeated id, a cache that outlives its pass or is never used. Needs Docker for the Postgres half. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/speed_step1.json",
+  "pytest": [
+    "tests/unit/application/detection/test_pass_candles.py",
+    "tests/integration/test_detection_persistence_pg.py"
+  ],
+  "mutations": [
+    {
+      "name": "the batch upsert revives a terminal pool",
+      "file": "backend/src/scanner/infrastructure/persistence/liquidity_detection_repositories.py",
+      "old": "        where=(LiquidityPoolRow.state == \"ACTIVE\"),\n    )\n\n\ndef _pool_record(",
+      "new": "    )\n\n\ndef _pool_record(",
+      "expect_failing": [
+        "test_terminal_pool_cannot_be_revived_by_upsert",
+        "test_a_batch_upsert_writes_what_sequential_upserts_would"
+      ]
+    },
+    {
+      "name": "a repeated pool id is sent twice in one statement",
+      "file": "backend/src/scanner/infrastructure/persistence/liquidity_detection_repositories.py",
+      "old": "        rows = list(latest.values())",
+      "new": "        rows = list(pools)",
+      "expect_failing": [
+        "test_a_batch_upsert_writes_what_sequential_upserts_would"
+      ]
+    },
+    {
+      "name": "a batch beyond one chunk is cut short",
+      "file": "backend/src/scanner/infrastructure/persistence/liquidity_detection_repositories.py",
+      "old": "            for start in range(0, len(rows), _UPSERT_CHUNK):",
+      "new": "            for start in range(0, min(len(rows), _UPSERT_CHUNK), _UPSERT_CHUNK):",
+      "expect_failing": [
+        "test_a_batch_larger_than_one_statement_is_written_whole"
+      ]
+    },
+    {
+      "name": "get_many returns an entry for an id with no row",
+      "file": "backend/src/scanner/infrastructure/persistence/liquidity_detection_repositories.py",
+      "old": "        wanted = sorted(set(pool_ids))\n\n        if not wanted:\n            return {}",
+      "new": "        wanted = sorted(set(pool_ids))\n\n        if not wanted:\n            return {\"\": None}  # type: ignore[dict-item]",
+      "expect_failing": [
+        "test_a_batch_larger_than_one_statement_is_written_whole"
+      ]
+    },
+    {
+      "name": "inside a pass every read still goes to the database",
+      "file": "backend/src/scanner/application/detection/pass_candles.py",
+      "old": "        if cache is None:\n            return await self._inner.fetch_series(symbol, timeframe, start, end)",
+      "new": "        if True:\n            return await self._inner.fetch_series(symbol, timeframe, start, end)",
+      "expect_failing": [
+        "test_inside_a_pass_one_window_is_read_once",
+        "test_two_concurrent_passes_do_not_share_a_cache",
+        "test_a_golden_pass_inside_the_scope_is_byte_identical"
+      ]
+    },
+    {
+      "name": "the cache outlives its pass",
+      "file": "backend/src/scanner/application/detection/pass_candles.py",
+      "old": "        finally:\n            _PASS.reset(token)",
+      "new": "        finally:\n            pass",
+      "expect_failing": [
+        "test_the_cache_ends_with_the_pass"
+      ]
+    },
+    {
+      "name": "the window is keyed without its end, so a shorter read is served the longer one",
+      "file": "backend/src/scanner/application/detection/pass_candles.py",
+      "old": "        key = (symbol, timeframe, start, end)",
+      "new": "        key = (symbol, timeframe, start, start)",
+      "expect_failing": [
+        "test_inside_a_pass_one_window_is_read_once"
+      ]
+    }
+  ]
+}

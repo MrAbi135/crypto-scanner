@@ -25,6 +25,7 @@ from scanner.application.detection.liquidity_replay import LiquidityReplayServic
 from scanner.application.detection.participation_replay import (
     ParticipationReplayService,
 )
+from scanner.application.detection.pass_candles import PassScopedCandles
 from scanner.application.detection.pipeline import DetectionPipeline
 from scanner.application.detection.signal_monitor import SignalMonitorService
 from scanner.application.detection.state import (
@@ -97,7 +98,8 @@ def build_detection_pipeline(
     would put backfill decisions into the ratio §14 watches for doctrine
     drift, and the drift it detected would be someone re-running a month.
     """
-    candles = PgCandleRepository(sessions, clock)
+    # Read once per pass and shared by all nine services (pass_candles.py).
+    candles = PassScopedCandles(PgCandleRepository(sessions, clock))
     events = PgEngineEventRepository(sessions)
     evidence = PgIctEvidenceRepository(sessions)
 
@@ -262,4 +264,5 @@ def build_detection_pipeline(
             namespace=AUTHORITATIVE_NAMESPACE,
         ),
         authoritative_version=STRUCTURE_SHIFT_ALGO_VERSION,
+        candle_scope=candles,
     )

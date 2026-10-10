@@ -139,6 +139,13 @@ class CollectingPools:
     async def get(self, pool_id: str) -> LiquidityPoolRecord | None:
         return self.items.get(pool_id)
 
+    async def upsert_many(self, pools) -> None:
+        for pool in pools:
+            await self.upsert(pool)
+
+    async def get_many(self, pool_ids) -> dict[str, LiquidityPoolRecord]:
+        return {i: self.items[i] for i in pool_ids if i in self.items}
+
     async def list_active(
         self, symbol, timeframe, *, only_version=None
     ) -> tuple[LiquidityPoolRecord, ...]:

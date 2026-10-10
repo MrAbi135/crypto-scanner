@@ -45,6 +45,7 @@ from scanner.application.detection.ict_ote_replay import IctOteReplayService
 from scanner.application.detection.ict_replay import IctReplayService
 from scanner.application.detection.liquidity_replay import LiquidityReplayService
 from scanner.application.detection.participation_replay import ParticipationReplayService
+from scanner.application.detection.pass_candles import PassScopedCandles
 from scanner.application.detection.signal_monitor import (
     MonitorReport,
     SignalMonitorService,
@@ -106,6 +107,7 @@ class DetectionPipeline:
         monitor: SignalMonitorService | None = None,
         authoritative_state: EngineStateManager | None = None,
         authoritative_version: str | None = None,
+        candle_scope: PassScopedCandles | None = None,
     ) -> None:
         self._structure = structure
         self._liquidity = liquidity
@@ -124,6 +126,9 @@ class DetectionPipeline:
         # every reader falls back to the shift trend exactly as before.
         self._authoritative_state = authoritative_state
         self._authoritative_version = authoritative_version
+        # The one candle read per pass (pass_candles.py). Optional: absent, every
+        # service reads its own window, as the golden harness always has.
+        self._candle_scope = candle_scope
 
     async def run(
         self,
@@ -133,6 +138,21 @@ class DetectionPipeline:
         end: datetime,
         *,
         rebuild_state: bool = False,
+    ) -> DetectionPipelineReport:
+        if self._candle_scope is None:
+            return await self._run(symbol, timeframe, start, end, rebuild_state=rebuild_state)
+
+        async with self._candle_scope.scope():
+            return await self._run(symbol, timeframe, start, end, rebuild_state=rebuild_state)
+
+    async def _run(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime,
+        end: datetime,
+        *,
+        rebuild_state: bool,
     ) -> DetectionPipelineReport:
         structure = await self._structure.run(
             symbol,
