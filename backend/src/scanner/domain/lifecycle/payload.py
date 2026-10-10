@@ -132,10 +132,7 @@ class SignalPayload:
                     str(entry.refined_distal) if entry.refined_distal is not None else None
                 ),
             },
-            "targets": {
-                "primary": _target_dict(primary),
-                "secondary": _target_dict(secondary) if secondary is not None else None,
-            },
+            "targets": _targets_dict(primary, secondary, self.levels.ladder),
             "htf_chain": dict(self.htf_chain),
             "versions": {
                 "algo_version": self.algo_version,
@@ -283,6 +280,39 @@ def _complete(payload: SignalPayload) -> bool:
         and payload.algo_version
         and payload.param_set_version
     )
+
+
+def _targets_dict(primary: object, secondary: object, ladder: object) -> dict[str, object]:
+    """§15.2's Target Zone row, sealed -- and, through `target_bands`, monitored.
+
+    SLS v1.0.15's ladder is written **only when there is one**. An always-
+    present `"ladder": null` would change the sealed bytes, the hash and the
+    `target_bands` column of every signal the engine publishes, not just the
+    laddered ones; omitting it keeps every non-laddered payload byte-identical
+    to what it was before the ladder existed.
+
+    It is sealed for the same reason the invalidation rule is: the monitor must
+    learn that a signal exits on a ladder from the signal itself, never from
+    today's `TP_LADDER`, or a setting changed after publication would re-read a
+    sealed signal under a rule it was not published with.
+    """
+    out: dict[str, object] = {
+        "primary": _target_dict(primary),
+        "secondary": _target_dict(secondary) if secondary is not None else None,
+    }
+
+    if ladder is not None:
+        from scanner.domain.confluence import TargetLadder
+
+        assert isinstance(ladder, TargetLadder)
+
+        out["ladder"] = {
+            "start_r": str(ladder.start_r),
+            "step_r": str(ladder.step_r),
+            "unbounded": True,
+        }
+
+    return out
 
 
 def _target_dict(target: object) -> dict[str, object]:

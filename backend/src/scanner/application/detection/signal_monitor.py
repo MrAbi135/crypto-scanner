@@ -28,6 +28,7 @@ from scanner.application.ports.signals import SignalRecord, SignalRepository
 from scanner.domain.confluence import (
     SignalLevels,
     TargetBand,
+    TargetLadder,
     entry_zone,
 )
 from scanner.domain.confluence.levels import Invalidation
@@ -445,6 +446,17 @@ def _levels_of(signal: SignalRecord) -> SignalLevels:
             low=Decimal(primary["low"]),
             high=Decimal(primary["high"]),
             pool_id=primary.get("pool_id"),
+        ),
+        # The ladder, if the signal was sealed with one -- from the signal's own
+        # record, like the rule above, and absent for everything published
+        # before SLS v1.0.15.
+        ladder=(
+            TargetLadder(
+                start_r=Decimal(targets["ladder"]["start_r"]),
+                step_r=Decimal(targets["ladder"]["step_r"]),
+            )
+            if targets.get("ladder")
+            else None
         ),
     )
 

@@ -1,0 +1,108 @@
+{
+  "description": "SLS v1.0.15 part 2: the unbounded R-ladder exit. Each mutation is a way the ladder could land somewhere the owner did not specify, be judged against a different target than the one it exits on, leak into the seal of every signal, be lost by the monitor, or be switched on without the stop it was measured with. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/m5_tp_ladder.json",
+  "pytest": [
+    "tests/unit/domain/confluence/test_tp_ladder.py",
+    "tests/unit/application/detection/test_risk_stop_wiring.py"
+  ],
+  "mutations": [
+    {
+      "name": "the ladder steps from TP1 instead of counting from it, so TP2 lands at 4R",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "        return self.start_r + self.step_r * Decimal(n - 1)",
+      "new": "        return self.start_r + self.step_r * Decimal(n)",
+      "expect_failing": [
+        "test_the_rungs_are_the_owners_two_three_four",
+        "test_the_ladder_has_no_last_rung",
+        "test_a_long_ladder_climbs_from_the_proximal_edge_in_r",
+        "test_a_short_ladder_descends_from_the_proximal_edge_in_r"
+      ]
+    },
+    {
+      "name": "a non-positive start is accepted, putting TP1 at or behind the entry",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "        if self.start_r <= 0:",
+      "new": "        if False and self.start_r <= 0:",
+      "expect_failing": [
+        "test_a_ladder_that_stalls_or_runs_backwards_is_refused[start0-step0]",
+        "test_a_ladder_that_stalls_or_runs_backwards_is_refused[start1-step1]"
+      ]
+    },
+    {
+      "name": "a non-positive step is accepted, so the ladder stalls or runs backwards",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "        if self.step_r <= 0:",
+      "new": "        if False and self.step_r <= 0:",
+      "expect_failing": [
+        "test_a_ladder_that_stalls_or_runs_backwards_is_refused[start2-step2]",
+        "test_a_ladder_that_stalls_or_runs_backwards_is_refused[start3-step3]"
+      ]
+    },
+    {
+      "name": "a short's rungs are placed above the entry",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "        return self.anchor + reach if self.direction == \"UP\" else self.anchor - reach",
+      "new": "        return self.anchor + reach",
+      "expect_failing": [
+        "test_a_short_ladder_descends_from_the_proximal_edge_in_r"
+      ]
+    },
+    {
+      "name": "§15.3 keeps judging the pool on a laddered signal, so the R:R gate and the exit disagree",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "        if self.ladder is not None:\n            return self.rung_price(1)",
+      "new": "        if False and self.ladder is not None:\n            return self.rung_price(1)",
+      "expect_failing": [
+        "test_the_exit_target_is_tp1_not_the_pool",
+        "test_the_r_multiple_is_the_ladders_start_by_construction",
+        "test_a_pool_closer_than_the_floor_no_longer_blocks_a_laddered_signal",
+        "test_a_laddered_timeframe_exits_on_tp1_at_two_r"
+      ]
+    },
+    {
+      "name": "the ladder is switched on without the stop it was measured with",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "TP_LADDER: dict[Timeframe, TargetLadder] = {}",
+      "new": "TP_LADDER: dict[Timeframe, TargetLadder] = {Timeframe.M5: TargetLadder(Decimal(2), Decimal(1))}",
+      "expect_failing": [
+        "test_the_ladder_mapping_ships_empty_until_the_m5_change",
+        "test_the_stop_and_the_ladder_switch_on_together"
+      ]
+    },
+    {
+      "name": "the call site never attaches the ladder",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "            ladder=TP_LADDER.get(timeframe),",
+      "new": "            ladder=None,",
+      "expect_failing": [
+        "test_a_laddered_timeframe_exits_on_tp1_at_two_r"
+      ]
+    },
+    {
+      "name": "the ladder is never sealed into the payload",
+      "file": "backend/src/scanner/domain/lifecycle/payload.py",
+      "old": "    if ladder is not None:",
+      "new": "    if False and ladder is not None:",
+      "expect_failing": [
+        "test_a_laddered_payload_seals_the_rule_not_a_list_of_prices"
+      ]
+    },
+    {
+      "name": "every payload carries a ladder key, moving the seal of every signal",
+      "file": "backend/src/scanner/domain/lifecycle/payload.py",
+      "old": "    if ladder is not None:",
+      "new": "    out[\"ladder\"] = None\n\n    if ladder is not None:",
+      "expect_failing": [
+        "test_a_pool_exit_payload_carries_no_ladder_key_at_all"
+      ]
+    },
+    {
+      "name": "the monitor drops the sealed ladder, so a laddered signal is watched for its pool",
+      "file": "backend/src/scanner/application/detection/signal_monitor.py",
+      "old": "            if targets.get(\"ladder\")",
+      "new": "            if False and targets.get(\"ladder\")",
+      "expect_failing": [
+        "test_the_monitor_rebuilds_the_ladder_the_signal_was_sealed_with"
+      ]
+    }
+  ]
+}

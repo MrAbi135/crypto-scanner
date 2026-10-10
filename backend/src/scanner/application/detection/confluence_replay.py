@@ -83,6 +83,7 @@ from scanner.domain.common import (
 from scanner.domain.common.rvol import baseline_span, median, relative_volumes, rvol_at
 from scanner.domain.confluence import (
     RISK_STOP_PCT,
+    TP_LADDER,
     Adjustment,
     ArchetypeEvidence,
     Confidence,
@@ -2178,6 +2179,12 @@ def _levels_for(
             entry=entry,
             invalidation=invalidation,
             primary_target=primary,
+            # SLS v1.0.15: the exit becomes the R-ladder on the timeframes that
+            # have one, and the pool above stays as evidence. The pool is still
+            # REQUIRED -- §15.2 says the bands "are still recorded" -- so a
+            # laddered timeframe publishes exactly the set the old rule did,
+            # which is the set the M5 measurement was taken on.
+            ladder=TP_LADDER.get(timeframe),
         ),
         (),
     )
