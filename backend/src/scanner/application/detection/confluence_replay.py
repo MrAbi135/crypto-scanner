@@ -82,6 +82,7 @@ from scanner.domain.common import (
 )
 from scanner.domain.common.rvol import baseline_span, median, relative_volumes, rvol_at
 from scanner.domain.confluence import (
+    RISK_STOP_PCT,
     Adjustment,
     ArchetypeEvidence,
     Confidence,
@@ -104,6 +105,7 @@ from scanner.domain.confluence import (
     liquidity_factor,
     meets_floor,
     momentum_factor,
+    risk_stop_for,
     structure_factor,
     volume_factor,
     zone_factor,
@@ -1065,6 +1067,7 @@ class ConfluenceReplayService:
         levels, payload_unmet = (
             _levels_for(
                 archetype,
+                timeframe=timeframe,
                 direction=direction,
                 zone=best_zone,
                 swept_extreme=best_sweep.reference_level if best_sweep else None,
@@ -2023,7 +2026,11 @@ def _payload_for(
     if multiple is None:
         return None
 
-    distance = abs(levels.entry.mid - levels.invalidation.price)
+    # `r_unit`, not a fresh `entry.mid` subtraction: this was one of three
+    # independent R computations, and the one a change of anchor would have
+    # missed -- the payload would then state a distance in a different unit
+    # from the R-multiple printed beside it.
+    distance = levels.r_unit
 
     return SignalPayload(
         symbol=symbol,
@@ -2103,6 +2110,7 @@ def _condition_tags(*, wash_risk: bool, reading: _Reading) -> tuple[str, ...]:
 def _levels_for(
     archetype: Archetype,
     *,
+    timeframe: Timeframe,
     direction: str,
     zone: IctZoneRecord,
     swept_extreme: Decimal | None,
@@ -2132,10 +2140,20 @@ def _levels_for(
         refined_high=zone.refined_high,
     )
 
-    invalidation = invalidation_for(
-        archetype,
-        entry=entry,
-        swept_extreme=swept_extreme,
+    # SLS v1.0.15 §15.2: on a timeframe with a `P.risk.stop_pct` the stop is
+    # a risk stop whatever the archetype. `RISK_STOP_PCT` is empty until the
+    # M5 change that also brings the ladder and TTL 48 -- see its definition
+    # for why the stop is not switched on alone.
+    stop_pct = RISK_STOP_PCT.get(timeframe)
+
+    invalidation = (
+        risk_stop_for(entry=entry, direction=direction, stop_pct=stop_pct)
+        if stop_pct is not None
+        else invalidation_for(
+            archetype,
+            entry=entry,
+            swept_extreme=swept_extreme,
+        )
     )
 
     primary = _primary_target(archetype, direction=direction, pool=target_pool, pd=pd)

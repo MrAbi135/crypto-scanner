@@ -80,6 +80,8 @@ from scanner.domain.confluence.gates import (
 )
 from scanner.domain.confluence.levels import (
     MIN_RR,
+    RISK_STOP,
+    RISK_STOP_PCT,
     SWEPT_EXTREME,
     ZONE_DISTAL_EDGE,
     EntryZone,
@@ -88,6 +90,7 @@ from scanner.domain.confluence.levels import (
     TargetBand,
     entry_zone,
     invalidation_for,
+    risk_stop_for,
 )
 from scanner.domain.confluence.weights import (
     GRADE_A_FLOOR,
@@ -119,6 +122,8 @@ __all__ = [
     "MIN_RR",
     "RANGE_MIN_ATR",
     "RANKING_PRIORITY",
+    "RISK_STOP",
+    "RISK_STOP_PCT",
     "SWEPT_EXTREME",
     "WEIGHTS",
     "ZONE_DISTAL_EDGE",
@@ -158,6 +163,7 @@ __all__ = [
     "meets_floor",
     "momentum_factor",
     "ranking_priority",
+    "risk_stop_for",
     "structure_factor",
     "volume_factor",
     "zone_factor",
