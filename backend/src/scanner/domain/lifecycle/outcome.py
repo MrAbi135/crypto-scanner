@@ -23,10 +23,16 @@ class Outcome:
     elapsed_candles: int
     mfe_r: Decimal
     mae_r: Decimal
+    # SLS v1.0.15 §12.4: the R booked at the exit, for a laddered signal only.
+    # None for a pool-exit signal, whose result is its state -- writing a
+    # number there would claim a measurement §12.4 never asked for.
+    realised_r: Decimal | None = None
 
     @property
     def counts_toward_hit_rate(self) -> bool:
-        """§12.4: expired signals are reported but excluded from the rate."""
+        """§12.4: expired signals are reported but excluded from the rate,
+        and so is v1.0.15's CLOSED_FLAT -- `HIT_RATE_STATES` names only the two
+        outcomes that are a win or a loss."""
 
         return self.outcome in HIT_RATE_STATES
 
@@ -36,6 +42,7 @@ def accounting(
     *,
     levels: SignalLevels,
     candles: Sequence[Candle],
+    realised_r: Decimal | None = None,
 ) -> Outcome:
     """§12.4's "max favorable excursion (MFE) and max adverse excursion (MAE)
     in R units (R = |entry anchor - invalidation|)".
@@ -68,7 +75,7 @@ def accounting(
         raise ValueError("R is zero: the invalidation sits on the entry anchor")
 
     if not candles:
-        return Outcome(outcome, 0, Decimal(0), Decimal(0))
+        return Outcome(outcome, 0, Decimal(0), Decimal(0), realised_r)
 
     origin = levels.anchor
 
@@ -84,4 +91,5 @@ def accounting(
         elapsed_candles=len(candles),
         mfe_r=max(Decimal(0), favourable) / unit,
         mae_r=max(Decimal(0), adverse) / unit,
+        realised_r=realised_r,
     )

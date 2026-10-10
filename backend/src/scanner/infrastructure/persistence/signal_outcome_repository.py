@@ -31,6 +31,7 @@ class PgSignalOutcomeRepository:
                 mae_r=outcome.mae_r,
                 excluded_from_stats=outcome.excluded_from_stats,
                 resolution_evidence=outcome.resolution_evidence,
+                realised_r=outcome.realised_r,
             )
             .on_conflict_do_nothing(index_elements=[SignalOutcomeRow.signal_id])
             .returning(SignalOutcomeRow.signal_id)
@@ -59,4 +60,5 @@ class PgSignalOutcomeRepository:
             mae_r=row.mae_r,
             excluded_from_stats=row.excluded_from_stats,
             resolution_evidence=row.resolution_evidence,
+            realised_r=row.realised_r,
         )

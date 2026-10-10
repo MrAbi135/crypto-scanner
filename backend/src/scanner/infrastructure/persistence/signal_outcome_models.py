@@ -20,7 +20,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from scanner.infrastructure.persistence.models import Base
 
-_OUTCOMES = "'SUCCESS','FAILED','EXPIRED_UNTOUCHED','EXPIRED_ACTIVE','INVALIDATED_EARLY'"
+# Mirrors migration 025, which added SLS v1.0.15's CLOSED_FLAT; held to
+# `SignalState`'s terminal outcomes by a test for the same reason as T18's list.
+_OUTCOMES = (
+    "'SUCCESS','FAILED','EXPIRED_UNTOUCHED','EXPIRED_ACTIVE','INVALIDATED_EARLY','CLOSED_FLAT'"
+)
 
 
 class SignalOutcomeRow(Base):
@@ -46,5 +50,11 @@ class SignalOutcomeRow(Base):
     elapsed_candles: Mapped[int] = mapped_column(Integer(), nullable=False)
     mfe_r: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
     mae_r: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    # SLS v1.0.15 §12.4: the R booked at a laddered signal's exit. Nullable
+    # because every pool-exit outcome -- all of them before v1.0.15 -- has none,
+    # and a zero there would claim a result that was never measured. Signed:
+    # unlike the excursions it can be negative, so it is outside
+    # `ck_signal_outcomes_excursions`.
+    realised_r: Mapped[Decimal | None] = mapped_column(Numeric(38, 18), nullable=True)
     excluded_from_stats: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
     resolution_evidence: Mapped[str] = mapped_column(Text(), nullable=False)

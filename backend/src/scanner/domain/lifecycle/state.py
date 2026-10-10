@@ -27,6 +27,7 @@ rather than merely conservative.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
@@ -35,7 +36,7 @@ from scanner.domain.confluence import SignalLevels
 
 
 class SignalState(str, Enum):
-    """§12's nine states."""
+    """§12's nine states, and SLS v1.0.15's tenth."""
 
     DETECTED = "DETECTED"
     PUBLISHED = "PUBLISHED"
@@ -46,6 +47,11 @@ class SignalState(str, Enum):
     EXPIRED_UNTOUCHED = "EXPIRED_UNTOUCHED"
     EXPIRED_ACTIVE = "EXPIRED_ACTIVE"
     INVALIDATED_EARLY = "INVALIDATED_EARLY"
+    # SLS v1.0.15 §12.4: a laddered signal that reached TP1, had its
+    # invalidation moved to the entry, and gave the move back -- `realised_r`
+    # exactly 0. Neither a win nor a loss, so excluded from hit-rate and
+    # reported separately, like the expiries.
+    CLOSED_FLAT = "CLOSED_FLAT"
 
 
 TERMINAL_STATES = frozenset(
@@ -56,6 +62,7 @@ TERMINAL_STATES = frozenset(
         SignalState.EXPIRED_UNTOUCHED,
         SignalState.EXPIRED_ACTIVE,
         SignalState.INVALIDATED_EARLY,
+        SignalState.CLOSED_FLAT,
     }
 )
 
@@ -76,6 +83,7 @@ _ALLOWED: dict[SignalState, frozenset[SignalState]] = {
             SignalState.SUCCESS,
             SignalState.FAILED,
             SignalState.EXPIRED_ACTIVE,
+            SignalState.CLOSED_FLAT,
         }
     ),
 }
@@ -153,6 +161,14 @@ def observe(
         return Observation(None, stress)
 
     # ACTIVE.
+    if levels.ladder is not None:
+        # A laddered signal's exit depends on every candle since the entry --
+        # which rung was reached decides where the stop sits -- and one candle
+        # cannot know that. Refusing here makes a monitor that forgot to route
+        # it to `walk_ladder` fail loudly, instead of silently watching the
+        # pool target that SLS v1.0.15 demoted to evidence.
+        raise ValueError("an ACTIVE laddered signal is walked with walk_ladder, not observed")
+
     hit_target = _touched_target(candle, levels)
     closed_through = _closed_beyond_invalidation(candle, levels)
 
@@ -177,6 +193,125 @@ def observe(
         )
 
     return Observation(None, stress)
+
+
+@dataclass(frozen=True, slots=True)
+class LadderWalk:
+    """What the candles since the entry did to a laddered signal."""
+
+    to_state: SignalState | None
+    # SLS v1.0.15 §12.4's `realised_r`, in units of the invalidation distance
+    # at publication. None while the signal is still live.
+    realised_r: Decimal | None
+    rungs: int
+    reason: str = ""
+
+
+def walk_ladder(
+    candles: Sequence[Candle],
+    *,
+    levels: SignalLevels,
+    elapsed_candles: int,
+    ttl_candles: int,
+) -> LadderWalk:
+    """SLS v1.0.15 §12.3 for an ACTIVE laddered signal: the trailing invalidation.
+
+    `candles` are the candles **after** the one that touched the entry, oldest
+    first, through the one just closed. The entry candle is excluded because
+    `observe` lets it only activate the signal -- the engine's convention, and
+    the one the M5 measurement was re-run under: the amended configuration
+    scored identically either way (+6.53%, drop2 +0.193, n=15), so following
+    the engine costs nothing.
+
+    The walk restarts from the entry on every pass instead of carrying the
+    highest rung forward. §12.3 says the trailing level is "derived from the
+    candles on every pass, never stored", and a walk also catches a stop-out
+    on a candle some earlier pass never saw, where a carried value would have
+    trusted that pass.
+
+    Per candle, in this order:
+
+    1. **The stop, on touch.** It sits one rung behind the highest reached:
+       -1R before TP1, the entry after TP1, TP(n-1) after TPn. A touch ends
+       the signal at that level, and the sign of the level is the state.
+    2. **Then the rungs**, as far as the candle's extreme reaches. Read after
+       the stop, so a candle that holds both the live stop and the next rung
+       resolves to the stop -- v1.0.8's same-candle rule, which never awards
+       the favourable reading of an order OHLC cannot establish.
+
+    The TTL is read last, as `observe` reads it: a signal that resolved on the
+    candle its TTL lapsed resolved.
+    """
+    ladder = levels.ladder
+
+    if ladder is None:
+        raise ValueError("walk_ladder needs a laddered signal")
+
+    unit = levels.r_unit
+
+    if unit <= 0:
+        raise ValueError("R is zero: the invalidation sits on the entry anchor")
+
+    up = levels.direction == "UP"
+
+    def price_at(r: Decimal) -> Decimal:
+        return levels.anchor + r * unit if up else levels.anchor - r * unit
+
+    def reached(candle: Candle, price: Decimal) -> bool:
+        return candle.high >= price if up else candle.low <= price
+
+    rungs = 0
+    stop_r = Decimal(-1)
+
+    for candle in candles:
+        stop = price_at(stop_r)
+
+        if candle.low <= stop if up else candle.high >= stop:
+            reason = _stop_reason(stop_r, rungs)
+
+            if reached(candle, price_at(ladder.rung_r(rungs + 1))):
+                reason += "; the next rung was touched on the same candle, order indeterminate"
+
+            return LadderWalk(_state_for(stop_r), stop_r, rungs, reason)
+
+        while reached(candle, price_at(ladder.rung_r(rungs + 1))):
+            rungs += 1
+            # One rung behind: TP1 moves the stop to the entry, TPn to TP(n-1).
+            stop_r = Decimal(0) if rungs == 1 else ladder.rung_r(rungs - 1)
+
+    if candles and elapsed_candles >= ttl_candles:
+        last = candles[-1].close
+        held = (last - levels.anchor) if up else (levels.anchor - last)
+
+        return LadderWalk(
+            SignalState.EXPIRED_ACTIVE,
+            held / unit,
+            rungs,
+            f"TTL lapsed after {rungs} TP(s); marked at the final close",
+        )
+
+    return LadderWalk(None, None, rungs)
+
+
+def _state_for(realised_r: Decimal) -> SignalState:
+    """SLS v1.0.15 §12.4: the state follows the sign of what was booked."""
+    if realised_r > 0:
+        return SignalState.SUCCESS
+
+    if realised_r < 0:
+        return SignalState.FAILED
+
+    return SignalState.CLOSED_FLAT
+
+
+def _stop_reason(stop_r: Decimal, rungs: int) -> str:
+    if rungs == 0:
+        return "stopped at the initial invalidation before TP1"
+
+    if stop_r == 0:
+        return "stopped at the entry after TP1"
+
+    return f"trailing stop at {stop_r}R after {rungs} TP(s)"
 
 
 def _touched_entry(candle: Candle, levels: SignalLevels) -> bool:

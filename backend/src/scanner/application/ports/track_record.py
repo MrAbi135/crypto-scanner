@@ -39,6 +39,8 @@ class ArchivedSignal:
     mfe_r: Decimal | None = None
     mae_r: Decimal | None = None
     excluded_from_stats: bool = False
+    # SLS v1.0.15 §12.4: a laddered signal's booked R. None for a pool exit.
+    realised_r: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +121,10 @@ class OutcomeCounts:
     failures: int
     expired: int
     invalidated: int
+    # SLS v1.0.15: reported, not rated. Defaulted so a caller that predates it
+    # still constructs; the repository always fills it, and a test holds the
+    # repository's buckets to every terminal outcome so a new one cannot vanish.
+    closed_flat: int = 0
 
 
 class TrackRecordStatistics(Protocol):
