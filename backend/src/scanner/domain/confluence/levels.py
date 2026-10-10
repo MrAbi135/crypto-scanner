@@ -117,6 +117,57 @@ class TargetBand:
 
 
 @dataclass(frozen=True, slots=True)
+class TargetLadder:
+    """SLS v1.0.15 §15.2: `TPn = (start + (n - 1) x step) x R`, with no upper bound.
+
+    Stored as its two parameters rather than as a list of prices, because it
+    has no last rung: "no maximum" was the owner's rule, and a list would have
+    had to stop somewhere. Every rung is a pure function of the signal's own
+    anchor and R, so nothing is lost by keeping only the rule.
+
+    The rungs are exits and stop-move triggers -- §12.3 trails the
+    invalidation one rung behind the highest reached. The liquidity pools are
+    still recorded beside the ladder as evidence; they no longer set the exit.
+    """
+
+    start_r: Decimal
+    step_r: Decimal
+
+    def __post_init__(self) -> None:
+        # A non-positive start puts TP1 at or behind the entry; a non-positive
+        # step makes the ladder stall or run backwards. Either would pass any
+        # check that only reads TP1.
+        if self.start_r <= 0:
+            raise ValueError(f"start_r must be positive, got {self.start_r}")
+
+        if self.step_r <= 0:
+            raise ValueError(f"step_r must be positive, got {self.step_r}")
+
+    def rung_r(self, n: int) -> Decimal:
+        """TPn's distance from the anchor, in R. Rungs count from 1."""
+        if n < 1:
+            raise ValueError(f"rungs count from 1, got {n}")
+
+        return self.start_r + self.step_r * Decimal(n - 1)
+
+
+# SLS v1.0.15 §15.2: the timeframes whose exit is an unbounded R-ladder
+# (`P.risk.tp_ladder_start`, `P.risk.tp_ladder_step`) instead of the nearest
+# liquidity pool. Empty for the same reason as `RISK_STOP_PCT`, and it must be
+# populated in the same change -- a ladder behind a zone stop was measured
+# worse than no ladder at all. A test holds the two mappings to the same keys,
+# so one cannot be switched on without the other.
+#
+# Defined BELOW `TargetLadder`, not beside `RISK_STOP_PCT`, and that is not
+# tidiness. The first draft sat up there, where an empty dict imports fine --
+# but the change that populates it writes `TargetLadder(...)` as a value, and
+# at that position the class does not exist yet, so the module would have
+# failed to import at the very moment M5 was switched on. The part-2 mutation
+# battery is what found it, by populating the mapping in place.
+TP_LADDER: dict[Timeframe, TargetLadder] = {}
+
+
+@dataclass(frozen=True, slots=True)
 class SignalLevels:
     """The three priced rows of §15.2, and the R they imply."""
 
@@ -125,6 +176,18 @@ class SignalLevels:
     invalidation: Invalidation
     primary_target: TargetBand
     secondary_target: TargetBand | None = None
+    # SLS v1.0.15: when set, the exit is this ladder and `primary_target` is
+    # evidence only. None everywhere until the M5 change switches it on.
+    ladder: TargetLadder | None = None
+
+    def rung_price(self, n: int) -> Decimal:
+        """TPn's price. Only meaningful for a laddered signal."""
+        if self.ladder is None:
+            raise ValueError("this signal exits on its pool target, not a ladder")
+
+        reach = self.ladder.rung_r(n) * self.r_unit
+
+        return self.anchor + reach if self.direction == "UP" else self.anchor - reach
 
     @property
     def anchor(self) -> Decimal:
@@ -162,19 +225,38 @@ class SignalLevels:
         return abs(self.anchor - self.invalidation.price)
 
     @property
+    def exit_target(self) -> Decimal:
+        """The price §15.3 judges the target by -- and the one place that decides it.
+
+        The pool's near edge, or TP1 for a laddered signal, whose pool is
+        evidence only. Both `r_multiple` and `coherent` read this rather than
+        `primary_target` directly; reading the pool in one and TP1 in the other
+        would let a signal pass the R:R gate on one target and the order check
+        on another.
+        """
+        if self.ladder is not None:
+            return self.rung_price(1)
+
+        return self.primary_target.near_edge(self.direction)
+
+    @property
     def r_multiple(self) -> Decimal | None:
-        """Reward in R to the primary target, or None when R is zero.
+        """Reward in R to the exit target, or None when R is zero.
 
         A zero R means the invalidation sits on the anchor, which is not a
         tight stop but a broken level pair -- and dividing by it would produce
         an infinite R-multiple that sails through §15.3's floor.
+
+        For a laddered signal this is exactly `ladder.start_r` -- TP1 sits at
+        that many R by construction -- which is why SLS v1.0.15 records
+        §15.3(3) as satisfied by construction on M5 rather than as a filter.
         """
         unit = self.r_unit
 
         if unit == 0:
             return None
 
-        reach = abs(self.primary_target.near_edge(self.direction) - self.anchor)
+        reach = abs(self.exit_target - self.anchor)
 
         return reach / unit
 
@@ -191,8 +273,16 @@ class SignalLevels:
         mid of any zone wider than 2%, so a mid-based check would refuse those
         signals as INCOHERENT_LEVELS although stop, entry and target are in
         perfect order from where the fill happens.
+
+        A zero R is incoherent whatever else holds: a laddered signal's TP1 is
+        R-relative, so with R at zero it collapses onto the anchor and the
+        strict inequality below refuses it -- the same case `r_multiple`
+        refuses.
         """
-        target = self.primary_target.near_edge(self.direction)
+        if self.r_unit == 0:
+            return False
+
+        target = self.exit_target
 
         if self.direction == "UP":
             return self.invalidation.price < self.anchor < target

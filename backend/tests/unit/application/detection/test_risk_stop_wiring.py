@@ -17,7 +17,14 @@ from types import SimpleNamespace
 from scanner.application.detection.confluence_replay import _levels_for
 from scanner.application.detection.signal_monitor import _levels_of
 from scanner.application.ports.signals import SignalRecord
-from scanner.domain.confluence import RISK_STOP, RISK_STOP_PCT, ZONE_DISTAL_EDGE, Archetype
+from scanner.domain.confluence import (
+    RISK_STOP,
+    RISK_STOP_PCT,
+    TP_LADDER,
+    ZONE_DISTAL_EDGE,
+    Archetype,
+    TargetLadder,
+)
 from scanner.shared import Timeframe
 
 
@@ -104,7 +111,7 @@ def test_with_the_mapping_empty_m5_is_untouched() -> None:
 # --- the monitor --------------------------------------------------------------
 
 
-def _record(*, payload: dict) -> SignalRecord:
+def _record(*, payload: dict, ladder: dict | None = None) -> SignalRecord:
     return SignalRecord(
         signal_id="sig-1",
         setup_id="sig-1",
@@ -117,7 +124,10 @@ def _record(*, payload: dict) -> SignalRecord:
         entry_proximal=Decimal(104),
         entry_distal=Decimal(100),
         invalidation_level=Decimal("102.96"),
-        target_bands=json.dumps({"primary": {"low": "112", "high": "114", "pool_id": "p1"}}),
+        target_bands=json.dumps(
+            {"primary": {"low": "112", "high": "114", "pool_id": "p1"}}
+            | ({"ladder": ladder} if ladder is not None else {})
+        ),
         published_at=datetime(2026, 10, 10, tzinfo=UTC),
         ttl_candles=24,
         algo_version="s8-test",
@@ -158,3 +168,97 @@ def test_the_monitor_reads_the_seal_not_todays_setting(monkeypatch) -> None:
 
     assert levels.invalidation.rule == ZONE_DISTAL_EDGE
     assert levels.anchor == Decimal(102)
+
+
+# --- the ladder (SLS v1.0.15 part 2) -----------------------------------------
+
+
+def test_a_laddered_timeframe_exits_on_tp1_at_two_r(monkeypatch) -> None:
+    """Both mappings on together, as the flip will do: the exit is the ladder,
+    the pool stays as evidence, and the R-multiple is the ladder's start."""
+    monkeypatch.setitem(RISK_STOP_PCT, Timeframe.M5, Decimal("1.0"))
+    monkeypatch.setitem(TP_LADDER, Timeframe.M5, TargetLadder(Decimal(2), Decimal(1)))
+
+    levels, unmet = _levels_for(
+        Archetype.CONTINUATION_PULLBACK,
+        timeframe=Timeframe.M5,
+        direction="UP",
+        zone=_zone(),
+        swept_extreme=None,
+        target_pool=_pool(),
+        pd=None,
+    )
+
+    assert unmet == ()
+    assert levels is not None
+    assert levels.ladder == TargetLadder(Decimal(2), Decimal(1))
+    assert levels.r_multiple == Decimal(2)
+    assert levels.primary_target.pool_id == "p1", "the pool must still be recorded"
+
+
+def test_a_laddered_timeframe_still_needs_a_pool(monkeypatch) -> None:
+    """§15.2 says the bands "are still recorded". Without one the signal does
+    not publish -- so a laddered timeframe publishes exactly the set the old
+    rule did, which is the set the M5 measurement was taken on."""
+    monkeypatch.setitem(RISK_STOP_PCT, Timeframe.M5, Decimal("1.0"))
+    monkeypatch.setitem(TP_LADDER, Timeframe.M5, TargetLadder(Decimal(2), Decimal(1)))
+
+    levels, unmet = _levels_for(
+        Archetype.CONTINUATION_PULLBACK,
+        timeframe=Timeframe.M5,
+        direction="UP",
+        zone=_zone(),
+        swept_extreme=None,
+        target_pool=None,
+        pd=None,
+    )
+
+    assert levels is None
+    assert unmet == ("primary_target",)
+
+
+def test_a_ladder_on_m5_does_not_leak_onto_h1(monkeypatch) -> None:
+    monkeypatch.setitem(TP_LADDER, Timeframe.M5, TargetLadder(Decimal(2), Decimal(1)))
+
+    levels, _ = _levels_for(
+        Archetype.CONTINUATION_PULLBACK,
+        timeframe=Timeframe.H1,
+        direction="UP",
+        zone=_zone(),
+        swept_extreme=None,
+        target_pool=_pool(),
+        pd=None,
+    )
+
+    assert levels is not None
+    assert levels.ladder is None
+
+
+def test_the_monitor_rebuilds_the_ladder_the_signal_was_sealed_with() -> None:
+    levels = _levels_of(
+        _record(
+            payload={"invalidation": {"rule": RISK_STOP, "price": "102.96"}},
+            ladder={"start_r": "2", "step_r": "1", "unbounded": True},
+        )
+    )
+
+    assert levels.ladder == TargetLadder(Decimal(2), Decimal(1))
+    assert levels.rung_price(1) == Decimal("106.08")
+
+
+def test_a_signal_sealed_without_a_ladder_exits_on_its_pool() -> None:
+    """Every signal published before SLS v1.0.15 -- and every non-M5 one after."""
+    levels = _levels_of(_record(payload={}))
+
+    assert levels.ladder is None
+    assert levels.exit_target == Decimal(112)
+
+
+def test_the_monitor_reads_the_ladder_from_the_seal_not_todays_setting(monkeypatch) -> None:
+    """A signal sealed with no ladder keeps exiting on its pool even after M5
+    is switched on -- the setting must never relabel a sealed signal."""
+    monkeypatch.setitem(TP_LADDER, Timeframe.M5, TargetLadder(Decimal(2), Decimal(1)))
+
+    levels = _levels_of(_record(payload={}))
+
+    assert levels.ladder is None

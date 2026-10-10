@@ -28,8 +28,8 @@
     {
       "name": "the R-multiple reaches from the mid while R is measured from the edge",
       "file": "backend/src/scanner/domain/confluence/levels.py",
-      "old": "        reach = abs(self.primary_target.near_edge(self.direction) - self.anchor)",
-      "new": "        reach = abs(self.primary_target.near_edge(self.direction) - self.entry.mid)",
+      "old": "        reach = abs(self.exit_target - self.anchor)",
+      "new": "        reach = abs(self.exit_target - self.entry.mid)",
       "expect_failing": [
         "test_the_r_multiple_reaches_from_the_same_anchor_r_is_measured_from"
       ]
