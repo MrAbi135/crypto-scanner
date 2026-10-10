@@ -1355,10 +1355,24 @@ async def test_a_displacement_on_the_newest_candle_is_not_decided_yet() -> None:
 
     assert full, "fixture produced no order blocks, so this proves nothing"
 
-    d = min(zone.confirmed_index for zone in full)
+    ob = min(full, key=lambda zone: zone.confirmed_index)
+    d = ob.confirmed_index
 
-    newest = await _order_blocks(candles[: d + 1])
-    decided = await _order_blocks(candles[: d + 2])
+    # Admit it by a structure break, recorded long before. Without one the
+    # fixture admits OBs only through the FVG test, which already answers no
+    # while d+1 is missing -- so the rule would pass without being exercised
+    # (the battery's first run reported exactly that).
+    bullish = ob.polarity == "BULLISH"
+    step = Decimal("0.01")
+    broken = _swing_record(
+        candles,
+        d - 20,
+        candles[d].close - step if bullish else candles[d].close + step,
+        "HIGH" if bullish else "LOW",
+    )
+
+    newest = await _order_blocks(candles[: d + 1], (broken,))
+    decided = await _order_blocks(candles[: d + 2], (broken,))
 
     assert all(zone.confirmed_index != d for zone in newest)
     assert any(zone.confirmed_index == d for zone in decided)
