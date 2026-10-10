@@ -1212,6 +1212,31 @@ a result that needs them is not a finding:
 | zone stop + ladder | −4.68% | −0.335R | 2/11 | −0.856 |
 | **1% stop + ladder (this amendment)** | **+6.37%** | **+0.455R** | **8/5** | **+0.196** |
 
+**Erratum, 2026-10-10 (same day, before any code switched on).** The table above
+was measured with the entry candle judged for stop and target. The engine does
+not do that: §12.3's monitor lets the candle that touches the entry **only
+activate** the signal, and reads stop and target from the next candle on.
+Re-measured under the engine's own convention (now n=15, the newest signal's
+window still filling):
+
+| variant | total | W/L | drop2 |
+|---|---|---|---|
+| zone stop + pool target (until now) | **+0.71%** | 3/12 | −0.842 |
+| 1% stop + pool target | +1.83% | 10/5 | −0.047 |
+| zone stop + ladder | −3.66% | 3/12 | −0.743 |
+| **1% stop + ladder (this amendment)** | **+6.53%** | **9/5** | **+0.193** |
+
+**The amended configuration is unaffected** — identical under both conventions —
+so what is built reproduces what was measured. **The baseline is not:** the
+"−10.29%" above was the entry-candle-judged figure, and under what the engine
+actually does the old M5 rule is **+0.71%, carried by a single trade** (it turns
+negative once that trade is removed, −0.735). The zone stop is tight enough to be
+hit on the entry candle itself, which is why the convention moves it so far. The
+ruling stands on the drop test, which only the amended configuration passes
+either way, but the size of the improvement was overstated. Kept beside the
+original rather than written over it, because the original is what the owner
+ruled on.
+
 Neither half works alone: the stop alone does not survive the drop test and the
 ladder alone is worse than before. The pair does, and the mechanism is plain —
 a stop that clears ordinary noise takes winners from 2 to 9, and the ladder
