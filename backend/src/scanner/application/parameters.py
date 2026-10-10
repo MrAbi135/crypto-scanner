@@ -42,6 +42,7 @@ from scanner.domain.common.warmup import (
 )
 from scanner.domain.confluence.archetypes import FLOORS
 from scanner.domain.confluence.confidence import MAX_PENALTY, MAX_SYNERGY
+from scanner.domain.confluence.levels import RISK_STOP_PCT, TP_LADDER
 from scanner.domain.confluence.weights import (
     GRADE_A_FLOOR,
     GRADE_B_FLOOR,
@@ -76,7 +77,7 @@ from scanner.domain.volume import SPIKE_FLOOR_QUOTE
 # Bumped by hand whenever any value below changes. SLS Appendix A: "Every
 # parameter change increments `param_set_version` and requires golden-dataset
 # re-validation." The checksum is what catches forgetting to.
-PARAM_SET_VERSION = "2026.08.24.2"
+PARAM_SET_VERSION = "2026.10.10.1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,10 +159,39 @@ def _mapped() -> tuple[Parameter, ...]:
         _p(
             "P.lifecycle.ttl",
             "12.5",
-            "M5:24/M15:24/H1:24/H4:18/D1:15",
+            "M5:48/M15:24/H1:24/H4:18/D1:15",
             "/".join(
                 f"{tf.value}:{n}"
                 for tf, n in sorted(TTL_CANDLES.items(), key=lambda kv: kv[0].minutes)
+            ),
+        ),
+        # SLS v1.0.15. Rendered per timeframe, so a value set on a second
+        # timeframe is drift from Appendix A ("other TFs: not set") too.
+        _p(
+            "P.risk.stop_pct",
+            "15.2",
+            "M5:1.0",
+            "/".join(
+                f"{tf.value}:{pct}"
+                for tf, pct in sorted(RISK_STOP_PCT.items(), key=lambda kv: kv[0].minutes)
+            ),
+        ),
+        _p(
+            "P.risk.tp_ladder_start",
+            "15.2",
+            "M5:2",
+            "/".join(
+                f"{tf.value}:{ladder.start_r}"
+                for tf, ladder in sorted(TP_LADDER.items(), key=lambda kv: kv[0].minutes)
+            ),
+        ),
+        _p(
+            "P.risk.tp_ladder_step",
+            "15.2",
+            "M5:1",
+            "/".join(
+                f"{tf.value}:{ladder.step_r}"
+                for tf, ladder in sorted(TP_LADDER.items(), key=lambda kv: kv[0].minutes)
             ),
         ),
     )

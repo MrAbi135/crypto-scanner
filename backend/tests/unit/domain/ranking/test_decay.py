@@ -11,9 +11,9 @@ from scanner.shared import Timeframe
 
 
 def test_the_ttl_table_is_12_5s() -> None:
-    """§12.5: M5 24, M15 24, H1 24, H4 18, D1 15."""
+    """§12.5 as of SLS v1.0.15: M5 48, M15 24, H1 24, H4 18, D1 15."""
     assert TTL_CANDLES == {
-        Timeframe.M5: 24,
+        Timeframe.M5: 48,
         Timeframe.M15: 24,
         Timeframe.H1: 24,
         Timeframe.H4: 18,

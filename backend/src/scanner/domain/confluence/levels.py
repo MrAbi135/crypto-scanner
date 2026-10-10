@@ -50,18 +50,16 @@ RISK_STOP = "risk_stop"
 
 # SLS v1.0.15 §15.2: `P.risk.stop_pct`, the timeframes whose invalidation is a
 # fixed risk stop rather than a zone or sweep level, as a percent of the entry's
-# proximal edge.
+# proximal edge. Every other timeframe misses here and keeps the zone rule.
 #
-# **Deliberately empty.** The doctrine sets M5 at 1.0%, and that value lands in
-# the same change as the M5 target ladder and TTL 48, not before. It was
-# measured on the 14 published M5 signals that the stop alone is not robust
-# (+1.68%, negative once the best two trades are removed) and that the ladder
-# alone is worse than the rule it replaces (-4.68%); only the two together
-# survive (+6.37%). Switching this on by itself would ship the configuration
-# the measurement rejected. Until that change, every lookup here misses and
-# every signal keeps the zone rule, so this commit moves no number at all --
-# which the untouched golden suite is the evidence for.
-RISK_STOP_PCT: dict[Timeframe, Decimal] = {}
+# M5 only, and only together with `TP_LADDER` and §12.5's TTL 48 -- the three
+# landed in one change (s8-confluence-v36). It was measured on the 14
+# published M5 signals that the stop alone is not robust (+1.68%, negative
+# once the best two trades are removed) and that the ladder alone is worse
+# than the rule it replaces (-4.68%); only the two together survived
+# (+6.37%). A test holds this mapping and `TP_LADDER` to the same keys, so
+# neither can be switched on, or off, without the other.
+RISK_STOP_PCT: dict[Timeframe, Decimal] = {Timeframe.M5: Decimal("1.0")}
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,10 +151,10 @@ class TargetLadder:
 
 # SLS v1.0.15 §15.2: the timeframes whose exit is an unbounded R-ladder
 # (`P.risk.tp_ladder_start`, `P.risk.tp_ladder_step`) instead of the nearest
-# liquidity pool. Empty for the same reason as `RISK_STOP_PCT`, and it must be
-# populated in the same change -- a ladder behind a zone stop was measured
-# worse than no ladder at all. A test holds the two mappings to the same keys,
-# so one cannot be switched on without the other.
+# liquidity pool: TP1 at 2R, then a rung every 1R, with no last one. M5 only,
+# landed with `RISK_STOP_PCT` in one change -- a ladder behind a zone stop was
+# measured worse than no ladder at all. A test holds the two mappings to the
+# same keys, so one cannot be switched on without the other.
 #
 # Defined BELOW `TargetLadder`, not beside `RISK_STOP_PCT`, and that is not
 # tidiness. The first draft sat up there, where an empty dict imports fine --
@@ -164,7 +162,9 @@ class TargetLadder:
 # at that position the class does not exist yet, so the module would have
 # failed to import at the very moment M5 was switched on. The part-2 mutation
 # battery is what found it, by populating the mapping in place.
-TP_LADDER: dict[Timeframe, TargetLadder] = {}
+TP_LADDER: dict[Timeframe, TargetLadder] = {
+    Timeframe.M5: TargetLadder(start_r=Decimal(2), step_r=Decimal(1)),
+}
 
 
 @dataclass(frozen=True, slots=True)
