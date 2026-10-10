@@ -14,7 +14,17 @@ import { ApiRequestError, fetchHistory, fetchStatistics } from '@services/api/cl
 
 import './history.css'
 
-const OUTCOMES = ['SUCCESS', 'FAILED', 'EXPIRED_UNTOUCHED', 'INVALIDATED_EARLY'] as const
+// Every outcome §12.4 can record. EXPIRED_ACTIVE was missing here before SLS
+// v1.0.15 too -- the same drift the backend's state lists had -- so a reader
+// could not filter to signals that timed out while in the position.
+const OUTCOMES = [
+  'SUCCESS',
+  'FAILED',
+  'CLOSED_FLAT',
+  'EXPIRED_UNTOUCHED',
+  'EXPIRED_ACTIVE',
+  'INVALIDATED_EARLY',
+] as const
 const WINDOWS = ['7d', '30d', '90d', '365d', 'all'] as const
 const AXES = ['archetype', 'grade', 'timeframe', 'symbol'] as const
 
@@ -220,6 +230,15 @@ export function HistoryScreen({ onOpenSignal }: HistoryScreenProps) {
                       ) : (
                         <>
                           {row.outcome.outcome}
+                          {/* SLS v1.0.15: a laddered signal's result is what it
+                              booked, not just its state. */}
+                          {row.outcome.realised_r !== undefined &&
+                            row.outcome.realised_r !== null && (
+                              <span data-testid={`realised-${row.signal_id}`}>
+                                {' '}
+                                ({row.outcome.realised_r}R)
+                              </span>
+                            )}
                           {/* PRD FC-10.1: present in the archive, out of the
                               stats — and the reader is told which rows the
                               statistics above are not counting. */}
@@ -285,6 +304,9 @@ function StatCard({ group }: { readonly group: StatsGroup }) {
       <p className="history__counts">
         {group.counts.success} success · {group.counts.failed} failed · {group.counts.expired}{' '}
         expired · {group.counts.invalidated_early} invalidated early
+        {/* SLS v1.0.15: reported beside the rest and never rated -- shown so a
+            flat close is visible rather than silently missing from the total. */}
+        {group.counts.closed_flat > 0 && ` · ${group.counts.closed_flat} closed flat`}
       </p>
     </li>
   )

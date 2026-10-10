@@ -9,7 +9,6 @@ and looks fine doing it.
 
 from __future__ import annotations
 
-import json
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
@@ -27,6 +26,7 @@ from scanner.interfaces.api.query import (
     parse_sort,
 )
 from scanner.interfaces.api.security import CurrentUser, require_user
+from scanner.interfaces.api.targets import targets_view
 
 router = APIRouter(prefix="/api/v1/scanner", tags=["scanner"])
 
@@ -128,7 +128,7 @@ def _row(row: FeedRow) -> dict[str, Any]:
             "distal": str(signal.entry_distal),
         },
         "invalidation": str(signal.invalidation_level),
-        "targets": json.loads(signal.target_bands),
+        "targets": targets_view(signal),
         "published_at": signal.published_at.isoformat(),
         "ttl_candles": signal.ttl_candles,
         "lifecycle_state": row.lifecycle_state,

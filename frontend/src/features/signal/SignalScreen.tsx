@@ -184,6 +184,17 @@ export function SignalScreen({ signalId, onOpenChart }: SignalScreenProps) {
   )
 }
 
+/** A pool target band as one line: a point when its edges coincide. */
+function poolText(band: SignalDetail['targets']['primary']): string {
+  if (band === null) {
+    return '—'
+  }
+
+  const span = band.low === band.high ? band.low : `${band.low} – ${band.high}`
+
+  return `${span} (pool strength ${band.strength})`
+}
+
 /** C14: entry, invalidation and targets as the three priced rows of §15.2. */
 function Levels({ row }: { readonly row: SignalDetail }) {
   const risk = payloadRisk(row)
@@ -200,18 +211,36 @@ function Levels({ row }: { readonly row: SignalDetail }) {
         <dt>invalidation</dt>
         <dd>{row.invalidation}</dd>
       </div>
-      <div>
-        <dt>target</dt>
-        <dd>
-          {row.targets.primary === null
-            ? '—'
-            : `${row.targets.primary.low}${
-                row.targets.primary.low === row.targets.primary.high
-                  ? ''
-                  : ` – ${row.targets.primary.high}`
-              } (pool strength ${row.targets.primary.strength})`}
-        </dd>
-      </div>
+      {row.targets.ladder !== undefined ? (
+        <>
+          {/* SLS v1.0.15: the exit is the ladder. Its prices come priced from
+              the backend's domain; nothing here derives them. */}
+          <div>
+            <dt>targets</dt>
+            <dd data-testid="signal-ladder">
+              {row.targets.ladder.rungs
+                .map((rung) => `TP${rung.n} ${rung.price} (${rung.r}R)`)
+                .join(' · ')}
+              {row.targets.ladder.unbounded ? ' · … no cap' : ''}
+            </dd>
+          </div>
+          <div>
+            <dt>stop</dt>
+            <dd data-testid="signal-ladder-trailing">{row.targets.ladder.trailing}</dd>
+          </div>
+          <div>
+            {/* Still shown, because it is still evidence -- but labelled so
+                nobody reads it as where the trade exits. */}
+            <dt>pool (evidence)</dt>
+            <dd data-testid="signal-pool-evidence">{poolText(row.targets.primary)}</dd>
+          </div>
+        </>
+      ) : (
+        <div>
+          <dt>target</dt>
+          <dd>{poolText(row.targets.primary)}</dd>
+        </div>
+      )}
       {row.targets.secondary !== null && (
         <div>
           <dt>secondary</dt>

@@ -385,3 +385,48 @@ describe('ScannerScreen filters', () => {
     await waitFor(() => expect(decodeURIComponent(lastUrl())).not.toContain('filter['))
   })
 })
+
+describe('ScannerScreen, laddered exit', () => {
+  it('shows TP1 where a pool signal shows its target', async () => {
+    // SLS v1.0.15: on a laddered row the pool is not where the trade exits,
+    // so the row's one target figure is the first rung.
+    stubFeed([
+      {
+        ...ROW,
+        timeframe: 'M5',
+        targets: {
+          ...ROW.targets,
+          ladder: {
+            start_r: '2',
+            step_r: '1',
+            unbounded: true,
+            rungs: [
+              { n: 1, r: '2', price: '106.08' },
+              { n: 2, r: '3', price: '107.12' },
+              { n: 3, r: '4', price: '108.16' },
+            ],
+            trailing: 'the invalidation trails one rung behind the highest reached',
+          },
+        },
+      },
+    ])
+
+    render(<ScannerScreen />)
+
+    const row = await screen.findByTestId('signal-sig-1')
+
+    expect(within(row).getByTestId('signal-row-target').textContent).toBe('106.08')
+    expect(within(row).getByText('TP1')).toBeDefined()
+    expect(row.textContent).not.toContain('2515.43')
+  })
+
+  it('still shows a pool signal’s target', async () => {
+    stubFeed([ROW])
+
+    render(<ScannerScreen />)
+
+    const row = await screen.findByTestId('signal-sig-1')
+
+    expect(within(row).getByTestId('signal-row-target').textContent).toBe('2515.43')
+  })
+})

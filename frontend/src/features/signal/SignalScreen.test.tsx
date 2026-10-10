@@ -307,3 +307,64 @@ describe('SignalScreen', () => {
     )
   })
 })
+
+// SLS v1.0.15: an M5 signal's exit is a ladder, priced by the backend's domain
+// (`interfaces/api/targets.py`). These are its real numbers: proximal 104, a
+// 1% stop, R 1.04 -- TP1 106.08, TP2 107.12, TP3 108.16.
+const LADDER = {
+  start_r: '2',
+  step_r: '1',
+  unbounded: true,
+  rungs: [
+    { n: 1, r: '2', price: '106.08' },
+    { n: 2, r: '3', price: '107.12' },
+    { n: 3, r: '4', price: '108.16' },
+  ],
+  trailing: 'the invalidation trails one rung behind the highest reached',
+}
+
+describe('SignalScreen, laddered exit', () => {
+  it('shows the rungs as the backend priced them, and says there is no last one', async () => {
+    stub({ detail: { ...DETAIL, targets: { ...DETAIL.targets, ladder: LADDER } } })
+
+    render(<SignalScreen signalId="sig-1" />)
+
+    const ladder = await screen.findByTestId('signal-ladder')
+
+    expect(ladder.textContent).toBe(
+      'TP1 106.08 (2R) · TP2 107.12 (3R) · TP3 108.16 (4R) · … no cap',
+    )
+    expect(screen.getByTestId('signal-ladder-trailing').textContent).toContain('trails')
+  })
+
+  it('keeps the pool, labelled as evidence rather than as the exit', async () => {
+    stub({ detail: { ...DETAIL, targets: { ...DETAIL.targets, ladder: LADDER } } })
+
+    render(<SignalScreen signalId="sig-1" />)
+
+    const pool = await screen.findByTestId('signal-pool-evidence')
+
+    expect(pool.textContent).toBe('2515.43 (pool strength 23.75)')
+    expect(screen.queryByText('target')).toBeNull()
+  })
+
+  it('renders a pool-exit signal exactly as before', async () => {
+    render(<SignalScreen signalId="sig-1" />)
+
+    expect(await screen.findByText('2515.43 (pool strength 23.75)')).toBeDefined()
+    expect(screen.queryByTestId('signal-ladder')).toBeNull()
+    expect(screen.queryByTestId('signal-pool-evidence')).toBeNull()
+  })
+
+  it('is axe-clean with a ladder', async () => {
+    stub({ detail: { ...DETAIL, targets: { ...DETAIL.targets, ladder: LADDER } } })
+
+    const { container } = render(<SignalScreen signalId="sig-1" />)
+
+    await screen.findByTestId('signal-ladder')
+
+    const violations = await axeViolations(container)
+
+    expect(violations, describeViolations(violations)).toEqual([])
+  })
+})
