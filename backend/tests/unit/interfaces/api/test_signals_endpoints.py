@@ -742,6 +742,9 @@ def test_a_group_reports_its_counts_its_rate_and_what_the_rate_is_worth() -> Non
         "failed": 10,
         "expired": 5,
         "invalidated_early": 2,
+        # SLS v1.0.15: reported beside the rest, never rated. Zero here because
+        # this fixture predates any laddered signal -- the key is the contract.
+        "closed_flat": 0,
     }
     assert group["hit_rate"]["rated"] == 40
     assert group["hit_rate"]["rate_pct"] == "75.00"
