@@ -62,13 +62,12 @@
       ]
     },
     {
-      "name": "the M5 stop is switched on alone, without the ladder it was measured with",
+      "name": "the M5 stop stays on while the ladder it was measured with is switched off (re-anchored at the v36 flip)",
       "file": "backend/src/scanner/domain/confluence/levels.py",
-      "old": "RISK_STOP_PCT: dict[Timeframe, Decimal] = {}",
-      "new": "RISK_STOP_PCT: dict[Timeframe, Decimal] = {Timeframe.M5: Decimal(\"1.0\")}",
+      "old": "    Timeframe.M5: TargetLadder(start_r=Decimal(2), step_r=Decimal(1)),\n}",
+      "new": "}",
       "expect_failing": [
-        "test_the_mapping_ships_empty_until_the_m5_change",
-        "test_with_the_mapping_empty_m5_is_untouched"
+        "test_the_live_m5_configuration_is_a_risk_stop_and_a_ladder"
       ]
     },
     {
