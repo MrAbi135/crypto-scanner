@@ -53,6 +53,8 @@ from scanner.domain.ict import (
     detect_fvg,
     detect_order_block,
 )
+from scanner.domain.structure import swing_window
+from scanner.domain.structure.model import SwingStrength
 from scanner.shared import Timeframe
 
 # v5: the three remaining index-frame mixes in this file are converted to
@@ -82,7 +84,22 @@ from scanner.shared import Timeframe
 # pass and be walked from there (zone tests and invalidations 447-460 candles
 # late, WINDOW_START). Its FVG test reads the candle after the displacement, so
 # a displacement is decided once that candle has closed.
-ICT_OB_ALGO_VERSION = "s6-ob-v8"
+# v9: evidence is read as of the decision candle (G2 no-repaint, 2026-10-10).
+# §5.1's grade, both promotions and §5.3's failure swing picked swings by the
+# PIVOT's time, but §3.1 writes a pivot's record five candles later (v1.0.9,
+# internal and external alike), and an MSS exists from its follow-through. A
+# pass that decided an OB in one go over a long window -- a version's first
+# pass, a catch-up after a restart, a backfill, the golden harness -- read
+# records a live pass at that candle never had, so the stored zone depended on
+# how the candle was reached. Measured by the no-repaint property: an OB_A
+# regraded OB_B, and an OB_B a prefix built that the whole series never did.
+# Evidence now counts only once recorded by the deciding candle: d+1 for an
+# OB (its FVG test reads that candle), the invalidation candle for a breaker,
+# a mitigation block and the failure swing. It also stops deciding a
+# displacement on the newest candle: v8's comment said d+1 decides, but the
+# loop decided d as soon as it was newest, so a pass could store an OB the
+# next pass rejected -- and nothing removed it.
+ICT_OB_ALGO_VERSION = "s6-ob-v9"
 
 _ATR_PERIOD = 14
 _ZERO = Decimal("0")
@@ -263,6 +280,13 @@ class IctOrderBlockReplayService:
             if displacement.candle_index + 1 < first_index:
                 continue
 
+            # ...and until that candle has closed it is not decided at all
+            # (v9). Deciding it on the newest candle wrote an OB from one
+            # candle's less evidence; when the next pass rejected it, nothing
+            # removed it, so the store kept an OB no full replay produces.
+            if displacement.candle_index + 1 >= len(candles):
+                continue
+
             ob = self._detect_order_block(
                 candles=candles,
                 swings=swings,
@@ -280,7 +304,11 @@ class IctOrderBlockReplayService:
             break_flags = _structure_break_flags(
                 candles[displacement.candle_index],
                 displacement,
-                swings,
+                _known_by(
+                    swings,
+                    _ob_decided_at(candles, displacement.candle_index),
+                    timeframe,
+                ),
                 before_at=candles[displacement.candle_index].open_time,
             )
 
@@ -403,10 +431,12 @@ class IctOrderBlockReplayService:
         if atr <= _ZERO:
             return None
 
+        decided_at = _ob_decided_at(candles, displacement_index)
+
         break_flags = _structure_break_flags(
             candles[displacement_index],
             displacement,
-            swings,
+            _known_by(swings, decided_at, candles[0].timeframe),
             before_at=candles[displacement_index].open_time,
         )
 
@@ -445,6 +475,7 @@ class IctOrderBlockReplayService:
                     mss_spans,
                     displacement,
                     candles[displacement_index].open_time,
+                    decided_at=decided_at,
                 ),
                 fvg_created=fvg_created,
                 origin_swept=False,
@@ -557,9 +588,13 @@ class IctOrderBlockReplayService:
             current = updated
 
             if updated.state is ZoneState.INVALIDATED:
+                # Decided on the invalidation candle: only what was confirmed
+                # by then -- see v9.
+                known = _known_by(swings, candles[index].open_time, record.timeframe)
+
                 origin_failure_swing = _has_failure_swing_before_invalidation(
                     updated,
-                    swings,
+                    known,
                     candles,
                     invalidation_index=index,
                 )
@@ -575,7 +610,7 @@ class IctOrderBlockReplayService:
                     timeframe=(record.timeframe),
                     candles=candles,
                     atrs=atrs,
-                    swings=swings,
+                    swings=known,
                     invalidation_index=index,
                 )
 
@@ -588,7 +623,7 @@ class IctOrderBlockReplayService:
                         timeframe=(record.timeframe),
                         candles=candles,
                         atrs=atrs,
-                        swings=swings,
+                        swings=known,
                         invalidation_index=index,
                     )
 
@@ -1302,6 +1337,8 @@ def _within_mss(
     spans: dict[str, tuple[tuple[datetime, datetime], ...]],
     displacement: Displacement,
     at: datetime,
+    *,
+    decided_at: datetime | None = None,
 ) -> bool:
     """Does this displacement sit inside an MSS's confirming move?
 
@@ -1311,13 +1348,59 @@ def _within_mss(
 
     `at` is the displacement candle's `open_time`, not its index. See
     `_mss_spans` for why the index cannot answer this.
+
+    `decided_at` is the open time of the candle that decides the OB. An MSS
+    exists only from its follow-through candle -- the span's end -- so one
+    confirmed after the decision is not evidence the OB had (v9). None keeps
+    the old, unbounded reading for callers that have no decision candle.
     """
     direction = _DISPLACEMENT_TO_SHIFT.get(displacement.direction.value)
 
     if direction is None:
         return False
 
-    return any(start <= at <= end for start, end in spans.get(direction, ()))
+    return any(
+        start <= at <= end and (decided_at is None or end <= decided_at)
+        for start, end in spans.get(direction, ())
+    )
+
+
+def _ob_decided_at(candles: Sequence[Candle], displacement_index: int) -> datetime:
+    """The open time of the candle whose close decides an OB: d+1.
+
+    The FVG test reads the candle after the displacement, so that is the pass
+    on which the OB is settled (v8). Derived from time, so it is defined even
+    when d is the newest candle in the window and d+1 has not closed yet.
+    """
+    displacement_candle = candles[displacement_index]
+
+    return displacement_candle.open_time + displacement_candle.timeframe.duration
+
+
+def _known_by(
+    swings: tuple[SwingEvidence, ...],
+    decided_at: datetime,
+    timeframe: Timeframe,
+) -> tuple[SwingEvidence, ...]:
+    """The swing records that existed on the candle that opened at `decided_at`.
+
+    `SwingEvidence.at` is the PIVOT's time, but SLS §3.1 (v1.0.9, ruling 2)
+    writes a pivot's one record when its k = 5 decision is made -- with its
+    final strength, internal or external alike. So a record exists from the
+    pivot's fifth right-hand candle, and a live pass deciding before that has
+    no record of it at all. Reading it anyway is look-ahead, invisible in a
+    live pass -- which never has it -- so it surfaces only where a long window
+    is decided in one go (v9).
+
+    The first draft used k = 2 for an internal record, from §3.1's swing
+    definition rather than its record timing, and the no-repaint property
+    caught it: an internal low printed three candles before a displacement
+    was in a whole-series run's evidence and absent from a prefix's, so the
+    prefix built an OB the whole series did not.
+    """
+    recorded_after = timeframe.duration * swing_window(SwingStrength.EXTERNAL)
+
+    return tuple(swing for swing in swings if swing.at + recorded_after <= decided_at)
 
 
 def _structure_break_flags(

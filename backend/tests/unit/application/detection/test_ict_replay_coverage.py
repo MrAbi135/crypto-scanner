@@ -1163,6 +1163,33 @@ def _mss(
     )
 
 
+def _msses_confirmed_by_each_decision(*, index_offset: int = 0) -> tuple[ShiftEvidenceRecord, ...]:
+    """One MSS per displacement in the fixture, shaped the way live ones are.
+
+    The span runs from two candles before the displacement to its follow-
+    through on d+1 -- the candle that decides the OB (s6-ob-v9). Measured on
+    the host 2026-10-10: every one of the 21 order blocks graded OB_A by the
+    MSS route alone had its follow-through on d or d+1, so this is the live
+    shape, not a convenient one. The earlier fixture spanned candles 0-299 and
+    so leaned on an MSS confirmed long after every OB was decided -- exactly
+    the look-ahead v9 removes.
+    """
+    candles = pad_for_warmup(fixture_series())
+    atrs = ob_mod.wilder_atr_series(candles)
+    records = []
+
+    for displacement in ob_mod._detect_displacements(candles, atrs):
+        d = displacement.candle_index
+
+        if d + 1 >= len(candles) or d < 2:
+            continue
+
+        for direction in ("UP", "DOWN"):
+            records.append(_mss(direction, d - 2, d + 1, index_offset=index_offset))
+
+    return tuple(records)
+
+
 @pytest.mark.asyncio
 async def test_an_mss_over_the_displacement_grades_the_ob_a() -> None:
     """§5.1: OB_A "if the qualifying move broke external structure **or the
@@ -1174,7 +1201,7 @@ async def test_an_mss_over_the_displacement_grades_the_ob_a() -> None:
     have come from the MSS.
     """
     without = await _ob_grades(())
-    covering = await _ob_grades((_mss("UP", 0, 299), _mss("DOWN", 0, 299)))
+    covering = await _ob_grades(_msses_confirmed_by_each_decision())
 
     assert without, "fixture produced no order blocks, so this proves nothing"
     assert without == {"OB_B"}
@@ -1200,16 +1227,26 @@ async def test_an_mss_recorded_by_an_older_window_is_still_its_origin() -> None:
     have stored. Nothing about the market changed, so nothing about the grade
     may change either.
     """
-    fresh = await _ob_grades((_mss("UP", 0, 299), _mss("DOWN", 0, 299)))
-    stale = await _ob_grades(
-        (
-            _mss("UP", 0, 299, index_offset=140),
-            _mss("DOWN", 0, 299, index_offset=140),
-        )
-    )
+    fresh = await _ob_grades(_msses_confirmed_by_each_decision())
+    stale = await _ob_grades(_msses_confirmed_by_each_decision(index_offset=140))
 
     assert "OB_A" in fresh
     assert stale == fresh
+
+
+@pytest.mark.asyncio
+async def test_an_mss_confirmed_after_the_ob_was_decided_does_not_grade_it() -> None:
+    """s6-ob-v9: an MSS exists only from its follow-through candle.
+
+    A span from candle 0 to 299 covers every displacement in the fixture, but
+    its follow-through comes long after each OB's decision on d+1. A live pass
+    deciding that OB never had the MSS, so a pass over the whole window may not
+    use it either -- otherwise the stored grade depends on whether the candle
+    was decided live or in a catch-up.
+    """
+    late = await _ob_grades((_mss("UP", 0, 299), _mss("DOWN", 0, 299)))
+
+    assert late == {"OB_B"}
 
 
 @pytest.mark.asyncio
@@ -1238,3 +1275,90 @@ async def test_the_mss_direction_vocabulary_is_translated() -> None:
     )
 
     assert mistyped == {"OB_B"}
+
+
+# --- s6-ob-v9: evidence as of the deciding candle, at the call sites ----------
+
+
+async def _order_blocks(
+    candles: list[Candle],
+    structure: tuple[StructureEvidenceRecord, ...] = (),
+) -> list[IctZoneRecord]:
+    zones = FakeZoneRepository()
+
+    await IctOrderBlockReplayService(
+        FakeCandleRepository(candles),
+        zones,
+        FakeTransitionRepository(),
+        FakeSnapshotStore(),
+        FakeEvidenceRepository(structure),
+        FakeClock(),
+    ).run("S6COVUSDT", Timeframe.M5, candles[0].open_time, candles[-1].close_time)
+
+    return [zone for zone in zones.zones.values() if zone.zone_type == "OB"]
+
+
+def _swing_record(
+    candles: list[Candle], pivot: int, price: Decimal, kind: str
+) -> StructureEvidenceRecord:
+    return StructureEvidenceRecord(
+        event_type=f"SWING_EXTERNAL_{kind}",
+        event_at=candles[pivot].open_time,
+        algo_version="s4-test",
+        payload=json.dumps(
+            {"index": pivot, "price": str(price), "strength": "EXTERNAL", "kind": kind}
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_ob_grade_ignores_a_pivot_recorded_after_the_ob_was_decided() -> None:
+    """The measured case, through the replay rather than the helper.
+
+    An older external pivot the displacement closed beyond makes the OB OB_A.
+    A second, unbroken pivot printed two candles before the displacement is
+    recorded five candles after it prints -- after the OB's decision on d+1.
+    A live pass grades OB_A; v8 graded the same OB against the later pivot.
+    """
+    candles = pad_for_warmup(fixture_series())
+    baseline = await _order_blocks(candles)
+
+    assert baseline, "fixture produced no order blocks, so this proves nothing"
+
+    ob = max(baseline, key=lambda zone: zone.confirmed_index)
+    d = ob.confirmed_index
+    close = candles[d].close
+    bullish = ob.polarity == "BULLISH"
+    kind = "HIGH" if bullish else "LOW"
+    step = Decimal("0.01")
+
+    broken = _swing_record(candles, d - 20, close - step if bullish else close + step, kind)
+    unrecorded = _swing_record(candles, d - 2, close + step if bullish else close - step, kind)
+
+    graded = {
+        zone.created_index: zone.grade
+        for zone in await _order_blocks(candles, (broken, unrecorded))
+        if zone.confirmed_index == d
+    }
+
+    assert graded.get(ob.created_index) == "OB_A", (
+        "the OB was graded against a pivot recorded after it was decided"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_displacement_on_the_newest_candle_is_not_decided_yet() -> None:
+    """Its FVG test reads d+1, so d+1 decides it. Deciding it on d stored an OB
+    the next pass could reject, and nothing removed it (v9)."""
+    candles = pad_for_warmup(fixture_series())
+    full = await _order_blocks(candles)
+
+    assert full, "fixture produced no order blocks, so this proves nothing"
+
+    d = min(zone.confirmed_index for zone in full)
+
+    newest = await _order_blocks(candles[: d + 1])
+    decided = await _order_blocks(candles[: d + 2])
+
+    assert all(zone.confirmed_index != d for zone in newest)
+    assert any(zone.confirmed_index == d for zone in decided)
