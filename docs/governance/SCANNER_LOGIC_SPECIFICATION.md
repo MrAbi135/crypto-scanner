@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.14
-**Ratified:** 2026-07-12 · **Last amended:** 2026-10-05 (v1.0.14; see Amendment History)
+**Version:** 1.0.15
+**Ratified:** 2026-07-12 · **Last amended:** 2026-10-10 (v1.0.15; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -1012,21 +1012,41 @@ Publication checklist (§15.3) evaluated exactly once, atomically: payload compl
 
 Per closed candle on the signal's TF: entry-zone touch check (→ ACTIVE); invalidation check — a candle **close** beyond the invalidation level (wick-through alone records `stress_test: true` but does not fail the signal; consistent with zone grammar §5.9); target check — **touch** of target zone suffices (targets are liquidity pools; a wick into the pool is the pool being consumed — asymmetry with invalidation is deliberate and doctrine-consistent); premise checks — sweep reclaimed, MSS demoted, zone violated ⇒ `INVALIDATED_EARLY` (pre-touch only).
 
+**M5 (v1.0.15): risk stop, target ladder and trailing invalidation.** On M5 the entry is the zone's **proximal** edge, the invalidation is the §15.2 `risk_stop`, and the single target is replaced by a ladder `TPn = (n+1) × R` for n = 1, 2, 3, … with no upper bound. Monitoring differs from the rules above in three ways, and only on M5:
+
+1. **Touch, not close.** The invalidation is read on **touch** — a candle whose range reaches it ends the signal. The close rule above exists because a wick through a *zone* does not falsify the zone (§5.9); the M5 invalidation is no longer a zone edge but a risk boundary, and a risk boundary is a resting order, which a wick fills. Ladder rungs are likewise read on touch, as the pool targets they replace were.
+2. **Trailing.** When TPn is reached the invalidation moves to TP(n−1)'s level, TP0 being the entry: reaching 2R moves it to the entry, reaching 3R moves it to 2R, reaching 4R moves it to 3R, and onward. It never moves against D. A candle whose extreme passes several rungs advances through all of them.
+3. **Derived, never stored.** The live trailing level is recomputed from the candles the signal has lived through on every pass, exactly as §12.4's excursions are. It is never written onto the signal, which §15.3(5)'s seal keeps immutable; the published invalidation remains the *initial* one.
+
+Same-candle collision keeps v1.0.8's rule: a candle containing both the live invalidation and the next rung resolves to the **invalidation**, recorded with a reason naming the indeterminate order. Premise checks still apply before the entry is touched.
+
 ### 12.4 Success / Failure Accounting
 
 `SUCCESS`: target touched before invalidation close. `FAILED`: invalidation close first. **Same-candle collision (v1.0.8):** one candle whose range touches the target and whose close is beyond the invalidation satisfies both halves with no way to order them; it resolves to `FAILED`, recorded with a reason naming the indeterminate order — §15.4 puts the record above the numbers, and awarding the favourable reading of an unknowable order is the flattery that ruins one. Both record: elapsed candles, max favorable excursion (MFE), max adverse excursion (MAE) in R units (R = |entry mid − invalidation|). Outcomes are immutable and feed §28-Constitution signal-quality metrics per algo version. Expired states are excluded from hit-rate but reported (a scanner that times out constantly has a target-selection problem — visible, not hidden).
+
+**M5 (v1.0.15).** A trailing exit has no single target, so the binary above does not describe it: a signal that reached 3R and was stopped at 2R neither touched a target nor closed through its invalidation. Every resolved M5 signal therefore records **`realised_r`**, the R booked at the exit, and its state follows from the sign:
+
+| `realised_r` | state | counts toward hit-rate |
+|---|---|---|
+| > 0 | `SUCCESS` | yes |
+| < 0 | `FAILED` | yes |
+| exactly 0 | **`CLOSED_FLAT`** | **no — reported separately** |
+
+`CLOSED_FLAT` is the signal that reached TP1, had its invalidation moved to the entry, and gave the move back. It eliminated its own risk and then made nothing, which is neither a win nor a loss; folding it into either is the flattery §15.4 forbids, and it is excluded from hit-rate on the same principle as the expired states. On M5, **R = |entry proximal − initial invalidation|**, which is `P.risk.stop_pct[M5]` of the proximal price — measured from where the fill happens, not from the zone mid, so the published R-multiple is the achievable one. `EXPIRED_ACTIVE` on M5 records `realised_r` at the close of the final TTL candle; it stays excluded from hit-rate, and enters the R-expectancy report.
 
 ### 12.5 Expiration (TTL)
 
 | TF | TTL (closed candles) | Wall-clock |
 |---|---|---|
-| M5 | 24 | 2 h |
+| M5 | **48** | **4 h** |
 | M15 | 24 | 6 h |
 | H1 | 24 | 24 h |
 | H4 | 18 | 3 d |
 | D1 | 15 | 15 d |
 
 TTL = `P.lifecycle.ttl[TF]`. Rationale: a setup's evidence is a snapshot of flow; beyond ~20 bars the causal chain is archaeology. Display-rank decay (§9.3) runs across the same window.
+
+M5's TTL is 48 since v1.0.15, and it belongs to the §12.3 ladder rather than to the rationale above: a trailing exit needs room to travel, and at 24 candles the ladder was measured to be cut off before it resolved (see the v1.0.15 entry).
 
 The table is complete as written: W1 carries no row because §0.3 declares it *"context only, no signals"*, and a timeframe that cannot publish has nothing to expire. A W1 row here would imply the opposite.
 
@@ -1078,17 +1098,19 @@ A signal is a claim backed by evidence (Constitution §28.1). Anything less than
 | Confidence | FinalConfidence + grade + factor breakdown F1–F6 | §8–§9 |
 | Reason | Archetype + deterministic reason string (template, human-readable) + AI thesis (when available, evidence-cited) | §8.6, §11 |
 | Risk | Invalidation distance in ATR and %, R-multiple to target, market-condition tags (wash_risk, funding extreme, exhaustion_watch, news_risk) | §12, §6, §7 |
-| Invalidation | Exact price level + rule that set it (zone distal edge / swept extreme per archetype) | §5, §8.6 |
+| Invalidation | Exact price level + rule that set it (zone distal edge / swept extreme per archetype). **On M5: `risk_stop`**, `P.risk.stop_pct[M5]` = 1.0% of the entry **proximal** edge, against D (v1.0.15) | §5, §8.6, §12.3 |
 | Entry Zone | Zone band [proximal, distal] + zone object id + refined sub-zone where defined | §5 |
-| Target Zone | Primary: nearest opposing external liquidity pool band; Secondary: next pool / range extreme; both with pool ids and strengths | §4.5 |
+| Target Zone | Primary: nearest opposing external liquidity pool band; Secondary: next pool / range extreme; both with pool ids and strengths. **On M5: a ladder `TPn = (n+1) × R`** from `P.risk.tp_ladder_start` = 2R in steps of `P.risk.tp_ladder_step` = 1R, unbounded; the pool bands are still recorded as evidence but do not set the exit (v1.0.15) | §4.5, §12.3 |
 | Supported Timeframes | Signal TF + HTF bias chain states at creation (snapshot) | §3.7 |
 | Versions | algo_version, param_set_version, model/prompt versions (if AI text attached) | §0.4 |
+
+**What the M5 invalidation means (v1.0.15).** Everywhere else the invalidation is the price at which the *setup* is wrong. On M5 it is the price at which the *risk budget* is spent. The zone remains the entry and the evidence; it no longer sets the stop. One consequence is stated rather than left to be found: when a zone is wider than the stop, the stop lies **inside** the band, and a fill deeper than the stop is not possible. That is accepted — on M5 the trade is entered at the proximal edge, and the rest of the band is evidence, not a level the signal relies on.
 
 ### 15.3 Publication Checks (Atomic, §12.2)
 
 1. Payload complete — every field above non-null and internally consistent (entry ≠ invalidation side, target beyond entry in direction D);
 2. All feeds fresh at publish moment; no DEGRADED input in evidence chain;
-3. R-multiple to primary target ≥ `P.quality.min_rr = 1.5` (a structurally valid setup with no room to travel is not an opportunity);
+3. R-multiple to primary target ≥ `P.quality.min_rr = 1.5` (a structurally valid setup with no room to travel is not an opportunity). **On M5 this check is satisfied by construction** — TP1 is fixed at 2R — and so no longer discriminates; it is stated here so that nobody reads it as protection it does not provide (v1.0.15);
 4. Dedup key clear (§10.3); tier/priority caps applied;
 5. Immutability seal: payload hashed; the hash accompanies the signal for audit.
 
@@ -1150,14 +1172,90 @@ Confidence is displayed with its factor breakdown — never as a bare number. Ta
 | P.confluence.factor_points | see §8.3.1 tables | §8.3.1 |
 | P.alert.storm_count | 40 per 5 min | §10.2 |
 | P.alert.user_daily_cap | 25 | §10.3 |
-| P.lifecycle.ttl | M5:24 · M15:24 · H1:24 · H4:18 · D1:15 | §12.5 |
+| P.lifecycle.ttl | M5:48 · M15:24 · H1:24 · H4:18 · D1:15 | §12.5 |
 | P.quality.min_rr | 1.5 | §15.3 |
+| P.risk.stop_pct | M5:1.0% (other TFs: not set — zone rule applies) | §15.2 |
+| P.risk.tp_ladder_start | 2R (M5) | §15.2, §12.3 |
+| P.risk.tp_ladder_step | 1R (M5) | §15.2, §12.3 |
 
 Every parameter change increments `param_set_version` and requires golden-dataset re-validation before deployment (Constitution §30.8, §32.3).
 
 ---
 
 ## Amendment History
+
+### v1.0.15 — 2026-10-10
+
+**M5 only: the invalidation becomes a fixed risk stop, the single target
+becomes an unbounded R-ladder with a trailing invalidation, and the TTL doubles.
+§12.3, §12.4, §12.5, §15.2, §15.3 and Appendix A.**
+
+**Why.** The published record stood at 4 SUCCESS against 27 losses, and the
+24 failures averaged only **0.69R** of favourable excursion before stopping out:
+they did not come close and reverse, they barely moved. The cause was traced to
+§15.2's invalidation rule. The stop is the zone's distal edge, so its distance
+is set by how wide the detected zone happens to be rather than by volatility,
+and across signals that width spans roughly **10×** (0.07% to 0.79% of price).
+The narrowest stops also make R-multiples incomparable: one M15 signal with a
+0.0736% stop priced an ordinary 4.6% move at 61R and carried an entire test
+result by itself.
+
+**What the owner was shown before ruling.** All published M5 signals replayed
+against their real forward candles (n=14, TTL 48, touch stop, no fees or
+slippage). "drop2" is the per-trade result after removing the best two trades —
+a result that needs them is not a finding:
+
+| variant | total | per trade | W/L | drop2 |
+|---|---|---|---|---|
+| zone stop + pool target (until now) | −10.29% | −0.735R | 2/12 | −0.939 |
+| 1% stop + pool target | +1.68% | +0.120R | 9/5 | −0.063 |
+| zone stop + ladder | −4.68% | −0.335R | 2/11 | −0.856 |
+| **1% stop + ladder (this amendment)** | **+6.37%** | **+0.455R** | **8/5** | **+0.196** |
+
+Neither half works alone: the stop alone does not survive the drop test and the
+ladder alone is worse than before. The pair does, and the mechanism is plain —
+a stop that clears ordinary noise takes winners from 2 to 9, and the ladder
+stops a fixed target from capping the winners that stop bought. TTL is part of
+the same package: the same variant measured **+1.80% at 24 candles (drop2
+−0.089)** against **+5.76% at 48 (drop2 +0.145)**. Among the target ladders
+tried, a first rung at 2R was not improved on (2.5R tied, 1R and 1.5R were
+worse).
+
+**The owner's five rulings.**
+
+1. **R is anchored at the zone's proximal edge**, where the fill happens, not at
+   the mid. Measuring from the mid while filling at the edge is what made the
+   published R:R (about 7–12) flatter the achievable one (about 4).
+2. **M5 only.** M15's best variant did not survive the drop test. H1 lost at
+   every stop from 1% to 5% with an unchanged 6/9 win–loss — widening converted
+   no losses at all, so H1's losses are not stop-outs in noise and no stop
+   setting can address them.
+3. **Touch for every M5 stop**, the initial one included. That is what was
+   measured, it is what a resting order does, and §12.3's close rule rests on
+   zone grammar that no longer describes the M5 stop. The close convention
+   scored higher; it is the optimistic bound, not the one adopted.
+4. **`CLOSED_FLAT` is excluded from hit-rate** and reported separately.
+5. **Adopted now rather than after a larger sample.** The geometry it replaces
+   was measured to lose, and adopting it now makes the forward sample an
+   out-of-sample test of the new rule instead of more evidence about the old
+   one. M15 and H1 keep the previous rules, so the same market runs both
+   geometries side by side and supplies a control.
+
+**What this amendment does not claim.** That M5 is profitable. Fourteen trades
+is a thin sample, roughly twenty configurations were tried on the same
+published record, and **no figure above includes fees, slippage or spread** —
+though at a 1% stop these weigh far less than they did at 0.07%. It is the best
+evidenced configuration that was measured, adopted because the alternative was
+measured to be worse, and it is to be judged on the forward record.
+
+**What changes meaning.** On M5 the invalidation stops being the price at which
+the setup is wrong and becomes the price at which the risk budget is spent. The
+zone is still the entry and the evidence. §15.2 states the consequence for a
+zone wider than the stop.
+
+**Versioning.** The confluence algorithm version increments, and per Appendix
+A's own rule `param_set_version` increments and the golden datasets are
+re-validated before deployment. A deploy and a soak reset follow.
 
 ### v1.0.14 — 2026-10-05
 
