@@ -32,6 +32,7 @@ from scanner.domain.confluence import (
 )
 from scanner.domain.confluence.levels import Invalidation
 from scanner.domain.lifecycle import SignalPayload
+from scanner.shared import Timeframe
 
 LADDER = TargetLadder(start_r=Decimal(2), step_r=Decimal(1))
 
@@ -213,8 +214,10 @@ def test_a_pool_exit_payload_carries_no_ladder_key_at_all() -> None:
 # --- the flip -----------------------------------------------------------------
 
 
-def test_the_ladder_mapping_ships_empty_until_the_m5_change() -> None:
-    assert TP_LADDER == {}
+def test_only_m5_has_a_ladder_and_it_is_two_r_in_steps_of_one() -> None:
+    """Appendix A v1.0.15: `P.risk.tp_ladder_start` 2R, `tp_ladder_step` 1R,
+    M5 only -- TP1 2R, TP2 3R, TP3 4R, with no last rung."""
+    assert {Timeframe.M5: TargetLadder(Decimal(2), Decimal(1))} == TP_LADDER
 
 
 def test_the_stop_and_the_ladder_switch_on_together() -> None:

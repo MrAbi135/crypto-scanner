@@ -33,6 +33,7 @@ from scanner.domain.confluence import (
 )
 from scanner.domain.confluence.levels import Invalidation
 from scanner.domain.lifecycle import Candle, SignalState, accounting
+from scanner.shared import Timeframe
 
 ONE_PCT = Decimal("1.0")
 
@@ -93,18 +94,16 @@ def test_an_unknown_direction_is_refused() -> None:
         risk_stop_for(entry=zone("UP"), direction="SIDEWAYS", stop_pct=ONE_PCT)
 
 
-def test_the_mapping_ships_empty_until_the_m5_change() -> None:
-    """A tripwire, and the change that flips M5 on edits it on purpose.
+def test_only_m5_carries_a_risk_stop_and_it_is_one_percent() -> None:
+    """Appendix A v1.0.15: `P.risk.stop_pct` M5:1.0%, other TFs not set.
 
-    Measured on the 14 published M5 signals: the 1% stop alone is not robust
-    (+1.68%, negative once the best two trades are dropped) and the ladder
-    alone is worse than the rule it replaces (-4.68%). Only the two together
-    survive. Populating this mapping without the ladder and TTL 48 ships the
-    configuration that measurement rejected -- so it must happen in the same
-    change, and this test is what makes that a conscious edit rather than a
-    one-line slip.
+    It shipped empty first and was switched on in s8-confluence-v36 together
+    with the ladder and TTL 48. A second timeframe appearing here is a
+    doctrine change, not a tweak -- the measurement behind M5's value says
+    nothing about any other timeframe -- so this test makes it a conscious
+    edit.
     """
-    assert RISK_STOP_PCT == {}
+    assert {Timeframe.M5: Decimal("1.0")} == RISK_STOP_PCT
 
 
 # --- one anchor ---------------------------------------------------------------

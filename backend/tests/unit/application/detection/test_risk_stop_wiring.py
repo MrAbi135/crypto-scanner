@@ -1,10 +1,12 @@
 """Where SLS v1.0.15's risk stop meets the application: the call site and the monitor.
 
-`RISK_STOP_PCT` ships empty, so in production nothing here fires yet. These
-tests switch it on with `monkeypatch.setitem` -- which mutates the one dict
-every module imported, and restores it afterwards -- to prove the wiring is
-correct before the change that populates it lands. A mechanism that is only
-ever exercised after it goes live is a mechanism first tested on real signals.
+These tests were written while `RISK_STOP_PCT` and `TP_LADDER` shipped empty,
+and switched M5 on with `monkeypatch.setitem` -- which mutates the one dict
+every module imported, and restores it afterwards -- to prove the wiring
+before it went live. Since s8-confluence-v36 M5 is on in production, so those
+calls are now no-ops that keep each test's premise explicit; the tests for
+the live configuration itself sit beside them, and the zone-rule fallback is
+exercised by removing M5 with `monkeypatch.delitem`.
 """
 
 from __future__ import annotations
@@ -91,9 +93,49 @@ def test_a_timeframe_without_one_keeps_the_archetype_rule(monkeypatch) -> None:
     assert levels.invalidation.price == Decimal(100)
 
 
-def test_with_the_mapping_empty_m5_is_untouched() -> None:
-    """The neutrality of this change, at the call site: M5 today still gets
-    the zone rule, because nothing has switched the risk stop on."""
+def test_the_live_m5_configuration_is_a_risk_stop_and_a_ladder() -> None:
+    """No monkeypatch: what production publishes on M5 since v36."""
+    levels, unmet = _levels_for(
+        Archetype.CONTINUATION_PULLBACK,
+        timeframe=Timeframe.M5,
+        direction="UP",
+        zone=_zone(),
+        swept_extreme=None,
+        target_pool=_pool(),
+        pd=None,
+    )
+
+    assert unmet == ()
+    assert levels is not None
+    assert levels.invalidation.rule == RISK_STOP
+    assert levels.invalidation.price == Decimal("102.96")
+    assert levels.ladder == TargetLadder(Decimal(2), Decimal(1))
+    assert levels.rung_price(1) == Decimal("106.08")
+
+
+def test_the_live_configuration_leaves_h1_on_its_pool() -> None:
+    levels, _ = _levels_for(
+        Archetype.CONTINUATION_PULLBACK,
+        timeframe=Timeframe.H1,
+        direction="UP",
+        zone=_zone(),
+        swept_extreme=None,
+        target_pool=_pool(),
+        pd=None,
+    )
+
+    assert levels is not None
+    assert levels.invalidation.rule == ZONE_DISTAL_EDGE
+    assert levels.ladder is None
+    assert levels.exit_target == Decimal(112)
+
+
+def test_with_m5_removed_from_the_mapping_m5_falls_back_to_the_zone_rule(monkeypatch) -> None:
+    """The mechanism, not the setting: a timeframe absent from the mapping
+    gets the archetype's rule -- which is every timeframe but M5."""
+    monkeypatch.delitem(RISK_STOP_PCT, Timeframe.M5)
+    monkeypatch.delitem(TP_LADDER, Timeframe.M5)
+
     levels, _ = _levels_for(
         Archetype.CONTINUATION_PULLBACK,
         timeframe=Timeframe.M5,

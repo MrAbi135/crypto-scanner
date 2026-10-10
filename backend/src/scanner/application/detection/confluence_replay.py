@@ -213,7 +213,10 @@ from scanner.shared import Timeframe
 # after M8 made RVOL readable there), and on M5 only for a Tier 1 symbol (§0.3,
 # whatever the published set). Suppressed with a recorded reason; setups and
 # the event log are unchanged.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v35"
+# v36: SLS v1.0.15 switched on for M5 -- a 1.0% risk stop from the entry's
+# proximal edge, an unbounded TP ladder (2R, 3R, 4R, ...) with the stop
+# trailing one rung behind, and TTL 48. Other timeframes are unchanged.
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v36"
 
 # The published set when nothing is configured (owner ruling 2026-09-15). A
 # default that published everything would open M15/M5 the day a setting went

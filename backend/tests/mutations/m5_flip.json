@@ -1,0 +1,110 @@
+{
+  "description": "SLS v1.0.15 flip (s8-confluence-v36): M5 switched on. Each mutation is a way the flip could land with a value the owner did not rule, switch on one half without the other, leak to a timeframe the measurement never covered, or leave Appendix A's registry certifying numbers the code does not run. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/m5_flip.json",
+  "pytest": [
+    "tests/unit/domain/confluence/test_risk_stop.py",
+    "tests/unit/domain/confluence/test_tp_ladder.py",
+    "tests/unit/domain/ranking/test_decay.py",
+    "tests/unit/application/detection/test_risk_stop_wiring.py",
+    "tests/unit/application/test_parameters.py"
+  ],
+  "mutations": [
+    {
+      "name": "M5's stop lands at 1.5% instead of the ruled 1.0%",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "RISK_STOP_PCT: dict[Timeframe, Decimal] = {Timeframe.M5: Decimal(\"1.0\")}",
+      "new": "RISK_STOP_PCT: dict[Timeframe, Decimal] = {Timeframe.M5: Decimal(\"1.5\")}",
+      "expect_failing": [
+        "test_only_m5_carries_a_risk_stop_and_it_is_one_percent",
+        "test_the_live_m5_configuration_is_a_risk_stop_and_a_ladder",
+        "test_no_implemented_parameter_departs_from_appendix_a"
+      ]
+    },
+    {
+      "name": "the stop is switched on without the ladder it was measured with",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "    Timeframe.M5: TargetLadder(start_r=Decimal(2), step_r=Decimal(1)),\n}",
+      "new": "}",
+      "expect_failing": [
+        "test_only_m5_has_a_ladder_and_it_is_two_r_in_steps_of_one",
+        "test_the_stop_and_the_ladder_switch_on_together",
+        "test_the_live_m5_configuration_is_a_risk_stop_and_a_ladder",
+        "test_no_implemented_parameter_departs_from_appendix_a"
+      ]
+    },
+    {
+      "name": "the ladder is switched on without the stop",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "RISK_STOP_PCT: dict[Timeframe, Decimal] = {Timeframe.M5: Decimal(\"1.0\")}",
+      "new": "RISK_STOP_PCT: dict[Timeframe, Decimal] = {}",
+      "expect_failing": [
+        "test_only_m5_carries_a_risk_stop_and_it_is_one_percent",
+        "test_the_stop_and_the_ladder_switch_on_together",
+        "test_the_live_m5_configuration_is_a_risk_stop_and_a_ladder",
+        "test_no_implemented_parameter_departs_from_appendix_a"
+      ]
+    },
+    {
+      "name": "TP1 lands at 3R instead of 2R",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "    Timeframe.M5: TargetLadder(start_r=Decimal(2), step_r=Decimal(1)),",
+      "new": "    Timeframe.M5: TargetLadder(start_r=Decimal(3), step_r=Decimal(1)),",
+      "expect_failing": [
+        "test_only_m5_has_a_ladder_and_it_is_two_r_in_steps_of_one",
+        "test_the_live_m5_configuration_is_a_risk_stop_and_a_ladder",
+        "test_no_implemented_parameter_departs_from_appendix_a"
+      ]
+    },
+    {
+      "name": "the rungs are 2R apart instead of 1R",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "    Timeframe.M5: TargetLadder(start_r=Decimal(2), step_r=Decimal(1)),",
+      "new": "    Timeframe.M5: TargetLadder(start_r=Decimal(2), step_r=Decimal(2)),",
+      "expect_failing": [
+        "test_only_m5_has_a_ladder_and_it_is_two_r_in_steps_of_one",
+        "test_the_live_m5_configuration_is_a_risk_stop_and_a_ladder",
+        "test_no_implemented_parameter_departs_from_appendix_a"
+      ]
+    },
+    {
+      "name": "the flip leaks onto H1, which the measurement never covered",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "RISK_STOP_PCT: dict[Timeframe, Decimal] = {Timeframe.M5: Decimal(\"1.0\")}",
+      "new": "RISK_STOP_PCT: dict[Timeframe, Decimal] = {Timeframe.M5: Decimal(\"1.0\"), Timeframe.H1: Decimal(\"1.0\")}",
+      "expect_failing": [
+        "test_only_m5_carries_a_risk_stop_and_it_is_one_percent",
+        "test_the_stop_and_the_ladder_switch_on_together",
+        "test_the_live_configuration_leaves_h1_on_its_pool",
+        "test_a_timeframe_without_one_keeps_the_archetype_rule",
+        "test_no_implemented_parameter_departs_from_appendix_a"
+      ]
+    },
+    {
+      "name": "M5's TTL stays at 24 while the ladder goes live",
+      "file": "backend/src/scanner/domain/ranking/decay.py",
+      "old": "    Timeframe.M5: 48,",
+      "new": "    Timeframe.M5: 24,",
+      "expect_failing": [
+        "test_the_ttl_table_is_12_5s",
+        "test_no_implemented_parameter_departs_from_appendix_a"
+      ]
+    },
+    {
+      "name": "the registry still certifies the pre-v1.0.15 TTL as doctrine",
+      "file": "backend/src/scanner/application/parameters.py",
+      "old": "            \"M5:48/M15:24/H1:24/H4:18/D1:15\",",
+      "new": "            \"M5:24/M15:24/H1:24/H4:18/D1:15\",",
+      "expect_failing": [
+        "test_no_implemented_parameter_departs_from_appendix_a"
+      ]
+    },
+    {
+      "name": "the registry records the stop as doctrine 1.5% so a wrong value would pass as matching",
+      "file": "backend/src/scanner/application/parameters.py",
+      "old": "            \"M5:1.0\",",
+      "new": "            \"M5:1.5\",",
+      "expect_failing": [
+        "test_no_implemented_parameter_departs_from_appendix_a"
+      ]
+    }
+  ]
+}

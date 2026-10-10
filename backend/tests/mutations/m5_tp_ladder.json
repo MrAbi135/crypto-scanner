@@ -59,12 +59,11 @@
       ]
     },
     {
-      "name": "the ladder is switched on without the stop it was measured with",
+      "name": "the ladder stays on while the stop it was measured with is switched off (re-anchored at the v36 flip)",
       "file": "backend/src/scanner/domain/confluence/levels.py",
-      "old": "TP_LADDER: dict[Timeframe, TargetLadder] = {}",
-      "new": "TP_LADDER: dict[Timeframe, TargetLadder] = {Timeframe.M5: TargetLadder(Decimal(2), Decimal(1))}",
+      "old": "RISK_STOP_PCT: dict[Timeframe, Decimal] = {Timeframe.M5: Decimal(\"1.0\")}",
+      "new": "RISK_STOP_PCT: dict[Timeframe, Decimal] = {}",
       "expect_failing": [
-        "test_the_ladder_mapping_ships_empty_until_the_m5_change",
         "test_the_stop_and_the_ladder_switch_on_together"
       ]
     },

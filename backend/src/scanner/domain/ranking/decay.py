@@ -14,8 +14,12 @@ from scanner.shared import Timeframe
 # W1 as a scanned timeframe. A W1 setup therefore has no stated TTL, and
 # `display_rank` raises rather than inventing one -- a silently assumed 15
 # would decay weekly setups at the daily rate and nothing would ever say so.
+#
+# M5 is 48 since SLS v1.0.15 (four hours), landed with M5's risk stop and
+# target ladder: a trailing ladder needs room to climb, and 24 M5 candles cut
+# trades off mid-move in the measurement that justified the ladder.
 TTL_CANDLES: dict[Timeframe, int] = {
-    Timeframe.M5: 24,
+    Timeframe.M5: 48,
     Timeframe.M15: 24,
     Timeframe.H1: 24,
     Timeframe.H4: 18,
