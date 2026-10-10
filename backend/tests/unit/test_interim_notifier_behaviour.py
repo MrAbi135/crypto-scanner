@@ -496,7 +496,8 @@ def test_the_notifier_prices_the_rungs_as_the_domain_does(notifier, direction, r
     assert [n for n, _, _ in rungs] == [1, 2, 3]
     for n, r, price in rungs:
         assert r == levels.ladder.rung_r(n)
-        assert price == levels.rung_price(n), f"TP{n}: notifier {price}, domain {levels.rung_price(n)}"
+        expected = levels.rung_price(n)
+        assert price == expected, f"TP{n}: notifier {price}, domain {expected}"
 
 
 def test_a_laddered_signal_is_announced_with_a_touch_stop_and_its_tps(notifier) -> None:
