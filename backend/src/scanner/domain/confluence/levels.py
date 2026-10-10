@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from scanner.domain.confluence.archetypes import Archetype
+from scanner.shared import Timeframe
 
 # §15.3(3): "R-multiple to primary target >= P.quality.min_rr = 1.5 (a
 # structurally valid setup with no room to travel is not an opportunity)".
@@ -45,6 +46,22 @@ _SWEPT_EXTREME_ARCHETYPES = frozenset(
 
 ZONE_DISTAL_EDGE = "zone_distal_edge"
 SWEPT_EXTREME = "swept_extreme"
+RISK_STOP = "risk_stop"
+
+# SLS v1.0.15 §15.2: `P.risk.stop_pct`, the timeframes whose invalidation is a
+# fixed risk stop rather than a zone or sweep level, as a percent of the entry's
+# proximal edge.
+#
+# **Deliberately empty.** The doctrine sets M5 at 1.0%, and that value lands in
+# the same change as the M5 target ladder and TTL 48, not before. It was
+# measured on the 14 published M5 signals that the stop alone is not robust
+# (+1.68%, negative once the best two trades are removed) and that the ladder
+# alone is worse than the rule it replaces (-4.68%); only the two together
+# survive (+6.37%). Switching this on by itself would ship the configuration
+# the measurement rejected. Until that change, every lookup here misses and
+# every signal keeps the zone rule, so this commit moves no number at all --
+# which the untouched golden suite is the evidence for.
+RISK_STOP_PCT: dict[Timeframe, Decimal] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,16 +127,45 @@ class SignalLevels:
     secondary_target: TargetBand | None = None
 
     @property
-    def r_unit(self) -> Decimal:
-        """§12.4: "R = |entry mid - invalidation|"."""
+    def anchor(self) -> Decimal:
+        """The entry price R is measured from -- and the ONLY place that decides it.
 
-        return abs(self.entry.mid - self.invalidation.price)
+        §12.4 measures R from the entry **mid**. SLS v1.0.15 measures it from
+        the **proximal** edge when the invalidation is a `risk_stop`, because
+        that stop is a percentage of the price a fill actually gets, and
+        measuring it from the mid would make the published R-multiple flatter
+        the achievable one (measured 2026-10-10: about 7-12 published against
+        about 4 achievable).
+
+        Keyed on the invalidation's **rule** -- which the sealed payload
+        records -- rather than on the timeframe or on `RISK_STOP_PCT`. Keying
+        on the parameter would re-read every signal already published under a
+        changed setting with today's rule, which is the retroactive relabel
+        this codebase does not permit.
+
+        Before this property R was computed in three places, two of which read
+        `entry.mid` directly instead of going through `r_unit`: the payload's
+        invalidation distance and §12.4's outcome accounting. A rule change
+        made here alone would have left both on the old origin, producing
+        excursions and distances in a unit nothing else used. All three now
+        read this.
+        """
+        if self.invalidation.rule == RISK_STOP:
+            return self.entry.proximal
+
+        return self.entry.mid
+
+    @property
+    def r_unit(self) -> Decimal:
+        """§12.4: "R = |entry anchor - invalidation|" -- see `anchor`."""
+
+        return abs(self.anchor - self.invalidation.price)
 
     @property
     def r_multiple(self) -> Decimal | None:
         """Reward in R to the primary target, or None when R is zero.
 
-        A zero R means the invalidation sits on the entry mid, which is not a
+        A zero R means the invalidation sits on the anchor, which is not a
         tight stop but a broken level pair -- and dividing by it would produce
         an infinite R-multiple that sails through §15.3's floor.
         """
@@ -128,7 +174,7 @@ class SignalLevels:
         if unit == 0:
             return None
 
-        reach = abs(self.primary_target.near_edge(self.direction) - self.entry.mid)
+        reach = abs(self.primary_target.near_edge(self.direction) - self.anchor)
 
         return reach / unit
 
@@ -136,16 +182,22 @@ class SignalLevels:
     def coherent(self) -> bool:
         """§15.3(1): "entry != invalidation side, target beyond entry in D".
 
-        For a long: invalidation below the entry mid, target above it. Both
+        For a long: invalidation below the anchor, target above it. Both
         strict -- a target level *at* the entry is not somewhere to travel to,
         and an invalidation at the entry is the zero-R case above.
+
+        Measured from `anchor` and not hard-wired to the mid, because the
+        difference is not cosmetic for a risk stop: a 1% stop sits ABOVE the
+        mid of any zone wider than 2%, so a mid-based check would refuse those
+        signals as INCOHERENT_LEVELS although stop, entry and target are in
+        perfect order from where the fill happens.
         """
         target = self.primary_target.near_edge(self.direction)
 
         if self.direction == "UP":
-            return self.invalidation.price < self.entry.mid < target
+            return self.invalidation.price < self.anchor < target
 
-        return target < self.entry.mid < self.invalidation.price
+        return target < self.anchor < self.invalidation.price
 
     @property
     def meets_rr(self) -> bool:
@@ -209,3 +261,39 @@ def invalidation_for(
         return Invalidation(price=swept_extreme, rule=SWEPT_EXTREME)
 
     return Invalidation(price=entry.distal, rule=ZONE_DISTAL_EDGE)
+
+
+def risk_stop_for(
+    *,
+    entry: EntryZone,
+    direction: str,
+    stop_pct: Decimal,
+) -> Invalidation:
+    """SLS v1.0.15 §15.2's `risk_stop`: `stop_pct` of the proximal edge, against D.
+
+    Applies whatever the archetype, which is the point of it: on the
+    timeframes it covers the stop is no longer the price at which the setup is
+    wrong but the price at which the risk budget is spent, so neither the
+    zone's distal edge nor a swept extreme has a say.
+
+    When the zone is wider than the stop, the stop lies INSIDE the band and a
+    fill deeper than the stop is impossible. §15.2 states that and accepts it
+    -- the trade is entered at the proximal edge, and the rest of the band is
+    evidence rather than a level the signal relies on -- so it is not an error
+    here either.
+    """
+    if direction not in {"UP", "DOWN"}:
+        raise ValueError(f"direction must be UP or DOWN, got {direction!r}")
+
+    if stop_pct <= 0:
+        # A zero stop is the zero-R case `r_multiple` already refuses; a
+        # negative one would sit on the wrong side of the entry and pass every
+        # check that only measures distance.
+        raise ValueError(f"stop_pct must be positive, got {stop_pct}")
+
+    distance = entry.proximal * stop_pct / Decimal(100)
+
+    if direction == "UP":
+        return Invalidation(price=entry.proximal - distance, rule=RISK_STOP)
+
+    return Invalidation(price=entry.proximal + distance, rule=RISK_STOP)

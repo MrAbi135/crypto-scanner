@@ -418,6 +418,20 @@ def _levels_of(signal: SignalRecord) -> SignalLevels:
     targets = json.loads(signal.target_bands)
     primary = targets["primary"]
 
+    # The rule that set the invalidation, read from the signal's own sealed
+    # payload. It used to be dropped here -- `Invalidation(level, "")` -- which
+    # was harmless while every rule measured R from the mid. SLS v1.0.15's
+    # `risk_stop` measures it from the proximal edge, and `SignalLevels.anchor`
+    # keys on the rule, so an empty rule would quietly put every such signal's
+    # §12.4 excursions in the wrong unit, with no error anywhere.
+    #
+    # Read from the payload rather than inferred from the timeframe or from the
+    # current `RISK_STOP_PCT`: the setting may change after publication, and
+    # re-reading a sealed signal under today's setting is the retroactive
+    # relabel the seal exists to prevent. A payload that predates the field
+    # reads as "" -- the mid, which is what every rule before v1.0.15 used.
+    rule = json.loads(signal.payload).get("invalidation", {}).get("rule", "")
+
     return SignalLevels(
         direction=signal.direction,
         entry=entry_zone(
@@ -426,7 +440,7 @@ def _levels_of(signal: SignalRecord) -> SignalLevels:
             band_low=min(signal.entry_proximal, signal.entry_distal),
             band_high=max(signal.entry_proximal, signal.entry_distal),
         ),
-        invalidation=Invalidation(signal.invalidation_level, ""),
+        invalidation=Invalidation(signal.invalidation_level, rule),
         primary_target=TargetBand(
             low=Decimal(primary["low"]),
             high=Decimal(primary["high"]),

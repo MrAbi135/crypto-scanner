@@ -3665,6 +3665,83 @@ def test_the_payload_chain_carries_what_the_factors_cited() -> None:
     assert payload.evidence_ids == ("z1", "BOS_UP-3", "p1")
 
 
+def test_the_payload_states_the_stop_distance_in_the_same_r_as_everything_else() -> None:
+    """§15.2's "invalidation distance in ATR and %", for a SLS v1.0.15 risk stop.
+
+    This line used to subtract the invalidation from `entry.mid` on its own,
+    one of three independent R computations. With a 1% risk stop it would
+    have published 0.96/104 -- about 0.923% -- beside an R-multiple measured
+    in 1.04 units: two numbers on one payload in two different units. It must
+    state exactly the 1% that set the stop.
+    """
+    from scanner.application.detection.confluence_replay import _payload_for, _Reading
+    from scanner.domain.confluence import (
+        Archetype,
+        Confidence,
+        Grade,
+        SignalLevels,
+        TargetBand,
+        entry_zone,
+        risk_stop_for,
+    )
+
+    entry = entry_zone(zone_id="z1", direction="UP", band_low=Decimal(100), band_high=Decimal(104))
+    levels = SignalLevels(
+        direction="UP",
+        entry=entry,
+        invalidation=risk_stop_for(entry=entry, direction="UP", stop_pct=Decimal("1.0")),
+        primary_target=TargetBand(low=Decimal(120), high=Decimal(120)),
+    )
+
+    reading = _Reading(
+        rvol=None,
+        score=Decimal(0),
+        direction=None,
+        phase_measured=False,
+        accelerating=False,
+        decelerating=False,
+        exhausted=False,
+        spike_direction=None,
+        expansion_direction=None,
+        contracting=False,
+        suspect=False,
+        delta=None,
+        p90=None,
+        median_p90=None,
+    )
+
+    payload = _payload_for(
+        symbol="BTCUSDT",
+        timeframe=TF,
+        direction="UP",
+        archetype=Archetype.CONTINUATION_PULLBACK,
+        confidence=Confidence(
+            base=Decimal(72),
+            synergy=Decimal(0),
+            penalty=Decimal(0),
+            final=Decimal(72),
+            published_grade=Grade.B,
+        ),
+        factors={},
+        levels=levels,
+        atr=Decimal(1),
+        # Priced at the proximal edge, so the percent reads straight off.
+        price=Decimal(104),
+        htf="BULLISH",
+        zone=zone("z1"),
+        wash_risk=False,
+        reading=reading,
+        algo_version="s8-test",
+        cited_ids=(),
+    )
+
+    assert payload is not None
+    assert payload.invalidation_distance_pct == Decimal("1.0"), (
+        "the payload measured the stop from the mid while the R-multiple beside it did not"
+    )
+    assert payload.invalidation_distance_atr == levels.r_unit
+
+
 @pytest.mark.asyncio
 async def test_a_break_in_its_failure_window_suspends_the_clean_record() -> None:
     """§3.5 gives every break 3 candles to fail, and only failures are
@@ -3826,6 +3903,7 @@ def test_levels_report_every_missing_row_not_just_the_first() -> None:
     # target (no pool here).
     levels, unmet = _levels_for(
         Archetype.SWEEP_REVERSAL,
+        timeframe=Timeframe.H1,
         direction="UP",
         zone=zone,
         swept_extreme=None,
@@ -3856,6 +3934,7 @@ def test_levels_report_nothing_missing_when_they_are_complete() -> None:
 
     levels, unmet = _levels_for(
         Archetype.CONTINUATION_PULLBACK,
+        timeframe=Timeframe.H1,
         direction="UP",
         zone=zone,
         swept_extreme=None,

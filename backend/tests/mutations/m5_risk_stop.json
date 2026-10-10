@@ -1,0 +1,120 @@
+{
+  "description": "SLS v1.0.15 part 1: the M5 risk stop mechanism and the single definition of R it forced. R was computed in three places (r_unit, the payload distance, §12.4 accounting), two of them reading entry.mid directly, and the monitor rebuilt every invalidation with an empty rule. Each mutation below is a way the anchor could silently diverge between those sites, or the stop be switched on before the ladder it was measured with. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/m5_risk_stop.json",
+  "pytest": [
+    "tests/unit/domain/confluence/test_risk_stop.py",
+    "tests/unit/application/detection/test_risk_stop_wiring.py",
+    "tests/unit/application/detection/test_confluence_replay.py::test_the_payload_states_the_stop_distance_in_the_same_r_as_everything_else"
+  ],
+  "mutations": [
+    {
+      "name": "the anchor ignores the rule and always reads the mid",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "        if self.invalidation.rule == RISK_STOP:",
+      "new": "        if False and self.invalidation.rule == RISK_STOP:",
+      "expect_failing": [
+        "test_a_risk_stop_anchors_r_at_the_proximal_edge",
+        "test_the_monitor_keeps_the_rule_the_signal_was_sealed_with"
+      ]
+    },
+    {
+      "name": "coherence is judged from the mid again, refusing every risk stop in a zone wider than 2%",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "            return self.invalidation.price < self.anchor < target",
+      "new": "            return self.invalidation.price < self.entry.mid < target",
+      "expect_failing": [
+        "test_a_risk_stop_inside_a_wide_zone_is_still_coherent"
+      ]
+    },
+    {
+      "name": "the R-multiple reaches from the mid while R is measured from the edge",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "        reach = abs(self.primary_target.near_edge(self.direction) - self.anchor)",
+      "new": "        reach = abs(self.primary_target.near_edge(self.direction) - self.entry.mid)",
+      "expect_failing": [
+        "test_the_r_multiple_reaches_from_the_same_anchor_r_is_measured_from"
+      ]
+    },
+    {
+      "name": "the stop percent is taken of the mid rather than of the proximal edge",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "    distance = entry.proximal * stop_pct / Decimal(100)",
+      "new": "    distance = (entry.proximal + entry.distal) / Decimal(2) * stop_pct / Decimal(100)",
+      "expect_failing": [
+        "test_a_long_risk_stop_sits_the_percent_below_the_proximal_edge"
+      ]
+    },
+    {
+      "name": "a long's risk stop is placed above the entry",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "        return Invalidation(price=entry.proximal - distance, rule=RISK_STOP)",
+      "new": "        return Invalidation(price=entry.proximal + distance, rule=RISK_STOP)",
+      "expect_failing": [
+        "test_a_long_risk_stop_sits_the_percent_below_the_proximal_edge"
+      ]
+    },
+    {
+      "name": "a zero or negative stop percent is accepted",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "    if stop_pct <= 0:",
+      "new": "    if False and stop_pct <= 0:",
+      "expect_failing": [
+        "test_a_non_positive_percent_is_refused"
+      ]
+    },
+    {
+      "name": "the M5 stop is switched on alone, without the ladder it was measured with",
+      "file": "backend/src/scanner/domain/confluence/levels.py",
+      "old": "RISK_STOP_PCT: dict[Timeframe, Decimal] = {}",
+      "new": "RISK_STOP_PCT: dict[Timeframe, Decimal] = {Timeframe.M5: Decimal(\"1.0\")}",
+      "expect_failing": [
+        "test_the_mapping_ships_empty_until_the_m5_change",
+        "test_with_the_mapping_empty_m5_is_untouched"
+      ]
+    },
+    {
+      "name": "§12.4 measures R from the mid on its own again",
+      "file": "backend/src/scanner/domain/lifecycle/outcome.py",
+      "old": "    unit = levels.r_unit",
+      "new": "    unit = abs(levels.entry.mid - levels.invalidation.price)",
+      "expect_failing": [
+        "test_outcome_excursions_use_the_levels_own_r_and_anchor"
+      ]
+    },
+    {
+      "name": "§12.4 measures excursions from the mid while R comes from the edge",
+      "file": "backend/src/scanner/domain/lifecycle/outcome.py",
+      "old": "    origin = levels.anchor",
+      "new": "    origin = levels.entry.mid",
+      "expect_failing": [
+        "test_outcome_excursions_use_the_levels_own_r_and_anchor"
+      ]
+    },
+    {
+      "name": "the payload states the stop distance from the mid again",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "    distance = levels.r_unit",
+      "new": "    distance = abs(levels.entry.mid - levels.invalidation.price)",
+      "expect_failing": [
+        "test_the_payload_states_the_stop_distance_in_the_same_r_as_everything_else"
+      ]
+    },
+    {
+      "name": "the call site ignores the stop mapping",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "    stop_pct = RISK_STOP_PCT.get(timeframe)",
+      "new": "    stop_pct = None",
+      "expect_failing": [
+        "test_a_timeframe_with_a_stop_pct_gets_a_risk_stop_whatever_the_archetype"
+      ]
+    },
+    {
+      "name": "the monitor drops the sealed rule, as it used to",
+      "file": "backend/src/scanner/application/detection/signal_monitor.py",
+      "old": "        invalidation=Invalidation(signal.invalidation_level, rule),",
+      "new": "        invalidation=Invalidation(signal.invalidation_level, \"\"),",
+      "expect_failing": [
+        "test_the_monitor_keeps_the_rule_the_signal_was_sealed_with"
+      ]
+    }
+  ]
+}

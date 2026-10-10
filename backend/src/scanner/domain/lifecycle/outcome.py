@@ -38,7 +38,7 @@ def accounting(
     candles: Sequence[Candle],
 ) -> Outcome:
     """§12.4's "max favorable excursion (MFE) and max adverse excursion (MAE)
-    in R units (R = |entry mid - invalidation|)".
+    in R units (R = |entry anchor - invalidation|)".
 
     Computed from the candles between publication and resolution rather than
     accumulated as the signal runs. An accumulator would have to be updated on
@@ -46,31 +46,38 @@ def accounting(
     under-report the excursion for the rest of the signal's life -- silently,
     and in the direction that flatters the record.
 
-    Excursion is measured from the **entry mid**, the same origin R is, so the
-    two are commensurable. Measuring favourable travel from the proximal edge
-    and adverse travel from the distal one would quietly widen every winner
-    and narrow every loser by the width of the band.
+    Excursion is measured from the **entry anchor**, the same origin R is, so
+    the two are commensurable. Measuring favourable travel from the proximal
+    edge and adverse travel from the distal one would quietly widen every
+    winner and narrow every loser by the width of the band.
+
+    The anchor is `SignalLevels.anchor` -- the entry mid, or the proximal edge
+    for a SLS v1.0.15 `risk_stop` -- and both R and the origin are read from
+    it rather than from `entry.mid` directly. They used to be read here
+    independently, which made this one of three separate R computations; a
+    change of anchor applied anywhere else would have left §12.4's excursions
+    in the old unit while every other number moved.
 
     Both are floored at zero. A signal that never traded in its favour has an
     MFE of zero, not a negative one -- "the furthest it went the right way"
     cannot be less than nowhere.
     """
-    unit = abs(levels.entry.mid - levels.invalidation.price)
+    unit = levels.r_unit
 
     if unit <= 0:
-        raise ValueError("R is zero: the invalidation sits on the entry mid")
+        raise ValueError("R is zero: the invalidation sits on the entry anchor")
 
     if not candles:
         return Outcome(outcome, 0, Decimal(0), Decimal(0))
 
-    mid = levels.entry.mid
+    origin = levels.anchor
 
     if levels.direction == "UP":
-        favourable = max(c.high for c in candles) - mid
-        adverse = mid - min(c.low for c in candles)
+        favourable = max(c.high for c in candles) - origin
+        adverse = origin - min(c.low for c in candles)
     else:
-        favourable = mid - min(c.low for c in candles)
-        adverse = max(c.high for c in candles) - mid
+        favourable = origin - min(c.low for c in candles)
+        adverse = max(c.high for c in candles) - origin
 
     return Outcome(
         outcome=outcome,
