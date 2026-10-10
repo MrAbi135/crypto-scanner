@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -103,6 +104,9 @@ def _signal(
         "condition_tags": "[]",
         "ttl_candles": ttl_candles,
         "age_seconds": age_seconds,
+        # A pool-exit signal: no ladder, sealed under the zone rule.
+        "target_bands": '{"primary":{"low":"110","high":"110","pool_id":"p1"},"secondary":null}',
+        "invalidation_rule": "zone_distal_edge",
     }
 
 
@@ -351,12 +355,13 @@ def test_every_selected_column_is_given_a_name(notifier, monkeypatch) -> None:
 
     columns = _select_columns(captured["sql"])
 
-    assert len(columns) == 15, f"the SELECT list changed shape: {columns}"
+    assert len(columns) == 17, f"the SELECT list changed shape: {columns}"
     assert len(columns) == len(_signal("SIG_X")), (
         f"{len(columns)} columns selected but the row fixture has "
         f"{len(_signal('SIG_X'))} keys -- zip would drop the difference in silence"
     )
     assert "s.ttl_candles" in columns, "the TTL test has nothing to read"
+    assert "s.target_bands" in columns, "the ladder message has nothing to read"
     assert any("epoch" in column for column in columns), (
         "the age is computed by postgres on purpose: one clock for both sides "
         "of the subtraction, and no timestamp parsing in this file"
@@ -424,3 +429,122 @@ def test_no_transitions_are_read_when_nothing_was_pushed(notifier) -> None:
     notifier._psql = lambda sql: pytest.fail("no query should be issued")
 
     assert notifier.terminal_transitions([]) == []
+
+
+# --- SLS v1.0.15: the M5 ladder in the message ---------------------------------
+
+LADDER = '{"start_r":"2","step_r":"1","unbounded":true}'
+
+
+def _laddered(direction: str = "UP", rule: str = "risk_stop") -> dict[str, str]:
+    """The live M5 shape: zone 100-104, a 1% risk stop. numeric(38,18) text,
+    as psql returns it, so trailing zeros are part of what is tested."""
+    row = _signal("SIG_L", timeframe="M5", ttl_candles="48", age_seconds="360")
+
+    if direction == "UP":
+        proximal, distal, stop = "104", "100", "102.96"
+    else:
+        proximal, distal, stop = "100", "104", "101"
+
+    def wide(value: str) -> str:
+        return f"{Decimal(value):.18f}"
+
+    row.update(
+        direction=direction,
+        entry_proximal=wide(proximal),
+        entry_distal=wide(distal),
+        invalidation=wide(stop) if rule == "risk_stop" else wide(distal),
+        target_bands='{"primary":{"low":"120","high":"120","pool_id":"p1"},"secondary":null,'
+        f'"ladder":{LADDER}}}',
+        invalidation_rule=rule,
+    )
+
+    return row
+
+
+@pytest.mark.parametrize("direction", ["UP", "DOWN"])
+@pytest.mark.parametrize("rule", ["risk_stop", "zone_distal_edge"])
+def test_the_notifier_prices_the_rungs_as_the_domain_does(notifier, direction, rule) -> None:
+    """The one copy of the R arithmetic outside the domain, held to it.
+
+    The notifier is standard-library only and cannot import `SignalLevels`, so
+    it restates the anchor rule (proximal for a risk stop, mid otherwise) and
+    the ladder. A drift would put a TP price on a phone that the engine never
+    judges against -- so every combination is compared, not one example.
+    """
+    from scanner.domain.confluence import SignalLevels, TargetBand, TargetLadder, entry_zone
+    from scanner.domain.confluence.levels import Invalidation
+
+    row = _laddered(direction, rule)
+
+    zone = entry_zone(
+        zone_id="z1",
+        direction=direction,
+        band_low=Decimal(100),
+        band_high=Decimal(104),
+    )
+    levels = SignalLevels(
+        direction=direction,
+        entry=zone,
+        invalidation=Invalidation(Decimal(row["invalidation"]), rule),
+        primary_target=TargetBand(low=Decimal(120), high=Decimal(120), pool_id="p1"),
+        ladder=TargetLadder(Decimal(2), Decimal(1)),
+    )
+
+    rungs = notifier.rung_prices(row, notifier.ladder_of(row))
+
+    assert [n for n, _, _ in rungs] == [1, 2, 3]
+    for n, r, price in rungs:
+        assert r == levels.ladder.rung_r(n)
+        assert price == levels.rung_price(n), f"TP{n}: notifier {price}, domain {levels.rung_price(n)}"
+
+
+def test_a_laddered_signal_is_announced_with_a_touch_stop_and_its_tps(notifier) -> None:
+    text = notifier.format_signal(_laddered())
+
+    assert "stop 102.960000000000000000 (touch, not close)" in text
+    assert "TP1 106.08 (2R) · TP2 107.12 (3R) · TP3 108.16 (4R) · no cap" in text
+    assert "trails" in text
+    assert "close beyond" not in text, "the pool-exit rule would tell the trader the opposite"
+
+
+def test_a_pool_exit_signal_is_announced_as_before(notifier) -> None:
+    text = notifier.format_signal(_signal("SIG_P"))
+
+    assert "invalidation 99 (close beyond, not touch)" in text
+    assert "TP1" not in text
+
+
+def test_an_unreadable_target_column_falls_back_to_the_pool_message(notifier) -> None:
+    """A malformed column must cost the TP line, never the alert."""
+    row = _signal("SIG_B")
+    row["target_bands"] = "not json"
+
+    assert "close beyond" in notifier.format_signal(row)
+
+
+def test_a_close_the_loop_message_carries_the_booked_r(notifier) -> None:
+    row = {
+        "transition_id": "t-1",
+        "signal_id": "SIG_L",
+        "to_state": "CLOSED_FLAT",
+        "at": NOW.isoformat(),
+        "trigger_evidence": '{"rungs":"1","realised_r":"0"}',
+    }
+
+    assert notifier.format_transition(row).endswith("realised 0R")
+
+    row["trigger_evidence"] = '{"rungs":"2","realised_r":"2.000000000000000000"}'
+    assert notifier.format_transition(row).endswith("realised 2R")
+
+
+def test_a_pool_exit_close_carries_no_r(notifier) -> None:
+    row = {
+        "transition_id": "t-2",
+        "signal_id": "SIG_P",
+        "to_state": "SUCCESS",
+        "at": NOW.isoformat(),
+        "trigger_evidence": "{}",
+    }
+
+    assert "realised" not in notifier.format_transition(row)

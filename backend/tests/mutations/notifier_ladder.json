@@ -1,0 +1,65 @@
+{
+  "description": "SLS v1.0.15 in the interim Telegram notifier. The notifier is stdlib-only and restates the R arithmetic outside the domain; each mutation is a way that restatement could price a TP the engine never judges against, announce a laddered signal under the pool-exit stop rule, or drop what the trailing stop booked. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/notifier_ladder.json",
+  "pytest": [
+    "tests/unit/test_interim_notifier_behaviour.py"
+  ],
+  "mutations": [
+    {
+      "name": "R is measured from the mid even for a risk stop",
+      "file": "ops/notify/notify_signals.py",
+      "old": "    if row.get(\"invalidation_rule\") == RISK_STOP_RULE:\n        anchor = proximal",
+      "new": "    if False:\n        anchor = proximal",
+      "expect_failing": [
+        "test_the_notifier_prices_the_rungs_as_the_domain_does",
+        "test_a_laddered_signal_is_announced_with_a_touch_stop_and_its_tps"
+      ]
+    },
+    {
+      "name": "a short's rungs are priced above the entry",
+      "file": "ops/notify/notify_signals.py",
+      "old": "    sign = 1 if row[\"direction\"] == \"UP\" else -1",
+      "new": "    sign = 1",
+      "expect_failing": [
+        "test_the_notifier_prices_the_rungs_as_the_domain_does"
+      ]
+    },
+    {
+      "name": "the ladder steps from TP1 instead of counting from it",
+      "file": "ops/notify/notify_signals.py",
+      "old": "        r = start + step * (n - 1)",
+      "new": "        r = start + step * n",
+      "expect_failing": [
+        "test_the_notifier_prices_the_rungs_as_the_domain_does",
+        "test_a_laddered_signal_is_announced_with_a_touch_stop_and_its_tps"
+      ]
+    },
+    {
+      "name": "a laddered signal is announced under the pool-exit rule",
+      "file": "ops/notify/notify_signals.py",
+      "old": "    return ladder if isinstance(ladder, dict) and ladder else None",
+      "new": "    return None",
+      "expect_failing": [
+        "test_the_notifier_prices_the_rungs_as_the_domain_does",
+        "test_a_laddered_signal_is_announced_with_a_touch_stop_and_its_tps"
+      ]
+    },
+    {
+      "name": "the close-the-loop message drops the booked R",
+      "file": "ops/notify/notify_signals.py",
+      "old": "    if realised not in (None, \"\"):",
+      "new": "    if False:",
+      "expect_failing": [
+        "test_a_close_the_loop_message_carries_the_booked_r"
+      ]
+    },
+    {
+      "name": "the target column is no longer selected, so no signal ever shows a ladder",
+      "file": "ops/notify/notify_signals.py",
+      "old": "               s.target_bands,\n",
+      "new": "",
+      "expect_failing": [
+        "test_every_selected_column_is_given_a_name"
+      ]
+    }
+  ]
+}

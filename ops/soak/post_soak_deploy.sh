@@ -2,8 +2,10 @@
 # The soak-end deploy, as a script instead of a memory.
 #
 # The step-0 and step-5 markers name the look-ahead audit bundle, PRs #265
-# through #279 (deployed 2026-09-15), which also brought migration 022. This
-# runs the sequence with an assertion at every step --
+# through #279 (deployed 2026-09-15), which also brought migration 022, and --
+# added for the 2026-10 batch -- SLS v1.0.15's M5 ladder, #310 through #316,
+# which brings migration 025. This runs the sequence with an assertion at
+# every step --
 # because the deploy days before it each lost hours to a step that "ran" and
 # did nothing: a patch whose replace matched nothing, a deploy that rebuilt
 # one image of four, a release stamp that described the checkout rather than
@@ -130,11 +132,22 @@ grep -qF 'origin_opens = ob.created_at' backend/src/scanner/application/detectio
 grep -qF 'SUSPECT_COUNT_TIMEFRAMES' backend/src/scanner/application/marketdata/fake_volume_job.py   || fail "wash_risk fix missing: the suspect count still spans every timeframe (SLS v1.0.10)"
 test -f backend/src/scanner/infrastructure/persistence/alembic/versions/022_recorded_at.py   || fail "#276 missing: migration 022_recorded_at is not in the tree"
 
-# Owner ruling 2026-09-15 (M8 option B): M15/M5 must not publish. The code defaults to
-# H1,H4; an override in the env file would open them, so its presence refuses the deploy.
-! grep -q '^SCANNER_SIGNAL_TIMEFRAMES=' ops/env/dev.env   || fail "ops/env/dev.env sets SCANNER_SIGNAL_TIMEFRAMES -- the H1,H4 default is the approved set"
+# SLS v1.0.15, the M5 ladder (#310-#316). The flip is a mapping going from
+# empty to populated, so the marker names the populated line -- a grep for the
+# constant's name alone would pass on the behaviour-neutral tree too.
+test -f backend/src/scanner/infrastructure/persistence/alembic/versions/025_closed_flat_and_realised_r.py   || fail "#314 missing: migration 025_closed_flat_and_realised_r is not in the tree"
+grep -qF 'RISK_STOP_PCT: dict[Timeframe, Decimal] = {Timeframe.M5: Decimal("1.0")}' backend/src/scanner/domain/confluence/levels.py   || fail "#316 missing: M5's 1% risk stop is not switched on"
+grep -qF 'Timeframe.M5: TargetLadder(start_r=Decimal(2), step_r=Decimal(1))' backend/src/scanner/domain/confluence/levels.py   || fail "#316 missing: M5's TP ladder is not switched on"
+grep -qF 'Timeframe.M5: 48,' backend/src/scanner/domain/ranking/decay.py   || fail "#316 missing: M5's TTL is not 48"
+grep -qF 'def walk_ladder' backend/src/scanner/domain/lifecycle/state.py   || fail "#313 missing: no trailing-ladder walk"
+grep -qF 'def ladder_of' ops/notify/notify_signals.py   || fail "notifier would announce a laddered M5 signal with the pool-exit stop rule"
 
-echo "   all 22 batch markers present, signal-timeframe override absent, tree at $(git rev-parse --short HEAD)"
+# The published set is decided in code (SLS v1.0.14, owner ruling 2026-10-05:
+# M5, M15, H1, H4). An override in the env file would silently replace it, so
+# its presence refuses the deploy.
+! grep -q '^SCANNER_SIGNAL_TIMEFRAMES=' ops/env/dev.env   || fail "ops/env/dev.env sets SCANNER_SIGNAL_TIMEFRAMES -- the published set lives in code (SLS v1.0.14)"
+
+echo "   all 29 batch markers present, signal-timeframe override absent, tree at $(git rev-parse --short HEAD)"
 
 # ---------------------------------------------------------------------------
 step "1. Invariants before touching anything (expect: exit 0, 1 acknowledged)"
@@ -157,10 +170,12 @@ step "2. Pre-deploy counts, so step 6 has something to compare against"
 pre_setups=$($PSQL -c "select count(*) from detection.setups;")
 pre_signals=$($PSQL -c "select count(*) from detection.signals;")
 pre_low_tf=$($PSQL -c "select count(*) from detection.signals where timeframe in ('M5','M15');")
+pre_live_m5=$($PSQL -c "select count(*) from detection.signals s where s.timeframe = 'M5' and not exists (select 1 from detection.signal_transitions t where t.signal_id = s.signal_id and t.to_state in ('SUCCESS','FAILED','EXPIRED_UNTOUCHED','EXPIRED_ACTIVE','INVALIDATED_EARLY','CLOSED_FLAT','SUPPRESSED'));")
 
 echo "   setups seen               : $pre_setups"
 echo "   signals published         : $pre_signals"
 echo "   of which on M5 or M15     : $pre_low_tf"
+echo "   M5 signals live right now : $pre_live_m5  (sealed before v36: they finish on the pool rule and TTL 24)"
 
 # ---------------------------------------------------------------------------
 step "2b. Stamp the release with the commit actually being built"
@@ -272,6 +287,11 @@ docker exec scanner-dev-engine-1 grep -qF 'abs(candles[cursor].high - candidate)
 docker exec scanner-dev-engine-1 grep -qF 'origin_opens = ob.created_at' /app/src/scanner/application/detection/ict_ob_replay.py   || fail "running engine: the OB helpers index the window with frozen offsets"
 docker exec scanner-dev-worker-1 grep -qF 'SUSPECT_COUNT_TIMEFRAMES' /app/src/scanner/application/marketdata/fake_volume_job.py   || fail "running worker: the suspect count still spans every timeframe"
 docker exec scanner-dev-engine-1 test -f /app/src/scanner/infrastructure/persistence/alembic/versions/022_recorded_at.py   || fail "running engine image has no migration 022_recorded_at"
+docker exec scanner-dev-engine-1 test -f /app/src/scanner/infrastructure/persistence/alembic/versions/025_closed_flat_and_realised_r.py   || fail "running engine image has no migration 025_closed_flat_and_realised_r"
+docker exec scanner-dev-engine-1 grep -qF 'RISK_STOP_PCT: dict[Timeframe, Decimal] = {Timeframe.M5: Decimal("1.0")}' /app/src/scanner/domain/confluence/levels.py   || fail "running engine: M5's 1% risk stop is not switched on"
+docker exec scanner-dev-engine-1 grep -qF 'Timeframe.M5: TargetLadder(start_r=Decimal(2), step_r=Decimal(1))' /app/src/scanner/domain/confluence/levels.py   || fail "running engine: M5's TP ladder is not switched on"
+docker exec scanner-dev-engine-1 grep -qF 'Timeframe.M5: 48,' /app/src/scanner/domain/ranking/decay.py   || fail "running engine: M5's TTL is not 48"
+docker exec scanner-dev-api-1 grep -qF 'def targets_view' /app/src/scanner/interfaces/api/targets.py   || fail "running api: laddered targets are not priced (#315)"
 
 schema_now=$($PSQL -c "select version_num from alembic_version;" | tr -d '\r')
 [ "$schema_now" = "$head_rev" ]   || fail "the new code is running on schema '$schema_now'; the tree head is '$head_rev'"
@@ -320,6 +340,21 @@ cat <<NEXT
              show none -- judge it over a day, not over the shakedown.
           -- all of them are grade B, and 10.1 pushes S and A only, so no
              Telegram alert is expected from them either.
+
+   3b. SLS v1.0.15 on the first NEW M5 signal (v36). Its levels are checked by
+       hand, not by trusting the code that made them:
+
+        $PSQL -c "select signal_id, direction, entry_proximal, invalidation_level, ttl_candles, payload::jsonb -> 'invalidation' ->> 'rule' as rule, target_bands::jsonb -> 'ladder' as ladder from detection.signals where timeframe = 'M5' and algo_version = 's8-confluence-v36' order by published_at limit 3;"
+          -- want: rule risk_stop; invalidation = proximal x 0.99 (UP) or
+             x 1.01 (DOWN); ttl_candles 48; ladder {start_r 2, step_r 1,
+             unbounded true}. Any M15/H1/H4 row under v36 must still have
+             NO ladder and a zone/sweep rule.
+          -- the $pre_live_m5 M5 signal(s) live at deploy keep their sealed
+             pool rule and TTL 24 -- correct, not a fault. Until they end, the
+             feed sorts them as if their TTL were 48 (display only, <= 2h).
+
+        $PSQL -c "select engine, version, param_set_version from detection.algo_versions where version = 's8-confluence-v36';"
+          -- want: one row, param set 2026.10.10.1, registered at first boot.
 
    4. Invariants, then a 2-4 hour shakedown. The :17 cron keeps running;
       read ~/soak-logs/alerts.log before trusting anything:
