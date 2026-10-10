@@ -344,6 +344,6 @@ def test_the_candle_fetch_is_sized_for_the_longest_ttl_swept(mod) -> None:
     shortfall as `EXPIRED_ACTIVE` and flatter every long-TTL row."""
     longest = max(geometry.get("ttl", 24) for _, geometry in mod.sweeps())
 
-    assert mod.MAX_TTL >= longest, (
+    assert longest <= mod.MAX_TTL, (
         f"sweeps() asks for TTL {longest} but only {mod.MAX_TTL} candles are loaded"
     )
