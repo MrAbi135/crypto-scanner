@@ -8,6 +8,7 @@ caught by hand.
 
 What is pinned here is therefore the parts a wrong answer would travel
 through: the R unit, the same-candle boundary, the entry requirement, the
+entry candle that only activates (as the engine's `observe()` does), the
 mark-to-close of unresolved trades, and the control gate that stops the whole
 report when the simulator and the engine stop agreeing about what an outcome
 is.
@@ -159,8 +160,14 @@ def test_price_cannot_reach_the_stop_without_passing_the_entry(mod) -> None:
     This is the `checks-that-cannot-fail` family, found in this very tool.
     """
     sig = _signal(mod)
-    # A candle that dives through entry 100 to close at 98, under the stop.
-    bars = [_bar(mod, "103", "101", "102"), _bar(mod, "102", "98", "98")]
+    # A candle that dives through entry 100 to close at 98, under the stop, and
+    # a following candle that stays there. The dive only fills (see the
+    # entry-candle test below); the loss is taken on the candle after it.
+    bars = [
+        _bar(mod, "103", "101", "102"),
+        _bar(mod, "102", "98", "98"),
+        _bar(mod, "98.5", "97.5", "98"),
+    ]
 
     out = mod.score(sig, bars)
 
@@ -172,12 +179,65 @@ def test_price_cannot_reach_the_stop_without_passing_the_entry(mod) -> None:
     assert out.r == Decimal(-1)
 
     short = _signal(mod, "DOWN", entry="100", inval="101", target="96")
-    rising = [_bar(mod, "99", "97", "98"), _bar(mod, "102", "98", "102")]
+    rising = [
+        _bar(mod, "99", "97", "98"),
+        _bar(mod, "102", "98", "102"),
+        _bar(mod, "102.5", "101.5", "102"),
+    ]
 
     mirrored = mod.score(short, rising)
 
     assert mirrored is not None
     assert mirrored.label == "FAILED", "the short mirrors it: entry 100 is crossed first"
+
+
+def test_the_entry_candle_only_activates_even_when_it_closes_through_the_stop(mod) -> None:
+    """The engine's convention, which the control depends on.
+
+    `lifecycle/state.py::observe()` returns ACTIVE the moment the entry is
+    touched and reads neither the invalidation nor the target on that candle.
+    Judging the entry candle too is a different rule, and not a slightly
+    different one: a tight zone-edge stop is often closed through on the very
+    candle that fills it, which turned M5's zone-edge stop from +0.71% into
+    -11.29% (n=15; SLS erratum PR #312).
+    """
+    sig = _signal(mod)
+    # Bar 1 touches entry 100 AND closes at 98, through the stop at 99. Bar 2
+    # recovers and touches neither level.
+    bars = [_bar(mod, "100.5", "98", "98"), _bar(mod, "100", "99.5", "99.8")]
+
+    out = mod.score(sig, bars, ttl=2)
+
+    assert out is not None
+    assert out.label == "EXPIRED_ACTIVE", (
+        "the entry candle was judged for the stop -- the engine only activates "
+        "on it, so this resolved a candle earlier than the engine would"
+    )
+    assert out.r == Decimal("-0.2"), "marked to bar 2's close, 99.8"
+
+    # The touch convention is held to the same rule: a wick through the stop on
+    # the entry candle is not a loss either.
+    touch = mod.score(sig, bars, ttl=2, close_stop=False)
+
+    assert touch is not None
+    assert touch.label == "EXPIRED_ACTIVE"
+
+    # And the target: an entry candle that also reaches it is not a win.
+    wide = [_bar(mod, "104", "100", "103"), _bar(mod, "103", "101", "102")]
+    target_on_entry = mod.score(sig, wide, ttl=2)
+
+    assert target_on_entry is not None
+    assert target_on_entry.label == "EXPIRED_ACTIVE"
+
+    # The short mirrors all of it.
+    short = _signal(mod, "DOWN", entry="100", inval="101", target="96")
+    mirrored = mod.score(
+        short, [_bar(mod, "102", "99.5", "102"), _bar(mod, "100.5", "100", "100.2")], ttl=2
+    )
+
+    assert mirrored is not None
+    assert mirrored.label == "EXPIRED_ACTIVE"
+    assert mirrored.r == Decimal("-0.2")
 
 
 def test_an_entry_never_touched_and_never_invalidated_expires_flat(mod) -> None:

@@ -32,6 +32,15 @@
       ]
     },
     {
+      "name": "the entry candle is judged for stop and target, so a tight stop closed through on its own fill reads as a loss the engine never records",
+      "file": "ops/soak/signal_outcomes.py",
+      "old": "                # PR #312).\n                continue\n",
+      "new": "                # PR #312).\n",
+      "expect_failing": [
+        "test_the_entry_candle_only_activates_even_when_it_closes_through_the_stop"
+      ]
+    },
+    {
       "name": "unresolved trades are dropped instead of marked to the last close",
       "file": "ops/soak/signal_outcomes.py",
       "old": "    return Outcome(\"EXPIRED_ACTIVE\", held / base)",
