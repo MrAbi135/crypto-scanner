@@ -143,6 +143,11 @@ TERMINAL_STATES = (
     "EXPIRED_UNTOUCHED",
     "EXPIRED_ACTIVE",
     "INVALIDATED_EARLY",
+    # SLS v1.0.15: a laddered signal that reached TP1 and was stopped at the
+    # entry. Missing here, a pushed M5 signal that closed flat would never get
+    # its close-the-loop message -- the trader told about an entry and never
+    # told it ended. A test holds this tuple to the engine's own terminal set.
+    "CLOSED_FLAT",
 )
 
 # --------------------------------------------------------------------------

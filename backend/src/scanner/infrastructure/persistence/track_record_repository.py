@@ -21,6 +21,23 @@ from scanner.infrastructure.persistence.signal_models import SignalRow
 from scanner.infrastructure.persistence.signal_outcome_models import SignalOutcomeRow
 from scanner.shared import Timeframe
 
+# Every terminal outcome, and the count it is reported under. The one table the
+# statistics are built from, so adding an outcome is one edit here -- and a test
+# holds this table to every outcome T19 can store, because an outcome missing
+# from it is not miscounted, it is silently dropped from `resolved` altogether.
+# That is what SLS v1.0.15's CLOSED_FLAT would have done: the four hard-coded
+# buckets before it had no home for it.
+#
+# The keys are `OutcomeCounts`' field names. `successes` and `failures` are the
+# two the hit rate rates; everything else is reported beside it (§12.4).
+OUTCOME_BUCKETS: dict[str, tuple[str, ...]] = {
+    "successes": ("SUCCESS",),
+    "failures": ("FAILED",),
+    "expired": ("EXPIRED_ACTIVE", "EXPIRED_UNTOUCHED"),
+    "invalidated": ("INVALIDATED_EARLY",),
+    "closed_flat": ("CLOSED_FLAT",),
+}
+
 
 class PgTrackRecordRepository:
     def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
@@ -106,12 +123,10 @@ class PgTrackRecordRepository:
         stmt = (
             select(
                 *columns,
-                _count_where(SignalOutcomeRow.outcome == "SUCCESS").label("successes"),
-                _count_where(SignalOutcomeRow.outcome == "FAILED").label("failures"),
-                _count_where(
-                    SignalOutcomeRow.outcome.in_(("EXPIRED_ACTIVE", "EXPIRED_UNTOUCHED"))
-                ).label("expired"),
-                _count_where(SignalOutcomeRow.outcome == "INVALIDATED_EARLY").label("invalidated"),
+                *(
+                    _count_where(SignalOutcomeRow.outcome.in_(states)).label(bucket)
+                    for bucket, states in OUTCOME_BUCKETS.items()
+                ),
             )
             # An inner join: a signal with no outcome has not resolved, and a
             # statistics row is about what happened. The archive read is where
@@ -139,10 +154,9 @@ class PgTrackRecordRepository:
             OutcomeCounts(
                 algo_version=row[0],
                 key=row[1] if axis is not None else None,
-                successes=row[-4],
-                failures=row[-3],
-                expired=row[-2],
-                invalidated=row[-1],
+                # By label, not by position: a bucket added to the table above
+                # must not shift every count read after it.
+                **{bucket: row._mapping[bucket] for bucket in OUTCOME_BUCKETS},
             )
             for row in rows
         )
@@ -250,4 +264,5 @@ def _archived(row: SignalRow, outcome: SignalOutcomeRow | None) -> ArchivedSigna
         mfe_r=outcome.mfe_r,
         mae_r=outcome.mae_r,
         excluded_from_stats=outcome.excluded_from_stats,
+        realised_r=outcome.realised_r,
     )

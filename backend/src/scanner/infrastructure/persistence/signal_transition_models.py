@@ -18,9 +18,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from scanner.infrastructure.persistence.models import Base
 
+# Mirrors migration 025's constraint, which added SLS v1.0.15's CLOSED_FLAT.
+# A test holds this list to `SignalState` itself: a state the enum knows and the
+# database refuses fails on its first insert in production, not in a test.
 _STATES = (
     "'DETECTED','PUBLISHED','SUPPRESSED','ACTIVE','SUCCESS','FAILED',"
-    "'EXPIRED_UNTOUCHED','EXPIRED_ACTIVE','INVALIDATED_EARLY'"
+    "'EXPIRED_UNTOUCHED','EXPIRED_ACTIVE','INVALIDATED_EARLY','CLOSED_FLAT'"
 )
 
 

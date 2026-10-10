@@ -26,6 +26,9 @@ class SignalOutcomeRecord:
     mae_r: Decimal
     excluded_from_stats: bool
     resolution_evidence: str
+    # SLS v1.0.15 §12.4. Last and defaulted, so every existing construction of
+    # a pool-exit outcome stays valid and correctly records none.
+    realised_r: Decimal | None = None
 
 
 class SignalOutcomeRepository(Protocol):

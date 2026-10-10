@@ -32,8 +32,15 @@ from scanner.domain.confluence import (
     entry_zone,
 )
 from scanner.domain.confluence.levels import Invalidation
+from scanner.domain.lifecycle import (
+    TERMINAL_STATES,
+    Observation,
+    SignalState,
+    accounting,
+    observe,
+    walk_ladder,
+)
 from scanner.domain.lifecycle import Candle as LifecycleCandle
-from scanner.domain.lifecycle import SignalState, accounting, observe
 from scanner.shared import Timeframe
 
 
@@ -130,14 +137,39 @@ class SignalMonitorService:
                 else None
             )
 
-            observation = observe(
-                source,
-                candle,
-                levels=_levels_of(signal),
-                elapsed_candles=_elapsed(signal, at, timeframe),
-                ttl_candles=signal.ttl_candles,
-                premise_broken=premise is not None,
-            )
+            levels = _levels_of(signal)
+            elapsed = _elapsed(signal, at, timeframe)
+            realised_r: Decimal | None = None
+            ladder_evidence: dict[str, str] = {}
+
+            if source is SignalState.ACTIVE and levels.ladder is not None:
+                # SLS v1.0.15 §12.3: where a laddered signal's stop sits depends
+                # on every candle since the entry, so it is walked from there on
+                # every pass rather than judged on the one candle just closed.
+                lived = await self._candles_since_entry(signal, timeframe, at)
+                walk = walk_ladder(
+                    lived,
+                    levels=levels,
+                    elapsed_candles=elapsed,
+                    ttl_candles=signal.ttl_candles,
+                )
+                # A trailing stop is read on touch, so there is no wick that
+                # "went through without failing" -- `stress_test` has no meaning.
+                observation = Observation(walk.to_state, False, walk.reason)
+                realised_r = walk.realised_r
+                ladder_evidence = {"rungs": str(walk.rungs)}
+
+                if realised_r is not None:
+                    ladder_evidence["realised_r"] = str(realised_r)
+            else:
+                observation = observe(
+                    source,
+                    candle,
+                    levels=levels,
+                    elapsed_candles=elapsed,
+                    ttl_candles=signal.ttl_candles,
+                    premise_broken=premise is not None,
+                )
 
             if observation.to_state is None and not observation.stress_test:
                 continue
@@ -161,6 +193,7 @@ class SignalMonitorService:
                             "low": str(closed.low),
                             "close": str(closed.close),
                             **({"premise": premise} if premise is not None else {}),
+                            **ladder_evidence,
                         },
                         sort_keys=True,
                     ),
@@ -185,6 +218,7 @@ class SignalMonitorService:
                         at=at,
                         timeframe=timeframe,
                         reason=observation.reason,
+                        realised_r=realised_r,
                     )
 
         return MonitorReport(
@@ -284,6 +318,45 @@ class SignalMonitorService:
 
         return None
 
+    async def _candles_since_entry(
+        self,
+        signal: SignalRecord,
+        timeframe: Timeframe,
+        at: datetime,
+    ) -> list[LifecycleCandle]:
+        """The candles AFTER the one that touched the entry, through `at`.
+
+        The entry candle is excluded because §12.3, as `observe` implements it,
+        lets that candle only activate the signal -- `walk_ladder` assumes it
+        and the M5 measurement was re-run under it.
+
+        Located from the ACTIVE transition's own candle rather than from the
+        publication time: everything before the fill is price travelling *to*
+        the entry, and for a long it can sit above TP1 on the way down. Counted
+        as rungs, it would trail the stop to breakeven before the position
+        existed.
+        """
+        activated = [
+            t.at_candle_open_time
+            for t in await self._transitions.list_for_signal(signal.signal_id)
+            if t.to_state == SignalState.ACTIVE.value
+        ]
+
+        if not activated:
+            # The latest transition said ACTIVE, so this cannot happen without
+            # the table being edited -- which 018's triggers refuse. Refusing
+            # here too is louder than walking from a guessed candle.
+            raise RuntimeError(f"{signal.signal_id} is ACTIVE with no ACTIVE transition")
+
+        series = await self._candles.fetch_series(
+            signal.symbol,
+            timeframe,
+            min(activated) + timeframe.duration,
+            at + timeframe.duration,
+        )
+
+        return [LifecycleCandle(high=c.high, low=c.low, close=c.close) for c in series]
+
     async def _record_outcome(
         self,
         signal: SignalRecord,
@@ -292,6 +365,7 @@ class SignalMonitorService:
         at: datetime,
         timeframe: Timeframe,
         reason: str,
+        realised_r: Decimal | None = None,
     ) -> None:
         """§12.4's accounting, written once when the signal resolves.
 
@@ -319,6 +393,7 @@ class SignalMonitorService:
                 outcome,
                 levels=levels,
                 candles=[LifecycleCandle(high=c.high, low=c.low, close=c.close) for c in lived],
+                realised_r=realised_r,
             )
         except ValueError:
             # R is zero, which T17's own check constraint should have refused
@@ -337,19 +412,18 @@ class SignalMonitorService:
                 mae_r=book.mae_r,
                 excluded_from_stats=False,
                 resolution_evidence=json.dumps({"reason": reason}, sort_keys=True),
+                realised_r=book.realised_r,
             )
         )
 
 
-_RESOLVED = frozenset(
-    {
-        SignalState.SUCCESS,
-        SignalState.FAILED,
-        SignalState.EXPIRED_ACTIVE,
-        SignalState.EXPIRED_UNTOUCHED,
-        SignalState.INVALIDATED_EARLY,
-    }
-)
+# Every state that ends a monitored signal, and so earns §12.4's outcome row.
+# Derived from `TERMINAL_STATES` rather than listed: it WAS listed, and SLS
+# v1.0.15's CLOSED_FLAT was missing from it -- the monitor wrote the transition
+# and then never wrote the outcome, so every flat close would have vanished
+# from the track record without an error. SUPPRESSED is the one terminal state
+# no monitored signal can reach: a suppressed candidate never becomes a signal.
+_RESOLVED = TERMINAL_STATES - {SignalState.SUPPRESSED}
 
 
 def _seeding_sweep_pool(setup: SetupRecord | None) -> str | None:

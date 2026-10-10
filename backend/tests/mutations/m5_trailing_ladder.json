@@ -1,0 +1,153 @@
+{
+  "description": "SLS v1.0.15 part 3: the trailing invalidation, realised_r and CLOSED_FLAT. Each mutation is a way a laddered trade could be scored wrong without an error -- the stop trailed from the wrong rung, read on close, checked after the rungs; the walk fed candles from before the fill; a flat close dropped from the outcomes, the track record or the notifier. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/m5_trailing_ladder.json",
+  "pytest": [
+    "tests/unit/domain/lifecycle/test_walk_ladder.py",
+    "tests/unit/application/detection/test_monitor_ladder.py",
+    "tests/unit/test_signal_states_agree_everywhere.py"
+  ],
+  "mutations": [
+    {
+      "name": "the stop is never touched, so a trade can only end on its TTL",
+      "file": "backend/src/scanner/domain/lifecycle/state.py",
+      "old": "        if candle.low <= stop if up else candle.high >= stop:\n            reason = _stop_reason(stop_r, rungs)",
+      "new": "        if False:\n            reason = _stop_reason(stop_r, rungs)",
+      "expect_failing": [
+        "test_a_touch_of_the_initial_stop_before_tp1_is_a_one_r_loss",
+        "test_tp1_then_back_to_the_entry_is_closed_flat"
+      ]
+    },
+    {
+      "name": "the stop is read on close, as the zone rule does, not on touch",
+      "file": "backend/src/scanner/domain/lifecycle/state.py",
+      "old": "        if candle.low <= stop if up else candle.high >= stop:",
+      "new": "        if candle.close <= stop if up else candle.close >= stop:",
+      "expect_failing": [
+        "test_a_touch_of_the_initial_stop_before_tp1_is_a_one_r_loss",
+        "test_a_trailing_touch_records_no_stress_test"
+      ]
+    },
+    {
+      "name": "the stop trails onto the rung just reached instead of one behind it",
+      "file": "backend/src/scanner/domain/lifecycle/state.py",
+      "old": "            stop_r = Decimal(0) if rungs == 1 else ladder.rung_r(rungs - 1)",
+      "new": "            stop_r = ladder.rung_r(rungs)",
+      "expect_failing": [
+        "test_tp1_then_back_to_the_entry_is_closed_flat",
+        "test_tp2_then_back_to_tp1_books_two_r"
+      ]
+    },
+    {
+      "name": "the TTL is never read, so a live trade can outlast its window",
+      "file": "backend/src/scanner/domain/lifecycle/state.py",
+      "old": "    if candles and elapsed_candles >= ttl_candles:",
+      "new": "    if False and candles and elapsed_candles >= ttl_candles:",
+      "expect_failing": [
+        "test_the_ttl_marks_a_live_trade_at_its_final_close"
+      ]
+    },
+    {
+      "name": "a flat close is scored a win",
+      "file": "backend/src/scanner/domain/lifecycle/state.py",
+      "old": "    return SignalState.CLOSED_FLAT",
+      "new": "    return SignalState.SUCCESS",
+      "expect_failing": [
+        "test_tp1_then_back_to_the_entry_is_closed_flat",
+        "test_tp1_then_back_to_the_entry_closes_flat_with_zero_r"
+      ]
+    },
+    {
+      "name": "CLOSED_FLAT is not terminal",
+      "file": "backend/src/scanner/domain/lifecycle/state.py",
+      "old": "        SignalState.INVALIDATED_EARLY,\n        SignalState.CLOSED_FLAT,\n    }",
+      "new": "        SignalState.INVALIDATED_EARLY,\n    }",
+      "expect_failing": [
+        "test_closed_flat_is_terminal_and_reachable_only_from_active",
+        "test_the_premise_closed_flat_is_an_outcome_state"
+      ]
+    },
+    {
+      "name": "observe() silently watches the pool of a laddered signal",
+      "file": "backend/src/scanner/domain/lifecycle/state.py",
+      "old": "    if levels.ladder is not None:",
+      "new": "    if False and levels.ladder is not None:",
+      "expect_failing": [
+        "test_observe_refuses_an_active_laddered_signal"
+      ]
+    },
+    {
+      "name": "the monitor never routes a laddered signal to the walk",
+      "file": "backend/src/scanner/application/detection/signal_monitor.py",
+      "old": "            if source is SignalState.ACTIVE and levels.ladder is not None:",
+      "new": "            if False and source is SignalState.ACTIVE and levels.ladder is not None:",
+      "expect_failing": [
+        "test_tp1_then_back_to_the_entry_closes_flat_with_zero_r",
+        "test_tp2_then_back_to_tp1_succeeds_with_two_r_on_the_outcome"
+      ]
+    },
+    {
+      "name": "the walk includes the entry candle, counting a high OHLC cannot order",
+      "file": "backend/src/scanner/application/detection/signal_monitor.py",
+      "old": "            min(activated) + timeframe.duration,",
+      "new": "            min(activated),",
+      "expect_failing": [
+        "test_the_entry_candle_is_not_a_rung_either"
+      ]
+    },
+    {
+      "name": "the walk starts at publication, counting the travel down to the fill as rungs",
+      "file": "backend/src/scanner/application/detection/signal_monitor.py",
+      "old": "            min(activated) + timeframe.duration,",
+      "new": "            signal.published_at,",
+      "expect_failing": [
+        "test_candles_before_the_fill_are_not_rungs"
+      ]
+    },
+    {
+      "name": "the monitor's resolved set is hard-coded again and CLOSED_FLAT gets no outcome",
+      "file": "backend/src/scanner/application/detection/signal_monitor.py",
+      "old": "_RESOLVED = TERMINAL_STATES - {SignalState.SUPPRESSED}",
+      "new": "_RESOLVED = TERMINAL_STATES - {SignalState.SUPPRESSED, SignalState.CLOSED_FLAT}",
+      "expect_failing": [
+        "test_tp1_then_back_to_the_entry_closes_flat_with_zero_r",
+        "test_the_monitor_records_an_outcome_for_every_outcome_state"
+      ]
+    },
+    {
+      "name": "the outcome is written without what the trade booked",
+      "file": "backend/src/scanner/application/detection/signal_monitor.py",
+      "old": "                        reason=observation.reason,\n                        realised_r=realised_r,",
+      "new": "                        reason=observation.reason,\n                        realised_r=None,",
+      "expect_failing": [
+        "test_tp1_then_back_to_the_entry_closes_flat_with_zero_r",
+        "test_tp2_then_back_to_tp1_succeeds_with_two_r_on_the_outcome"
+      ]
+    },
+    {
+      "name": "a flat close drops out of `resolved`",
+      "file": "backend/src/scanner/domain/lifecycle/track_record.py",
+      "old": "        return self.successes + self.failures + self.expired + self.invalidated + self.closed_flat",
+      "new": "        return self.successes + self.failures + self.expired + self.invalidated",
+      "expect_failing": [
+        "test_closed_flat_is_resolved_but_never_rated"
+      ]
+    },
+    {
+      "name": "the track record has no bucket for CLOSED_FLAT",
+      "file": "backend/src/scanner/infrastructure/persistence/track_record_repository.py",
+      "old": "    \"closed_flat\": (\"CLOSED_FLAT\",),",
+      "new": "    \"closed_flat\": (),",
+      "expect_failing": [
+        "test_the_track_record_buckets_cover_every_outcome_exactly_once"
+      ]
+    },
+    {
+      "name": "the notifier never closes the loop on a flat close",
+      "file": "ops/notify/notify_signals.py",
+      "old": "    \"CLOSED_FLAT\",\n)",
+      "new": ")",
+      "expect_failing": [
+        "test_the_notifier_closes_the_loop_on_every_outcome_state"
+      ]
+    }
+  ]
+}

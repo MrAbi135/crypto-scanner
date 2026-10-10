@@ -77,6 +77,8 @@ class Outcome(BaseModel):
     elapsed_candles: int
     mfe_r: Decimal
     mae_r: Decimal
+    # SLS v1.0.15 §12.4: a laddered signal's booked R; None for a pool exit.
+    realised_r: Decimal | None = None
 
 
 class Transition(BaseModel):
@@ -298,6 +300,9 @@ def _archived_row(row: ArchivedSignal) -> dict[str, Any]:
         "elapsed_candles": row.elapsed_candles,
         "mfe_r": str(row.mfe_r) if row.mfe_r is not None else None,
         "mae_r": str(row.mae_r) if row.mae_r is not None else None,
+        # SLS v1.0.15 §12.4: what a laddered signal actually booked. Null for a
+        # pool-exit signal, whose result is its outcome.
+        "realised_r": str(row.realised_r) if row.realised_r is not None else None,
         # PRD FC-10.1: "Delisting-expired signals excluded from quality stats
         # but present in archive". Carried so a reader of the archive can see
         # which rows the statistics row will not be counting.
@@ -384,6 +389,7 @@ def _group(row: OutcomeCounts, group_by: GroupBy) -> dict[str, Any]:
         failures=row.failures,
         expired=row.expired,
         invalidated=row.invalidated,
+        closed_flat=row.closed_flat,
     )
 
     rate = record.hit_rate
@@ -403,6 +409,9 @@ def _group(row: OutcomeCounts, group_by: GroupBy) -> dict[str, Any]:
             # has a target-selection problem — visible, not hidden."
             "expired": record.expired,
             "invalidated_early": record.invalidated,
+            # SLS v1.0.15: reached TP1, stop moved to the entry, gave it back.
+            # Resolved and reported, never rated -- neither a win nor a loss.
+            "closed_flat": record.closed_flat,
         },
         "hit_rate": {
             "rated": rate.rated,
@@ -459,6 +468,7 @@ async def signal_detail(
             elapsed_candles=resolved.elapsed_candles,
             mfe_r=resolved.mfe_r,
             mae_r=resolved.mae_r,
+            realised_r=resolved.realised_r,
         ).model_dump(mode="json")
 
     if projection == "full":

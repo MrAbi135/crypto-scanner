@@ -101,12 +101,14 @@ class GroupStats:
     failures: int
     expired: int
     invalidated: int
+    # SLS v1.0.15's CLOSED_FLAT: resolved, reported, never rated.
+    closed_flat: int = 0
 
     @property
     def resolved(self) -> int:
         """Everything that reached a terminal state, rated or not."""
 
-        return self.successes + self.failures + self.expired + self.invalidated
+        return self.successes + self.failures + self.expired + self.invalidated + self.closed_flat
 
     @property
     def hit_rate(self) -> HitRate:

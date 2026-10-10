@@ -16,16 +16,19 @@ from scanner.domain.lifecycle.payload import (
 from scanner.domain.lifecycle.state import (
     TERMINAL_STATES,
     Candle,
+    LadderWalk,
     Observation,
     SignalState,
     may_transition,
     observe,
+    walk_ladder,
 )
 
 __all__ = [
     "HIT_RATE_STATES",
     "TERMINAL_STATES",
     "Candle",
+    "LadderWalk",
     "Observation",
     "Outcome",
     "PublicationDecision",
@@ -36,4 +39,5 @@ __all__ = [
     "may_transition",
     "observe",
     "publication_checks",
+    "walk_ladder",
 ]
