@@ -1,0 +1,89 @@
+{
+  "description": "ops/soak/signal_outcomes.py scores money rather than events, so its failure modes are quiet: a unit mixed up, a boundary resolved the flattering way, unresolved trades dropped, or a control gate that cannot fail. Each mutation below is a way the 2026-10-10 analysis could have reported a plausible wrong number. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/signal_outcome_replay.json",
+  "pytest": [
+    "tests/unit/test_signal_outcome_replay.py"
+  ],
+  "mutations": [
+    {
+      "name": "a loss is charged one unit whatever the stop, so widening the stop reads as free",
+      "file": "ops/soak/signal_outcomes.py",
+      "old": "            return Outcome(\"FAILED\", -stop_mult)",
+      "new": "            return Outcome(\"FAILED\", Decimal(-1))",
+      "expect_failing": [
+        "test_a_loss_is_charged_in_original_stops_not_in_the_widened_one"
+      ]
+    },
+    {
+      "name": "the ambiguous candle is resolved as a win, flattering every wide stop",
+      "file": "ops/soak/signal_outcomes.py",
+      "old": "        if hit_stop:\n            return Outcome(\"FAILED\", -stop_mult)\n\n        if hit_target:\n            return Outcome(\"SUCCESS\", target_in_r)",
+      "new": "        if hit_target:\n            return Outcome(\"SUCCESS\", target_in_r)\n\n        if hit_stop:\n            return Outcome(\"FAILED\", -stop_mult)",
+      "expect_failing": [
+        "test_one_candle_holding_both_target_and_stop_is_scored_a_loss"
+      ]
+    },
+    {
+      "name": "every signal is treated as filled, so an untouched entry still takes the loss",
+      "file": "ops/soak/signal_outcomes.py",
+      "old": "    target_in_r = abs(target - signal.entry) / base\n    live = False",
+      "new": "    target_in_r = abs(target - signal.entry) / base\n    live = True",
+      "expect_failing": [
+        "test_an_entry_never_touched_and_never_invalidated_expires_flat"
+      ]
+    },
+    {
+      "name": "unresolved trades are dropped instead of marked to the last close",
+      "file": "ops/soak/signal_outcomes.py",
+      "old": "    return Outcome(\"EXPIRED_ACTIVE\", held / base)",
+      "new": "    return None",
+      "expect_failing": [
+        "test_an_unresolved_trade_is_marked_to_the_last_close_not_dropped"
+      ]
+    },
+    {
+      "name": "the zero-R labels enter the expectancy denominator and pull it toward zero",
+      "file": "ops/soak/signal_outcomes.py",
+      "old": "        if outcome.label in FILLED:\n            total += outcome.r\n            scored += 1",
+      "new": "        if True:\n            total += outcome.r\n            scored += 1",
+      "expect_failing": [
+        "test_expectancy_averages_over_filled_positions_only"
+      ]
+    },
+    {
+      "name": "the control gate cannot fail, so a drifted simulator still prints its table",
+      "file": "ops/soak/signal_outcomes.py",
+      "old": "CONTROL_FLOOR = Decimal(\"0.85\")",
+      "new": "CONTROL_FLOOR = Decimal(\"0\")",
+      "expect_failing": [
+        "test_the_control_gate_blocks_a_simulator_that_stopped_matching"
+      ]
+    },
+    {
+      "name": "no evidence reads as agreement, so an empty record passes the control",
+      "file": "ops/soak/signal_outcomes.py",
+      "old": "    if not checked:\n        print(\n            \"CONTROL: no resolved signal to check against -- refusing to report\",\n            file=sys.stderr,\n        )\n\n        return False",
+      "new": "    if not checked:\n        return True",
+      "expect_failing": [
+        "test_the_control_gate_refuses_when_there_is_nothing_resolved_to_check"
+      ]
+    },
+    {
+      "name": "fewer candles are loaded than the sweep asks for, so long TTLs read as expired",
+      "file": "ops/soak/signal_outcomes.py",
+      "old": "MAX_TTL = 96",
+      "new": "MAX_TTL = 24",
+      "expect_failing": [
+        "test_the_candle_fetch_is_sized_for_the_longest_ttl_swept"
+      ]
+    },
+    {
+      "name": "concentration drops arbitrary trades instead of the best ones",
+      "file": "ops/soak/signal_outcomes.py",
+      "old": "    results.sort(reverse=True)",
+      "new": "    results.sort()",
+      "expect_failing": [
+        "test_concentration_strips_the_best_trades_in_order"
+      ]
+    }
+  ]
+}
