@@ -35,7 +35,9 @@ that still produces plausible numbers is worse than no simulator.
 **What it does not model:** fees, slippage and spread, none of them. Every
 figure is gross, and costs move all of them the same way. And when one candle
 contains both the target and the stop, the order is unknowable from OHLC, so
-the trade is scored a LOSS -- stated because it flatters nothing.
+the trade is scored a LOSS -- stated because it flatters nothing. The candle
+that touches the entry only activates the signal, as the engine's `observe()`
+does; stop and target are judged from the following candle.
 
 Read-only. Runs from the engine image for its database access, exactly as
 `break_tolerance.py` does; `ops/soak/run_signal_outcomes.sh` wraps the
@@ -148,6 +150,17 @@ def score(
             # a loss on a position that was never opened.
             if (up and bar.low <= signal.entry) or (not up and bar.high >= signal.entry):
                 live = True
+                # The entry candle only activates; stop and target are read
+                # from the NEXT candle on. That is the engine's convention --
+                # `lifecycle/state.py::observe()` returns ACTIVE as soon as the
+                # entry is touched, without looking at the invalidation or the
+                # target on that candle -- and the control is only a control
+                # if both sides judge the same candles. It is not a detail: a
+                # tight zone-edge stop is often closed through on the entry
+                # candle itself, and judging that candle turned M5's
+                # zone-edge stop from +0.71% into -11.29% (n=15; SLS erratum
+                # PR #312).
+                continue
             else:
                 # There is deliberately no "invalidated before entry" branch
                 # here, and the reason is arithmetic rather than taste: a first
