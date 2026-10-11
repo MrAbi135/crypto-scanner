@@ -31,8 +31,19 @@ class EventStreamConsumer(Protocol):
         self,
         stream: str,
         group: str,
+        *,
+        seed_group: str | None = None,
     ) -> None:
-        """Create the group if absent. Idempotent; safe on every boot."""
+        """Create the group if absent. Idempotent; safe on every boot.
+
+        `seed_group`: a group this one takes over from (speed step 2: the
+        single `engine` group splitting into shard groups). A new group starts
+        where the seed group stands -- just before its oldest unacked entry, or
+        at its last delivered one -- so a split neither skips the closes that
+        arrived while the engines restarted nor replays the stream's whole
+        history. Without a seed, or when the seed does not exist, a new group
+        starts at the stream's beginning, as it always has.
+        """
         ...
 
     async def read(

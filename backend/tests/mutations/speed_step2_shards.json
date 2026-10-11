@@ -1,0 +1,76 @@
+{
+  "description": "Speed step 2 (2026-10-11): engine shards by symbol hash, each with its own consumer group seeded from `engine`. Each mutation is a way a split could run one context twice, run it nowhere, lose the closes that arrived during the restart, or replay history. Needs Docker for the Redis half. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/speed_step2_shards.json",
+  "pytest": [
+    "tests/unit/application/detection/test_shards.py",
+    "tests/integration/test_event_consumer_redis.py"
+  ],
+  "mutations": [
+    {
+      "name": "the owner is hashed from a different spelling of the symbol",
+      "file": "backend/src/scanner/application/detection/shards.py",
+      "old": "    digest = hashlib.sha256(symbol.encode(\"utf-8\")).digest()",
+      "new": "    digest = hashlib.sha256(symbol.lower().encode(\"utf-8\")).digest()",
+      "expect_failing": [
+        "test_the_owner_of_a_symbol_is_pinned"
+      ]
+    },
+    {
+      "name": "every shard owns every symbol, so one context runs in two engines",
+      "file": "backend/src/scanner/application/detection/shards.py",
+      "old": "        return self.count == 1 or shard_of(symbol, self.count) == self.index",
+      "new": "        return True",
+      "expect_failing": [
+        "test_every_symbol_has_exactly_one_owner",
+        "test_a_shard_runs_its_own_closes_and_acks_the_others",
+        "test_an_owned_close_that_fails_stays_pending"
+      ]
+    },
+    {
+      "name": "a shard group's name drops the count, so a 3-way split resumes a 2-way group",
+      "file": "backend/src/scanner/application/detection/shards.py",
+      "old": "        return f\"{CANDLE_GROUP}-shard-{self.index}-of-{self.count}\"",
+      "new": "        return f\"{CANDLE_GROUP}-shard-{self.index}\"",
+      "expect_failing": [
+        "test_a_shard_group_names_its_split"
+      ]
+    },
+    {
+      "name": "another shard's close is left unacked in this group",
+      "file": "backend/src/scanner/application/detection/candle_close_consumer.py",
+      "old": "                    acked.append(close.entry_id)\n                    skipped += 1",
+      "new": "                    skipped += 1",
+      "expect_failing": [
+        "test_a_shard_runs_its_own_closes_and_acks_the_others",
+        "test_an_owned_close_that_fails_stays_pending"
+      ]
+    },
+    {
+      "name": "a seeded group ignores the close that was in flight at the restart",
+      "file": "backend/src/scanner/infrastructure/redis/event_consumer.py",
+      "old": "        if oldest is not None:\n            return _just_before(_text(oldest))",
+      "new": "        if False:\n            return _just_before(_text(oldest))",
+      "expect_failing": [
+        "test_a_shard_group_starts_where_the_engine_group_stands"
+      ]
+    },
+    {
+      "name": "the start id is the oldest unfinished close itself, so that close is skipped",
+      "file": "backend/src/scanner/infrastructure/redis/event_consumer.py",
+      "old": "    if sequence > 0:\n        return f\"{millis}-{sequence - 1}\"",
+      "new": "    if sequence > 0:\n        return f\"{millis}-{sequence}\"",
+      "expect_failing": [
+        "test_a_seeded_group_starts_just_before_the_oldest_unfinished_close",
+        "test_a_shard_group_starts_where_the_engine_group_stands"
+      ]
+    },
+    {
+      "name": "a seed group that does not exist starts the new group at the stream's end",
+      "file": "backend/src/scanner/infrastructure/redis/event_consumer.py",
+      "old": "            start = await self._resume_point(stream, seed_group) or \"0\"",
+      "new": "            start = await self._resume_point(stream, seed_group) or \"$\"",
+      "expect_failing": [
+        "test_without_a_seed_group_a_new_group_reads_from_the_start"
+      ]
+    }
+  ]
+}
