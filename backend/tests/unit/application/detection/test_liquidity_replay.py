@@ -119,6 +119,13 @@ class FakePools:
             return self.pool
         return None
 
+    async def upsert_many(self, pools) -> None:
+        for pool in pools:
+            await self.upsert(pool)
+
+    async def get_many(self, pool_ids) -> dict[str, LiquidityPoolRecord]:
+        return {i: self.pool for i in pool_ids if i == self.pool.pool_id}
+
     async def list_active(
         self,
         symbol: str,

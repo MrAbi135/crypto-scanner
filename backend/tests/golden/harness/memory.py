@@ -241,8 +241,15 @@ class InMemoryLiquidityPoolRepository:
             evidence=pool.evidence,
         )
 
+    async def upsert_many(self, pools: Sequence[LiquidityPoolRecord]) -> None:
+        for pool in pools:
+            await self.upsert(pool)
+
     async def get(self, pool_id: str) -> LiquidityPoolRecord | None:
         return self.pools.get(pool_id)
+
+    async def get_many(self, pool_ids: Sequence[str]) -> dict[str, LiquidityPoolRecord]:
+        return {pool_id: self.pools[pool_id] for pool_id in pool_ids if pool_id in self.pools}
 
     async def list_active(
         self,

@@ -653,6 +653,48 @@ async def test_terminal_pool_cannot_be_revived_by_upsert(
     assert stored.evidence == '{"v":1}'
 
 
+async def test_a_batch_upsert_writes_what_sequential_upserts_would(engine) -> None:
+    """2026-10-11 speed work: the liquidity pass writes its ~130 pools as one
+    statement. The batch must leave the table exactly as one upsert per pool
+    did -- including a repeated id (last occurrence wins), a terminal pool
+    the batch may not revive, and a mix of new and existing rows."""
+    repo = PgLiquidityPoolRepository(build_session_factory(engine))
+    symbol = "PBATCH"
+
+    await repo.upsert(pool("pb-live", symbol=symbol))
+    await repo.upsert(pool("pb-dead", symbol=symbol))
+    assert await repo.transition("pb-dead", to_state="SWEPT", updated_at=T0)
+
+    await repo.upsert_many(
+        [
+            pool("pb-live", symbol=symbol, strength=Decimal("60"), evidence='{"v":2}'),
+            pool("pb-new", symbol=symbol, strength=Decimal("40")),
+            pool("pb-dead", symbol=symbol, strength=Decimal("99"), evidence='{"revived":true}'),
+            pool("pb-live", symbol=symbol, strength=Decimal("70"), evidence='{"v":3}'),
+        ]
+    )
+
+    stored = await repo.get_many(["pb-live", "pb-new", "pb-dead", "pb-missing"])
+
+    assert set(stored) == {"pb-live", "pb-new", "pb-dead"}, "a missing id must be absent"
+    assert stored["pb-live"].strength == Decimal("70"), "the last occurrence must win"
+    assert stored["pb-live"].evidence == '{"v":3}'
+    assert stored["pb-new"].strength == Decimal("40")
+    assert stored["pb-dead"].state == "SWEPT", "a terminal pool was revived by the batch"
+    assert stored["pb-dead"].strength == Decimal("50")
+
+
+async def test_a_batch_larger_than_one_statement_is_written_whole(engine) -> None:
+    """Chunked under Postgres's bind-parameter ceiling, in one transaction."""
+    repo = PgLiquidityPoolRepository(build_session_factory(engine))
+    ids = [f"pc-{n:04d}" for n in range(2_100)]
+
+    await repo.upsert_many([pool(pool_id, symbol="PCHUNK") for pool_id in ids])
+
+    assert set(await repo.get_many(ids)) == set(ids)
+    assert await repo.get_many([]) == {}
+
+
 async def test_pool_transition_is_one_way(engine) -> None:
     repo = PgLiquidityPoolRepository(build_session_factory(engine))
     await repo.upsert(pool("p-once", symbol="PONCE"))

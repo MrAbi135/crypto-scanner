@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import ColumnElement, cast, select, update
 from sqlalchemy.dialects.postgresql import JSONB
@@ -34,64 +36,55 @@ class PgLiquidityPoolRepository:
         self,
         pool: LiquidityPoolRecord,
     ) -> None:
-        stmt = pg_insert(LiquidityPoolRow).values(
-            pool_id=pool.pool_id,
-            symbol=pool.symbol,
-            timeframe=pool.timeframe.value,
-            side=pool.side,
-            liquidity_class=pool.liquidity_class,
-            source=pool.source,
-            price=pool.price,
-            band_low=pool.band_low,
-            band_high=pool.band_high,
-            strength=pool.strength,
-            state=pool.state,
-            member_count=pool.member_count,
-            created_index=pool.created_index,
-            created_at=pool.created_at,
-            updated_at=pool.updated_at,
-            evidence=pool.evidence,
-        )
+        await self.upsert_many((pool,))
 
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[
-                LiquidityPoolRow.pool_id,
-            ],
-            set_={
-                "liquidity_class": stmt.excluded.liquidity_class,
-                # A cluster merging into a swing pool turns it into a cluster
-                # pool (SLS 4.2 "merge into one pool with combined evidence").
-                "source": stmt.excluded.source,
-                "price": stmt.excluded.price,
-                "band_low": stmt.excluded.band_low,
-                "band_high": stmt.excluded.band_high,
-                "strength": stmt.excluded.strength,
-                "member_count": stmt.excluded.member_count,
-                "updated_at": stmt.excluded.updated_at,
-                "evidence": stmt.excluded.evidence,
-            },
-            where=(LiquidityPoolRow.state == "ACTIVE"),
-        )
+    async def upsert_many(
+        self,
+        pools: Sequence[LiquidityPoolRecord],
+    ) -> None:
+        """One INSERT ... ON CONFLICT for the batch, in one transaction.
+
+        The liquidity pass used to rewrite every pool in its window one
+        statement and one commit at a time -- ~130 round trips per pass,
+        measured on 2026-10-11 as the largest single cost of a pass. This is
+        the same statement with many VALUES rows. Postgres refuses to update
+        one row twice in one statement, so a repeated id keeps only its last
+        occurrence, which is what sequential upserts would have left.
+        """
+        latest = {pool.pool_id: pool for pool in pools}
+
+        if not latest:
+            return
+
+        rows = list(latest.values())
 
         async with self._sessions() as session:
-            await session.execute(stmt)
+            for start in range(0, len(rows), _UPSERT_CHUNK):
+                await session.execute(_pool_upsert(rows[start : start + _UPSERT_CHUNK]))
+
             await session.commit()
 
     async def get(
         self,
         pool_id: str,
     ) -> LiquidityPoolRecord | None:
+        return (await self.get_many((pool_id,))).get(pool_id)
+
+    async def get_many(
+        self,
+        pool_ids: Sequence[str],
+    ) -> dict[str, LiquidityPoolRecord]:
+        wanted = sorted(set(pool_ids))
+
+        if not wanted:
+            return {}
+
         async with self._sessions() as session:
             result = await session.execute(
-                select(LiquidityPoolRow).where(LiquidityPoolRow.pool_id == pool_id).limit(1)
+                select(LiquidityPoolRow).where(LiquidityPoolRow.pool_id.in_(wanted))
             )
 
-            row = result.scalar_one_or_none()
-
-            if row is None:
-                return None
-
-            return _pool_record(row)
+            return {row.pool_id: _pool_record(row) for row in result.scalars().all()}
 
     async def list_active(
         self,
@@ -201,6 +194,61 @@ class PgLiquidityTransitionRepository:
             await session.commit()
 
             return bool(result.rowcount)  # type: ignore[attr-defined]
+
+
+# 16 bound parameters per row against Postgres's 32,767 per statement; a pass
+# writes ~130, so one chunk is the normal case and the bound is only a guard.
+_UPSERT_CHUNK = 1000
+
+
+def _pool_upsert(pools: Sequence[LiquidityPoolRecord]) -> Any:
+    """The single-pool upsert's statement, for many rows at once.
+
+    The conflict rule is unchanged: the mutable subset moves only while the
+    stored row is ACTIVE, so a swept pool cannot be revived by a later pass
+    (SLS §4.2 calls terminal states permanent).
+    """
+    stmt = pg_insert(LiquidityPoolRow).values(
+        [
+            {
+                "pool_id": pool.pool_id,
+                "symbol": pool.symbol,
+                "timeframe": pool.timeframe.value,
+                "side": pool.side,
+                "liquidity_class": pool.liquidity_class,
+                "source": pool.source,
+                "price": pool.price,
+                "band_low": pool.band_low,
+                "band_high": pool.band_high,
+                "strength": pool.strength,
+                "state": pool.state,
+                "member_count": pool.member_count,
+                "created_index": pool.created_index,
+                "created_at": pool.created_at,
+                "updated_at": pool.updated_at,
+                "evidence": pool.evidence,
+            }
+            for pool in pools
+        ]
+    )
+
+    return stmt.on_conflict_do_update(
+        index_elements=[LiquidityPoolRow.pool_id],
+        set_={
+            "liquidity_class": stmt.excluded.liquidity_class,
+            # A cluster merging into a swing pool turns it into a cluster
+            # pool (SLS 4.2 "merge into one pool with combined evidence").
+            "source": stmt.excluded.source,
+            "price": stmt.excluded.price,
+            "band_low": stmt.excluded.band_low,
+            "band_high": stmt.excluded.band_high,
+            "strength": stmt.excluded.strength,
+            "member_count": stmt.excluded.member_count,
+            "updated_at": stmt.excluded.updated_at,
+            "evidence": stmt.excluded.evidence,
+        },
+        where=(LiquidityPoolRow.state == "ACTIVE"),
+    )
 
 
 def _pool_record(
