@@ -23,7 +23,14 @@ class RedisEventStreamConsumer:
         self,
         stream: str,
         group: str,
+        *,
+        seed_group: str | None = None,
     ) -> None:
+        start = "0"
+
+        if seed_group is not None and not await self._group_exists(stream, group):
+            start = await self._resume_point(stream, seed_group) or "0"
+
         try:
             # mkstream because the engine may boot before ingest has produced
             # anything; without it the first start fails on a missing key and
@@ -31,7 +38,7 @@ class RedisEventStreamConsumer:
             await self._client.xgroup_create(
                 stream,
                 group,
-                id="0",
+                id=start,
                 mkstream=True,
             )
         except ResponseError as exc:
@@ -40,6 +47,39 @@ class RedisEventStreamConsumer:
             # narrowly rather than swallowing ResponseError wholesale.
             if "BUSYGROUP" not in str(exc):
                 raise
+
+    async def _groups(self, stream: str) -> dict[str, dict[str, Any]]:
+        try:
+            infos = await self._client.xinfo_groups(stream)
+        except ResponseError:
+            # No such stream yet: no group exists either.
+            return {}
+
+        return {_text(info["name"]): info for info in infos}
+
+    async def _group_exists(self, stream: str, group: str) -> bool:
+        return group in await self._groups(stream)
+
+    async def _resume_point(self, stream: str, seed_group: str) -> str | None:
+        """Where a group taking over from `seed_group` must start.
+
+        Just before the seed's oldest unacknowledged entry when it has one --
+        that close was delivered and never finished, so its new owner must see
+        it -- else at the seed's last delivered entry. Re-running a close is
+        safe (every detection write is idempotent); skipping one is not.
+        """
+        info = (await self._groups(stream)).get(seed_group)
+
+        if info is None:
+            return None
+
+        summary = await self._client.xpending(stream, seed_group)
+        oldest = summary.get("min") if summary.get("pending") else None
+
+        if oldest is not None:
+            return _just_before(_text(oldest))
+
+        return _text(info["last-delivered-id"])
 
     async def read(
         self,
@@ -135,6 +175,19 @@ class RedisEventStreamConsumer:
             return 0
 
         return int(await self._client.xack(stream, group, *entry_ids))
+
+
+def _just_before(entry_id: str) -> str:
+    """The stream id immediately preceding `entry_id` ("ms-seq")."""
+    millis, sequence = (int(part) for part in entry_id.split("-"))
+
+    if sequence > 0:
+        return f"{millis}-{sequence - 1}"
+
+    if millis == 0:
+        return "0"
+
+    return f"{millis - 1}-{2**64 - 1}"
 
 
 def _flatten(response: Any) -> tuple[StreamEntry, ...]:

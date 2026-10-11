@@ -18,7 +18,7 @@ stream, because a consumer group makes no promises about either:
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -46,6 +46,8 @@ class ConsumeReport:
     processed: int
     acked: int
     failed: int
+    # Closes another shard owns: acknowledged in this shard's group, not run.
+    skipped: int = 0
 
 
 class DetectionRunner(Protocol):
@@ -116,8 +118,13 @@ class CandleCloseConsumer:
     def __init__(
         self,
         runner: DetectionRunner,
+        *,
+        owns: Callable[[str], bool] | None = None,
     ) -> None:
         self._runner = runner
+        # shards.py: with several engine processes, each runs only the symbols
+        # it owns. None owns everything -- one engine, as before.
+        self._owns = owns
 
     async def consume(
         self,
@@ -152,6 +159,23 @@ class CandleCloseConsumer:
 
                 continue
 
+        skipped = 0
+
+        if self._owns is not None:
+            owned: list[CandleClose] = []
+
+            for close in parsed:
+                if self._owns(close.symbol):
+                    owned.append(close)
+                else:
+                    # Another shard's group delivers this close to its owner.
+                    # Acked here so it does not sit in this group's pending
+                    # list, which the soak checks read as unprocessed work.
+                    acked.append(close.entry_id)
+                    skipped += 1
+
+            parsed = owned
+
         closes = order_for_detection(parsed)
 
         for close in closes:
@@ -182,9 +206,10 @@ class CandleCloseConsumer:
         return (
             ConsumeReport(
                 received=len(entries),
-                processed=len(acked),
+                processed=len(acked) - skipped,
                 acked=len(acked),
                 failed=failed,
+                skipped=skipped,
             ),
             tuple(acked),
         )

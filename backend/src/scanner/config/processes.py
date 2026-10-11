@@ -88,6 +88,14 @@ class EngineSettings(BaseProcessSettings):
     # S and A only, alerts on none of them.
     signal_timeframes: str = "M5,M15,H1,H4"
 
+    # Speed step 2 (TAD §4, application/detection/shards.py): how many engine
+    # processes share the symbols, and which one this is. The default is one
+    # process owning everything under the `engine` group -- exactly the engine
+    # every deployment so far has run -- so these change nothing until a deploy
+    # sets SCANNER_ENGINE_SHARD_COUNT and gives each process its index.
+    engine_shard_count: int = Field(default=1, ge=1, le=16)
+    engine_shard_index: int = Field(default=0, ge=0, le=15)
+
 
 class WorkerSettings(BaseProcessSettings):
     health_port: int = Field(default=8003, gt=0, le=65535)

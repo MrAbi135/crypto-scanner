@@ -22,6 +22,7 @@ from starlette.applications import Starlette
 
 from scanner.application.detection.candle_close_consumer import CandleCloseConsumer
 from scanner.application.detection.confluence_replay import CONFLUENCE_ALGO_VERSION
+from scanner.application.detection.shards import Shard
 from scanner.application.detection.trailing_window import TrailingWindowRunner
 from scanner.application.immutability_verification import verify_immutability_guards
 from scanner.application.marketdata.contexts import parse_signal_timeframes
@@ -80,8 +81,18 @@ async def _consume_forever(
     consumer: RedisEventStreamConsumer,
     closes: CandleCloseConsumer,
     name: str,
+    shard: Shard | None = None,
 ) -> None:
-    await consumer.ensure_group(CANDLE_STREAM, CANDLE_GROUP)
+    shard = shard or Shard()
+    group = shard.group
+
+    # A shard group taking over from the single `engine` group starts where
+    # that group stands (event_consumer.py), so the split loses no close.
+    await consumer.ensure_group(
+        CANDLE_STREAM,
+        group,
+        seed_group=CANDLE_GROUP if shard.count > 1 else None,
+    )
 
     # Whatever this consumer name left unacked last time it ran. A read for ">"
     # will never return it -- that means "not yet delivered to anyone" -- so
@@ -89,7 +100,7 @@ async def _consume_forever(
     # anything touches it.
     recovered = await consumer.drain_pending(
         CANDLE_STREAM,
-        CANDLE_GROUP,
+        group,
         name,
         count=_READ_BATCH,
     )
@@ -98,6 +109,8 @@ async def _consume_forever(
         "engine_consumer_started",
         consumer=name,
         stream=CANDLE_STREAM,
+        group=group,
+        shard=f"{shard.index}/{shard.count}",
         recovered=len(recovered),
     )
 
@@ -105,7 +118,7 @@ async def _consume_forever(
         report, acked = await closes.consume(recovered)
 
         if acked:
-            await consumer.ack(CANDLE_STREAM, CANDLE_GROUP, list(acked))
+            await consumer.ack(CANDLE_STREAM, group, list(acked))
 
         log.info(
             "engine_resume_processed",
@@ -116,7 +129,7 @@ async def _consume_forever(
 
     while True:
         try:
-            await _consume_once(consumer, closes, name)
+            await _consume_once(consumer, closes, name, group)
         except RedisError:
             # A blip, not a bug. The engine holds a connection across a batch
             # that can run for minutes, so a reconnect mid-run is expected over
@@ -132,13 +145,14 @@ async def _consume_once(
     consumer: RedisEventStreamConsumer,
     closes: CandleCloseConsumer,
     name: str,
+    group: str = CANDLE_GROUP,
 ) -> None:
     """One claim-read-process-ack cycle."""
     # Stale entries first. A batch abandoned by a killed process is older
     # than anything unread, and the market does not care that we restarted.
     entries = await consumer.claim_stale(
         CANDLE_STREAM,
-        CANDLE_GROUP,
+        group,
         name,
         min_idle_ms=_CLAIM_IDLE_MS,
         count=_READ_BATCH,
@@ -147,7 +161,7 @@ async def _consume_once(
     if not entries:
         entries = await consumer.read(
             CANDLE_STREAM,
-            CANDLE_GROUP,
+            group,
             name,
             count=_READ_BATCH,
             block_ms=_BLOCK_MS,
@@ -159,13 +173,14 @@ async def _consume_once(
     report, acked = await closes.consume(entries)
 
     if acked:
-        await consumer.ack(CANDLE_STREAM, CANDLE_GROUP, list(acked))
+        await consumer.ack(CANDLE_STREAM, group, list(acked))
 
     log.info(
         "engine_batch_processed",
         received=report.received,
         processed=report.processed,
         failed=report.failed,
+        skipped=report.skipped,
     )
 
 
@@ -249,11 +264,17 @@ def main() -> None:
 
         name = _consumer_name()
 
+        shard = Shard(index=settings.engine_shard_index, count=settings.engine_shard_count)
+
         task = asyncio.create_task(
             _consume_forever(
                 RedisEventStreamConsumer(redis_client),
-                CandleCloseConsumer(TrailingWindowRunner(pipeline, metrics=metrics)),
+                CandleCloseConsumer(
+                    TrailingWindowRunner(pipeline, metrics=metrics),
+                    owns=shard.owns if shard.count > 1 else None,
+                ),
                 name,
+                shard,
             )
         )
 

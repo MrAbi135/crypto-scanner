@@ -239,3 +239,92 @@ async def test_an_idle_blocking_read_returns_empty_rather_than_raising(
     )
 
     assert taken == ()
+
+
+# --- speed step 2: shard groups taking over from `engine` ---------------------
+
+
+async def test_a_shard_group_starts_where_the_engine_group_stands(redis_client) -> None:
+    """A split must neither skip the closes that arrived while the engines
+    restarted nor replay the stream's whole history.
+
+    The old group finished e0-e1, was handed e2 and never acked it (a pass in
+    flight at the restart), and e3-e4 arrived after. The new shard group must
+    start at e2: e0-e1 were done, e2 was not.
+    """
+    stream = "scanner:stream:split-pending"
+    consumer = RedisEventStreamConsumer(redis_client)
+    publisher = RedisEventStreamPublisher(redis_client)
+
+    await consumer.ensure_group(stream, CANDLE_GROUP)
+    await publisher.publish(stream, entries(3))
+
+    first = await consumer.read(stream, CANDLE_GROUP, "engine-old", count=3, block_ms=10)
+    await consumer.ack(stream, CANDLE_GROUP, [first[0].entry_id, first[1].entry_id])
+
+    await publisher.publish(stream, [{"event_id": f"late{i}", "payload": "{}"} for i in range(2)])
+
+    await consumer.ensure_group(stream, "engine-shard-0-of-2", seed_group=CANDLE_GROUP)
+
+    resumed = await consumer.read(
+        stream, "engine-shard-0-of-2", "engine-new", count=10, block_ms=10
+    )
+
+    assert [e.fields["event_id"] for e in resumed] == ["e2", "late0", "late1"]
+
+
+async def test_a_shard_group_with_nothing_unfinished_starts_after_the_last_delivered(
+    redis_client,
+) -> None:
+    stream = "scanner:stream:split-clean"
+    consumer = RedisEventStreamConsumer(redis_client)
+    publisher = RedisEventStreamPublisher(redis_client)
+
+    await consumer.ensure_group(stream, CANDLE_GROUP)
+    await publisher.publish(stream, entries(2))
+
+    done = await consumer.read(stream, CANDLE_GROUP, "engine-old", count=2, block_ms=10)
+    await consumer.ack(stream, CANDLE_GROUP, [e.entry_id for e in done])
+
+    await publisher.publish(stream, [{"event_id": "next", "payload": "{}"}])
+
+    await consumer.ensure_group(stream, "engine-shard-1-of-2", seed_group=CANDLE_GROUP)
+
+    resumed = await consumer.read(
+        stream, "engine-shard-1-of-2", "engine-new", count=10, block_ms=10
+    )
+
+    assert [e.fields["event_id"] for e in resumed] == ["next"]
+
+
+async def test_an_existing_shard_group_is_not_moved_by_a_restart(redis_client) -> None:
+    """Seeding applies at creation only. A shard restarting must resume its
+    own place, not be pulled back to wherever `engine` was left."""
+    stream = "scanner:stream:split-restart"
+    consumer = RedisEventStreamConsumer(redis_client)
+    publisher = RedisEventStreamPublisher(redis_client)
+
+    await consumer.ensure_group(stream, CANDLE_GROUP)
+    await consumer.ensure_group(stream, "engine-shard-0-of-2", seed_group=CANDLE_GROUP)
+    await publisher.publish(stream, entries(2))
+
+    done = await consumer.read(stream, "engine-shard-0-of-2", "engine-new", count=2, block_ms=10)
+    await consumer.ack(stream, "engine-shard-0-of-2", [e.entry_id for e in done])
+
+    await consumer.ensure_group(stream, "engine-shard-0-of-2", seed_group=CANDLE_GROUP)
+
+    again = await consumer.read(stream, "engine-shard-0-of-2", "engine-new", count=10, block_ms=10)
+
+    assert again == ()
+
+
+async def test_without_a_seed_group_a_new_group_reads_from_the_start(redis_client) -> None:
+    stream = "scanner:stream:split-fresh"
+    consumer = RedisEventStreamConsumer(redis_client)
+
+    await RedisEventStreamPublisher(redis_client).publish(stream, entries(2))
+    await consumer.ensure_group(stream, "engine-shard-0-of-2", seed_group="no-such-group")
+
+    read = await consumer.read(stream, "engine-shard-0-of-2", "engine-new", count=10, block_ms=10)
+
+    assert [e.fields["event_id"] for e in read] == ["e0", "e1"]
