@@ -216,7 +216,10 @@ from scanner.shared import Timeframe
 # v36: SLS v1.0.15 switched on for M5 -- a 1.0% risk stop from the entry's
 # proximal edge, an unbounded TP ladder (2R, 3R, 4R, ...) with the stop
 # trailing one rung behind, and TTL 48. Other timeframes are unchanged.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v36"
+# v37: no rule of its own. It ships with s6-ob-v9 (#318), whose order blocks
+# feed F3, so a setup or signal scored on the new zones carries a version of
+# its own instead of sharing v36 with the ones scored on s6-ob-v8.
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v37"
 
 # The published set when nothing is configured (owner ruling 2026-09-15). A
 # default that published everything would open M15/M5 the day a setting went

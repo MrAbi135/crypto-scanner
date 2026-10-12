@@ -4,7 +4,10 @@
 # The step-0 and step-5 markers name the look-ahead audit bundle, PRs #265
 # through #279 (deployed 2026-09-15), which also brought migration 022, and --
 # added for the 2026-10 batch -- SLS v1.0.15's M5 ladder, #310 through #316,
-# which brings migration 025. This runs the sequence with an assertion at
+# which brings migration 025, and -- the 2026-10-12 batch -- #318 (s6-ob-v9,
+# order-block evidence read as of the deciding candle), #319 (one candle read
+# per pass, batched pool writes), #320 (engine shards, OFF) and the v37
+# marker. This runs the sequence with an assertion at
 # every step --
 # because the deploy days before it each lost hours to a step that "ran" and
 # did nothing: a patch whose replace matched nothing, a deploy that rebuilt
@@ -116,7 +119,7 @@ grep -qF 's6-ote-v7' backend/src/scanner/application/detection/ict_ote_replay.py
 grep -qF 's6-ob-v9' backend/src/scanner/application/detection/ict_ob_replay.py   || fail "#272 missing: ICT_OB_ALGO_VERSION is not s6-ob-v9 (evidence read as of the deciding candle)"
 grep -qF 's6-interaction-v6' backend/src/scanner/application/detection/ict_interaction_replay.py   || fail "#275 missing: ICT_INTERACTION_ALGO_VERSION is not s6-interaction-v6"
 grep -qF 's7-participation-v4' backend/src/scanner/application/detection/participation_replay.py   || fail "#273 missing: PARTICIPATION_ALGO_VERSION is not s7-participation-v4"
-grep -qF 's8-confluence-v36' backend/src/scanner/application/detection/confluence_replay.py   || fail "CONFLUENCE_ALGO_VERSION is not s8-confluence-v36 (M5 risk stop + TP ladder + TTL 48, SLS v1.0.15)"
+grep -qF 's8-confluence-v37' backend/src/scanner/application/detection/confluence_replay.py   || fail "CONFLUENCE_ALGO_VERSION is not s8-confluence-v37 (the marker that ships with s6-ob-v9)"
 grep -qF 'DEFAULT_SIGNAL_TIMEFRAMES' backend/src/scanner/application/detection/confluence_replay.py   || fail "signal gate missing: no fail-closed published-timeframe default"
 grep -qF 'def first_undecided_index' backend/src/scanner/application/detection/state.py   || fail "#272 missing: engines still re-decide the whole window"
 grep -qF 'CURRENT_EVENT_VERSIONS' backend/src/scanner/application/detection/event_versions.py   || fail "#274 missing: event reads are not pinned to the running versions"
@@ -142,12 +145,21 @@ grep -qF 'Timeframe.M5: 48,' backend/src/scanner/domain/ranking/decay.py   || fa
 grep -qF 'def walk_ladder' backend/src/scanner/domain/lifecycle/state.py   || fail "#313 missing: no trailing-ladder walk"
 grep -qF 'def ladder_of' ops/notify/notify_signals.py   || fail "notifier would announce a laddered M5 signal with the pool-exit stop rule"
 
+# The 2026-10-12 batch. #320's shards ship switched OFF: one engine, group
+# 'engine', exactly as before. Turning them on is its own change (a second
+# engine service, its metrics, and soak checks that read both groups), so a
+# shard count in the env file refuses this deploy rather than half-enabling it.
+grep -qF 'def _known_by' backend/src/scanner/application/detection/ict_ob_replay.py   || fail "#318 missing: OB evidence is not read as of the deciding candle"
+grep -qF 'candles = PassScopedCandles(' backend/src/scanner/runtime/wiring/detection.py   || fail "#319 missing: the pipeline does not share one candle read per pass"
+grep -qF 'def shard_of' backend/src/scanner/application/detection/shards.py   || fail "#320 missing: no engine shards module"
+! grep -q '^SCANNER_ENGINE_SHARD_COUNT=' ops/env/dev.env   || fail "ops/env/dev.env sets SCANNER_ENGINE_SHARD_COUNT -- shards are not part of this deploy"
+
 # The published set is decided in code (SLS v1.0.14, owner ruling 2026-10-05:
 # M5, M15, H1, H4). An override in the env file would silently replace it, so
 # its presence refuses the deploy.
 ! grep -q '^SCANNER_SIGNAL_TIMEFRAMES=' ops/env/dev.env   || fail "ops/env/dev.env sets SCANNER_SIGNAL_TIMEFRAMES -- the published set lives in code (SLS v1.0.14)"
 
-echo "   all 29 batch markers present, signal-timeframe override absent, tree at $(git rev-parse --short HEAD)"
+echo "   all 32 batch markers present, signal-timeframe and shard overrides absent, tree at $(git rev-parse --short HEAD)"
 
 # ---------------------------------------------------------------------------
 step "1. Invariants before touching anything (expect: exit 0, 1 acknowledged)"
@@ -175,7 +187,7 @@ pre_live_m5=$($PSQL -c "select count(*) from detection.signals s where s.timefra
 echo "   setups seen               : $pre_setups"
 echo "   signals published         : $pre_signals"
 echo "   of which on M5 or M15     : $pre_low_tf"
-echo "   M5 signals live right now : $pre_live_m5  (sealed before v36: they finish on the pool rule and TTL 24)"
+echo "   M5 signals live right now : $pre_live_m5  (sealed under v36: same M5 rules as v37, they finish as sealed)"
 
 # ---------------------------------------------------------------------------
 step "2b. Stamp the release with the commit actually being built"
@@ -272,7 +284,11 @@ docker exec scanner-dev-engine-1 grep -qF 's6-ote-v7' /app/src/scanner/applicati
 docker exec scanner-dev-engine-1 grep -qF 's6-ob-v9' /app/src/scanner/application/detection/ict_ob_replay.py   || fail "running engine: ICT_OB_ALGO_VERSION is not s6-ob-v9 (evidence read as of the deciding candle)"
 docker exec scanner-dev-engine-1 grep -qF 's6-interaction-v6' /app/src/scanner/application/detection/ict_interaction_replay.py   || fail "running engine: ICT_INTERACTION_ALGO_VERSION is not s6-interaction-v6"
 docker exec scanner-dev-engine-1 grep -qF 's7-participation-v4' /app/src/scanner/application/detection/participation_replay.py   || fail "running engine: PARTICIPATION_ALGO_VERSION is not s7-participation-v4"
-docker exec scanner-dev-engine-1 grep -qF 's8-confluence-v36' /app/src/scanner/application/detection/confluence_replay.py   || fail "running engine: CONFLUENCE_ALGO_VERSION is not s8-confluence-v36 (SLS v1.0.15 M5 ladder)"
+docker exec scanner-dev-engine-1 grep -qF 's8-confluence-v37' /app/src/scanner/application/detection/confluence_replay.py   || fail "running engine: CONFLUENCE_ALGO_VERSION is not s8-confluence-v37"
+docker exec scanner-dev-engine-1 grep -qF 'def _known_by' /app/src/scanner/application/detection/ict_ob_replay.py   || fail "running engine: #318's OB evidence timing is absent"
+docker exec scanner-dev-engine-1 grep -qF 'candles = PassScopedCandles(' /app/src/scanner/runtime/wiring/detection.py   || fail "running engine: #319's per-pass candle read is absent"
+docker exec scanner-dev-engine-1 grep -qF 'def shard_of' /app/src/scanner/application/detection/shards.py   || fail "running engine: #320's shards module is absent"
+[ -z "$(docker exec scanner-dev-engine-1 printenv SCANNER_ENGINE_SHARD_COUNT 2>/dev/null)" ]   || fail "running engine has SCANNER_ENGINE_SHARD_COUNT set -- shards must be off"
 docker exec scanner-dev-engine-1 grep -qF 'DEFAULT_SIGNAL_TIMEFRAMES' /app/src/scanner/application/detection/confluence_replay.py   || fail "running engine: no fail-closed published-timeframe default"
 docker exec scanner-dev-engine-1 grep -qF 'def first_undecided_index' /app/src/scanner/application/detection/state.py   || fail "running engine: engines still re-decide the whole window"
 docker exec scanner-dev-engine-1 grep -qF 'CURRENT_EVENT_VERSIONS' /app/src/scanner/application/detection/event_versions.py   || fail "running engine: event reads are not pinned to the running versions"
@@ -341,20 +357,33 @@ cat <<NEXT
           -- all of them are grade B, and 10.1 pushes S and A only, so no
              Telegram alert is expected from them either.
 
-   3b. SLS v1.0.15 on the first NEW M5 signal (v36). Its levels are checked by
+   3b. SLS v1.0.15 on the first NEW M5 signal (v37 -- the same M5 rules as v36,
+       re-checked because the zones under them are now s6-ob-v9). Its levels are checked by
        hand, not by trusting the code that made them:
 
-        $PSQL -c "select signal_id, direction, entry_proximal, invalidation_level, ttl_candles, payload::jsonb -> 'invalidation' ->> 'rule' as rule, target_bands::jsonb -> 'ladder' as ladder from detection.signals where timeframe = 'M5' and algo_version = 's8-confluence-v36' order by published_at limit 3;"
+        $PSQL -c "select signal_id, direction, entry_proximal, invalidation_level, ttl_candles, payload::jsonb -> 'invalidation' ->> 'rule' as rule, target_bands::jsonb -> 'ladder' as ladder from detection.signals where timeframe = 'M5' and algo_version = 's8-confluence-v37' order by published_at limit 3;"
           -- want: rule risk_stop; invalidation = proximal x 0.99 (UP) or
              x 1.01 (DOWN); ttl_candles 48; ladder {start_r 2, step_r 1,
-             unbounded true}. Any M15/H1/H4 row under v36 must still have
+             unbounded true}. Any M15/H1/H4 row under v37 must still have
              NO ladder and a zone/sweep rule.
           -- the $pre_live_m5 M5 signal(s) live at deploy keep their sealed
              pool rule and TTL 24 -- correct, not a fault. Until they end, the
              feed sorts them as if their TTL were 48 (display only, <= 2h).
 
-        $PSQL -c "select engine, version, param_set_version from detection.algo_versions where version = 's8-confluence-v36';"
+        $PSQL -c "select engine, version, param_set_version from detection.algo_versions where version = 's8-confluence-v37';"
           -- want: one row, param set 2026.10.10.1, registered at first boot.
+
+   3c. s6-ob-v9's first pass on every context decides its whole window, so
+       the first close of each timeframe is slower than usual (estimated
+       ~0.2 s per context on this VM, not measured here). Then the speed:
+       the same two read-only measurements as before the deploy, compared
+       line by line with deploy-baseline/*_20261011* and *_20261012*:
+
+        python3 - < ops/soak/latency_baseline.py
+        python3 - < ops/soak/boundary_last_pass.py
+          -- want: the 'pass' stage and every passes/boundary row lower than
+             before (#319). SLS 14's targets are NOT expected to be met by
+             this deploy -- it is a step, measured, not the fix.
 
    4. Invariants, then a 2-4 hour shakedown. The :17 cron keeps running;
       read ~/soak-logs/alerts.log before trusting anything:
