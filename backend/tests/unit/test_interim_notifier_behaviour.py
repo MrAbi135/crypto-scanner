@@ -503,7 +503,7 @@ def test_the_notifier_prices_the_rungs_as_the_domain_does(notifier, direction, r
 def test_a_laddered_signal_is_announced_with_a_touch_stop_and_its_tps(notifier) -> None:
     text = notifier.format_signal(_laddered())
 
-    assert "stop 102.960000000000000000 (touch, not close)" in text
+    assert "stop 102.96 (touch, not close)" in text
     assert "TP1 106.08 (2R) · TP2 107.12 (3R) · TP3 108.16 (4R) · no cap" in text
     assert "trails" in text
     assert "close beyond" not in text, "the pool-exit rule would tell the trader the opposite"
@@ -514,6 +514,38 @@ def test_a_pool_exit_signal_is_announced_as_before(notifier) -> None:
 
     assert "invalidation 99 (close beyond, not touch)" in text
     assert "TP1" not in text
+
+
+def test_numeric_columns_are_announced_without_eighteen_places(notifier) -> None:
+    """psql returns numeric(38,18) with every place. Measured on the host
+    2026-10-12: 'confidence 81.000000000000000000' and an entry of
+    '80354.650000000000000000' -- every number but the TP prices, which already
+    went through _plain."""
+    row = _signal("SIG_W")
+    row.update(
+        confidence="81.000000000000000000",
+        entry_proximal="80354.650000000000000000",
+        entry_distal="79000.000000000000000000",
+        invalidation="79000.000000000000000000",
+    )
+
+    text = notifier.format_signal(row)
+
+    assert "confidence 81\n" in text
+    assert "entry 80354.65 → 79000\n" in text
+    assert "invalidation 79000 (close beyond, not touch)" in text
+    assert "000000" not in text
+
+    laddered = notifier.format_signal(_laddered())
+    assert "000000" not in laddered
+
+
+def test_an_unparseable_number_is_shown_as_it_came(notifier) -> None:
+    """Tidiness may fail; the alert may not."""
+    row = _signal("SIG_X")
+    row["confidence"] = "n/a"
+
+    assert "confidence n/a" in notifier.format_signal(row)
 
 
 def test_an_unreadable_target_column_falls_back_to_the_pool_message(notifier) -> None:

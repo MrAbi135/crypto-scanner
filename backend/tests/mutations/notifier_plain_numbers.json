@@ -1,0 +1,54 @@
+{
+  "description": "The notifier announces sealed numeric(38,18) columns as plain numbers (2026-10-12: the host printed 'confidence 81.000000000000000000'). Each mutation puts one column back to the raw psql text, or lets a malformed value cost the alert. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/notifier_plain_numbers.json",
+  "pytest": [
+    "tests/unit/test_interim_notifier_behaviour.py"
+  ],
+  "mutations": [
+    {
+      "name": "confidence printed as psql returned it",
+      "file": "ops/notify/notify_signals.py",
+      "old": "confidence {_shown(row['confidence'])}",
+      "new": "confidence {row['confidence']}",
+      "expect_failing": [
+        "test_numeric_columns_are_announced_without_eighteen_places"
+      ]
+    },
+    {
+      "name": "entry printed as psql returned it",
+      "file": "ops/notify/notify_signals.py",
+      "old": "f\"entry {_shown(row['entry_proximal'])} → {_shown(row['entry_distal'])}\\n\"",
+      "new": "f\"entry {row['entry_proximal']} → {row['entry_distal']}\\n\"",
+      "expect_failing": [
+        "test_numeric_columns_are_announced_without_eighteen_places"
+      ]
+    },
+    {
+      "name": "the pool-exit invalidation printed as psql returned it",
+      "file": "ops/notify/notify_signals.py",
+      "old": "f\"invalidation {_shown(row['invalidation'])} (close beyond, not touch)\\n\"",
+      "new": "f\"invalidation {row['invalidation']} (close beyond, not touch)\\n\"",
+      "expect_failing": [
+        "test_numeric_columns_are_announced_without_eighteen_places"
+      ]
+    },
+    {
+      "name": "the laddered stop printed as psql returned it",
+      "file": "ops/notify/notify_signals.py",
+      "old": "f\"stop {_shown(row['invalidation'])} (touch, not close)\\n\"",
+      "new": "f\"stop {row['invalidation']} (touch, not close)\\n\"",
+      "expect_failing": [
+        "test_numeric_columns_are_announced_without_eighteen_places",
+        "test_a_laddered_signal_is_announced_with_a_touch_stop_and_its_tps"
+      ]
+    },
+    {
+      "name": "an unparseable number raises instead of passing through",
+      "file": "ops/notify/notify_signals.py",
+      "old": "    except (InvalidOperation, TypeError, ValueError):\n        return text",
+      "new": "    except ZeroDivisionError:\n        return text",
+      "expect_failing": [
+        "test_an_unparseable_number_is_shown_as_it_came"
+      ]
+    }
+  ]
+}
