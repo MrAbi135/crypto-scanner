@@ -147,6 +147,54 @@ problems=0
 triage_violations "E. some new violation|X|9|9" > "$OUT"
 check "the shipped file acknowledges only what it names" "1" "$problems"
 echo
+echo "check G: detection behind candles, from the decided state"
+
+NOW_S=$(date -u -d '2026-10-13 10:17:01' +%s)
+LONG_UP=$(date -u -d '2026-10-10 14:04:42' +%s)     # the soak's engine start
+JUST_UP=$(date -u -d '2026-10-13 09:00:00' +%s)
+
+g() { printf '%s\n' "$1" | decided_lag_violations "$2" "$NOW_S"; }
+
+# 12. **The case that fired on 2026-10-13.** TRXUSDT M5 wrote no event from
+#     08:50 to 10:05 because the market did not move, yet every pass ran.
+#     Its decided state was current, so this is clean.
+check "a quiet market whose passes ran is not behind" "" \
+  "$(g 'TRXUSDT|M5|2026-10-13 10:10:00+00|2026-10-13T10:10:00+00:00' "$LONG_UP")"
+
+# 13. And the check can still fail: thirteen M5 candles undecided is a stall.
+check "thirteen candles undecided is behind" \
+  "G. detection behind candles|TRXUSDT|M5|2026-10-13 10:10:00+00|2026-10-13T09:05:00+00:00" \
+  "$(g 'TRXUSDT|M5|2026-10-13 10:10:00+00|2026-10-13T09:05:00+00:00' "$LONG_UP")"
+
+# 14. The threshold is the SQL check's: more than twelve, not twelve.
+check "exactly twelve candles is not behind" "" \
+  "$(g 'TRXUSDT|M5|2026-10-13 10:10:00+00|2026-10-13T09:10:00+00:00' "$LONG_UP")"
+
+# 15. No decided state after twelve closes of uptime is a stall ...
+check "no decided state on a long-running engine is behind" \
+  "G. detection behind candles|LITEBUSDT|H1|2026-10-13 09:00:00+00|(never)" \
+  "$(g 'LITEBUSDT|H1|2026-10-13 09:00:00+00|' "$LONG_UP")"
+
+# 16. ... and right after a restart it is not: D1 has not closed since.
+check "no decided state right after a restart is not behind" "" \
+  "$(g 'LITEBUSDT|D1|2026-10-12 00:00:00+00|' "$JUST_UP")"
+
+# 17. A timeframe it has no step for, and a decided value it cannot read, are
+#     reported -- never read as "not behind".
+check "an unknown timeframe is reported" \
+  "G. detection behind candles|BTCUSDT|W1|2026-10-12 00:00:00+00|(timeframe has no step here)" \
+  "$(g 'BTCUSDT|W1|2026-10-12 00:00:00+00|2026-10-12T00:00:00+00:00' "$LONG_UP")"
+check "an unreadable decided time is reported" \
+  "G. detection behind candles|BTCUSDT|M5|2026-10-13 10:10:00+00|(unreadable: yesterday-ish)" \
+  "$(g 'BTCUSDT|M5|2026-10-13 10:10:00+00|yesterday-ish' "$LONG_UP")"
+
+# 18. Its rows are ones the runner counts and triage can acknowledge.
+problems=0
+ACK_FILE=/nonexistent
+triage_violations "$(g 'TRXUSDT|M5|2026-10-13 10:10:00+00|2026-10-13T09:05:00+00:00' "$LONG_UP")" "detection-lag" > "$OUT"
+check "a G row counts as one problem" "1" "$problems"
+
+echo
 echo "check labels vs the row pattern"
 
 # 10. Every label in the shipped SQL is one the runner will actually count.
