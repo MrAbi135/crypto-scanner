@@ -656,6 +656,19 @@ def _plain(value: Decimal) -> str:
     return format(value.normalize(), "f")
 
 
+def _shown(text: str) -> str:
+    """A sealed numeric column as a trader reads it: 81, not 81.000000000000000000.
+
+    psql hands numeric(38,18) back with all eighteen places. Anything that does
+    not parse is shown as it came -- a malformed column must cost the tidiness,
+    never the alert.
+    """
+    try:
+        return _plain(Decimal(text))
+    except (InvalidOperation, TypeError, ValueError):
+        return text
+
+
 def format_signal(row: dict[str, str]) -> str:
     tags = ""
 
@@ -665,7 +678,7 @@ def format_signal(row: dict[str, str]) -> str:
     ladder = ladder_of(row)
 
     if ladder is None:
-        exit_lines = f"invalidation {row['invalidation']} (close beyond, not touch)\n"
+        exit_lines = f"invalidation {_shown(row['invalidation'])} (close beyond, not touch)\n"
     else:
         # SLS v1.0.15 §12.3: on a laddered signal the stop is a TOUCH, and it
         # trails. "close beyond, not touch" -- the pool-exit rule -- would tell
@@ -678,15 +691,15 @@ def format_signal(row: dict[str, str]) -> str:
             rungs = "TP prices unavailable -- see the dashboard"
 
         exit_lines = (
-            f"stop {row['invalidation']} (touch, not close)\n"
+            f"stop {_shown(row['invalidation'])} (touch, not close)\n"
             f"{rungs} · no cap\n"
             "stop moves to entry at TP1, then trails one TP behind\n"
         )
 
     return (
         f"{row['symbol']} {row['timeframe']} {row['direction']}\n"
-        f"{row['archetype']} · grade {row['grade']} · confidence {row['confidence']}\n"
-        f"entry {row['entry_proximal']} → {row['entry_distal']}\n"
+        f"{row['archetype']} · grade {row['grade']} · confidence {_shown(row['confidence'])}\n"
+        f"entry {_shown(row['entry_proximal'])} → {_shown(row['entry_distal'])}\n"
         f"{exit_lines}"
         f"published {row['published_at']}{tags}"
     )
