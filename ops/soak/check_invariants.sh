@@ -174,6 +174,54 @@ report_stale_acknowledgements() {
   done < "$ACK_FILE"
 }
 
+# ---------------------------------------------------------------------------
+# G. Detection falling behind its own candles -- the verdict, as pure text.
+# ---------------------------------------------------------------------------
+# Input, one context per line: symbol|timeframe|newest candle open|decided open
+# (the last field empty when the engine has no decided state for it). Output:
+# one `G. detection behind candles|...` row per context more than twelve candles
+# behind -- the same row shape and threshold the SQL check had, so its
+# acknowledgements and its alert history still read the same way.
+#
+# "Decided" is the engine's own record that a pass ran over that candle,
+# written whether or not the pass found anything. The SQL version measured the
+# newest EVENT instead, and a quiet market writes no events: TRXUSDT M5 fired
+# on 2026-10-13 while every pass ran on time.
+#
+# No decided state at all is a stall only once the engine has been up long
+# enough to have run twelve closes of that timeframe -- a context that has
+# not closed since a restart (D1 for up to a day) has nothing to decide yet.
+decided_lag_violations() {
+  local engine_started_s="$1" now_s="$2"
+  local symbol timeframe newest decided step newest_s decided_s
+
+  while IFS='|' read -r symbol timeframe newest decided; do
+    [ -n "$symbol" ] || continue
+
+    case "$timeframe" in
+      M5) step=300 ;; M15) step=900 ;; H1) step=3600 ;; H4) step=14400 ;; D1) step=86400 ;;
+      *) echo "G. detection behind candles|$symbol|$timeframe|$newest|(timeframe has no step here)"; continue ;;
+    esac
+
+    if [ -z "$decided" ]; then
+      if [ $(( now_s - engine_started_s )) -gt $(( step * 12 )) ]; then
+        echo "G. detection behind candles|$symbol|$timeframe|$newest|(never)"
+      fi
+      continue
+    fi
+
+    newest_s=$(date -u -d "$newest" +%s 2>/dev/null) || newest_s=""
+    decided_s=$(date -u -d "$decided" +%s 2>/dev/null) || decided_s=""
+
+    if [ -z "$newest_s" ] || [ -z "$decided_s" ]; then
+      # Unparseable is reported, never read as "not behind".
+      echo "G. detection behind candles|$symbol|$timeframe|$newest|(unreadable: $decided)"
+    elif [ $(( newest_s - decided_s )) -gt $(( step * 12 )) ]; then
+      echo "G. detection behind candles|$symbol|$timeframe|$newest|$decided"
+    fi
+  done
+}
+
 # Sourced by `test_check_invariants.sh` to reach the helpers above without
 # running any check. Placed here rather than at the top so the helpers are
 # defined and nothing below -- which needs docker, a database and the repo --
@@ -594,6 +642,65 @@ else
     triage_violations "$violations"
   else
     echo "  clean"
+  fi
+fi
+echo
+
+# ---------------------------------------------------------------------------
+# G. Detection falling behind its own candles (see decided_lag_violations).
+# ---------------------------------------------------------------------------
+# Read from the participation engine's decided state: it runs at the end of
+# the pass, after every engine whose output it reads, and on 2026-10-13 it was
+# the decided record present for all 75 scanned contexts (structure, liquidity
+# and ICT have none for LITEBUSDT D1, whose 100-odd candles they do not
+# decide). Its version is read off the running engine for the same reason
+# check A's is: a literal goes stale at the next bump and then matches no key,
+# and every context would read as "(never)" -- loud, but wrong.
+
+echo "-- G. detection behind candles (the engine's decided state) --"
+
+PART_ALGO=$($C exec -T engine grep -oE   'PARTICIPATION_ALGO_VERSION = "[^"]+"'   /app/src/scanner/application/detection/participation_replay.py 2>/dev/null   | cut -d'"' -f2 | tr -d '\r')
+
+if [ -z "$PART_ALGO" ]; then
+  flag "cannot read PARTICIPATION_ALGO_VERSION from the running engine -- check G did not run"
+else
+  newest_rows=$($PSQL -At -F'|' -v ON_ERROR_STOP=1 -c "
+    select symbol, timeframe, max(open_time)
+    from market.candles
+    where symbol = any(string_to_array('$INGEST_SYMBOLS', ','))
+      and timeframe in ('M5', 'M15', 'H1', 'H4', 'D1')
+    group by 1, 2 order by 1, 2;" 2>&1 | tr -d '\r')
+  nrc=$?
+
+  if [ "$nrc" -ne 0 ] || [ -z "$newest_rows" ]; then
+    flag "check G could not read the newest candles -- it did not run"
+  else
+    # One MGET for every context rather than a docker exec each. --raw prints
+    # a missing key as an empty line, so the replies stay aligned with the keys
+    # -- except that $(...) strips trailing newlines, which would drop the
+    # empty replies of missing keys that sort last. The sentinel keeps them.
+    keys=$(printf '%s\n' "$newest_rows" | awk -F'|' -v v="$PART_ALGO" '{ print "scanner:engine-state:participation:" v ":" $1 ":" $2 }')
+    # shellcheck disable=SC2086
+    states=$( { docker exec scanner-dev-redis-1 redis-cli --raw MGET $keys 2>/dev/null; echo __end__; } | tr -d '\r')
+    states=${states%$'\n'__end__}
+
+    if [ "$(printf '%s\n' "$states" | wc -l)" -ne "$(printf '%s\n' "$newest_rows" | wc -l)" ]; then
+      flag "check G read $(printf '%s\n' "$states" | wc -l) Redis replies for $(printf '%s\n' "$newest_rows" | wc -l) contexts -- it did not run"
+    else
+      decided=$(printf '%s\n' "$states" | sed -n 's/.*"last_processed_open_time": *"\([^"]*\)".*/\1/p; t; s/.*//p')
+      engine_started_s=$(date -u -d "$(docker inspect --format '{{.State.StartedAt}}' scanner-dev-engine-1 2>/dev/null)" +%s 2>/dev/null || echo 0)
+
+      g_rows=$(paste -d'|' <(printf '%s\n' "$newest_rows") <(printf '%s\n' "$decided") \
+                 | decided_lag_violations "$engine_started_s" "$(date -u +%s)")
+
+      echo "  $(printf '%s\n' "$newest_rows" | wc -l) contexts, decided state of $PART_ALGO"
+
+      if [ -n "$g_rows" ]; then
+        triage_violations "$g_rows" "detection-lag"
+      else
+        echo "  clean"
+      fi
+    fi
   fi
 fi
 echo

@@ -280,40 +280,15 @@ group by 1, 2, 3;
 
 
 -- ===========================================================================
--- G. Detection falling behind its own candles
+-- G. Detection falling behind its own candles -- MOVED to check_invariants.sh
 -- ===========================================================================
--- Per symbol and timeframe rather than globally: `soak_status.sh` reads the
--- newest pass in the log, so one context can stop being detected while the
--- others keep the aggregate looking fresh.
-
--- This list is the check's scope, not a lookup: a timeframe absent here is
--- dropped by the join below and is therefore NOT CHECKED. D1 was missing for
--- the two runs after #304 began ingesting it, so D1 detection could have
--- stopped dead and nothing here would have said so. Measured before adding it:
--- all 15 symbols carry D1 engine_events, LITEBUSDT included on 98 candles, so
--- the `last_event is null` arm raises nothing. W1 is listed for the same
--- reason the tables at the bottom of this file list it -- it costs nothing and
--- a timeframe with no candles produces no rows.
-with tf(name, step) as (
-    values ('M5', interval '5 min'), ('M15', interval '15 min'),
-           ('H1', interval '1 hour'), ('H4', interval '4 hours'),
-           ('D1', interval '1 day'), ('W1', interval '7 days')
-),
-newest as (
-    select c.symbol, c.timeframe,
-           max(c.open_time) as last_candle,
-           (select max(e.event_at) from soak_engine_events e
-             where e.symbol = c.symbol and e.timeframe = c.timeframe) as last_event
-    from soak_candles c
-    group by 1, 2
-)
-select 'G. detection behind candles' as check,
-       n.symbol, n.timeframe, n.last_candle,
-       coalesce(n.last_event::text, '(never)') as last_event
-from newest n
-join tf on tf.name = n.timeframe
-where n.last_event is null
-   or n.last_candle - n.last_event > tf.step * 12;
+-- This used to ask "when was the newest engine_events row?" and call more than
+-- twelve candles of silence a stalled engine. Events are what a pass FINDS,
+-- not proof that it ran: on 2026-10-13 TRXUSDT M5 traded 0.3297-0.3300 for an
+-- hour, every pass ran on time (~0.9 s each, 08:40-10:35 in the engine log),
+-- found nothing, and G fired. The engine's own decided state (Redis) records
+-- every pass whether or not it found anything, and no table holds it, so the
+-- check now lives in the runner beside check A, which reads Redis too.
 
 
 -- ===========================================================================
