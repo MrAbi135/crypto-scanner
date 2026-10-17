@@ -25,8 +25,19 @@ CHECK=$(block check)
 
 failures=0
 
+# Each marker exactly once. Without its closing marker a block runs to the end
+# of the deploy script, and the test then failed only by accident -- on some
+# later line of the script -- rather than because the block was broken.
+for marker in ">>> image-verify:record" "<<< image-verify:record" ">>> image-verify:check" "<<< image-verify:check"; do
+  n=$(grep -c "^# $marker" "$SCRIPT")
+  if [ "$n" -ne 1 ]; then
+    echo "  FAIL  '# $marker' appears $n times in $SCRIPT, need exactly 1"
+    exit 1
+  fi
+done
+
 if [ -z "$RECORD" ] || [ -z "$CHECK" ]; then
-  echo "  FAIL  markers not found in $SCRIPT -- the blocks under test are empty"
+  echo "  FAIL  a block between the markers is empty in $SCRIPT -- nothing under test"
   exit 1
 fi
 

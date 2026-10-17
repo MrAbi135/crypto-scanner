@@ -171,3 +171,15 @@ jobs:
           docker run --rm -v "$PWD/ops/prometheus:/p" -w /p/tests \
             --entrypoint promtool prom/prometheus:v3.1.0 \
             test rules detection-targets_test.yml
+
+  # ops/soak's shell tests: the invariants triage + check G verdict, and the
+  # deploy script's image-id verification. Pure text logic that fails silently
+  # when wrong; they need bash and GNU date, nothing from the VM.
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ops/soak shell tests
+        run: |
+          set -e
+          for t in ops/soak/test_*.sh; do echo "== $t"; bash "$t"; done
