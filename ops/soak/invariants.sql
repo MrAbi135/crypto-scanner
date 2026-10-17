@@ -328,6 +328,13 @@ from market.symbols s
 left join market.liquidity_history h on h.exchange_symbol = s.exchange_symbol
 where s.status = 'QUARANTINE'
   and h.exchange_symbol is null
+  -- A listing synced at 00:00 gets its first history row from the same
+  -- night's loop, ~24 min later (measured: 00:24:03 on 2026-10-14, 00:24:22-
+  -- 00:24:48 on 2026-10-15) -- after the 00:17 run. Before that, "no history"
+  -- is the normal state of a new listing, not a collector failure, and H2
+  -- fired on every new listing. Two hours covers the loop with margin, and a symbol the
+  -- collector really skips is still reported on the 02:17 run.
+  and s.first_seen_at < now() - interval '2 hours'
   -- Only once the loop has had a night to reach them.
   and exists (select 1 from market.liquidity_history)
 limit 10;
