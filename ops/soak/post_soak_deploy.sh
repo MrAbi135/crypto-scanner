@@ -284,6 +284,25 @@ echo "   schema at head: $schema_rev"
 step "4. Deploy -- this resets T0, which is the point"
 # ---------------------------------------------------------------------------
 
+# Wait for a minute where no candle closes while ingest restarts (it is down
+# ~9-21 s on a recreate; a close inside that gap arrives by backfill and is
+# never scored -- 2026-09-27 08:15:00 lost M5 08:10 and M15 08:00) and the
+# engine is not still busy with a big boundary. The rules and their tests:
+# ops/soak/deploy_gate.sh, ops/soak/test_deploy_gate.sh.
+#
+# Timeout: 15 min, then the script STOPS here. Nothing has been restarted --
+# images are built and the schema is at head (step 3b), and the old code runs
+# on the migrated schema exactly as step 3b's note says. Run the script again.
+#
+# NEVER run `docker compose up -d` by hand after a timeout. Step 2b already
+# stamped the new SCANNER_RELEASE into ops/env/dev.env, so compose sees a new
+# config hash and a manual `up -d` recreates every container -- an ungated
+# deploy, skipping this gate and step 5's verification. Re-run the script.
+. ops/soak/deploy_gate.sh || fail "ops/soak/deploy_gate.sh is missing"
+
+wait_for_deploy_window 900 | sed 's/^/   /'
+[ "${PIPESTATUS[0]}" -eq 0 ] || fail "no safe deploy minute in 15 min -- nothing restarted; re-run this script (never \`docker compose up -d\` by hand)"
+
 $DC up -d || fail "compose up failed"
 sleep 15
 
