@@ -17,15 +17,20 @@
     Exit code mirrors the remote script: 0 deployed-and-verified, 1 a check
     refused, 2 the run itself could not happen.
 
+.PARAMETER DeploySha
+    Required. The exact commit to deploy; passed to the script as DEPLOY_SHA.
+    The script refuses unless origin/main is this commit (owner rule 2026-10-18).
+
 .PARAMETER KeyPath
     Path to the SSH private key. Only ever passed to `ssh -i`; never read.
 
 .EXAMPLE
-    ./ops/soak/post_soak_deploy.ps1
+    ./ops/soak/post_soak_deploy.ps1 -DeploySha ba2d9eb
 #>
 
 [CmdletBinding()]
 param(
+    [Parameter(Mandatory = $true)] [ValidatePattern('^[0-9a-f]{7,40}$')] [string] $DeploySha,
     [string] $VmHost = 'ubuntu@141.148.205.213',
     [string] $KeyPath = "$env:USERPROFILE\Downloads\ssh-key-2026-08-20.asc",
     [switch] $NoUpload
@@ -80,7 +85,7 @@ bash -n ops/soak/post_soak_deploy.sh
     }
 }
 
-& $ssh -i $KeyPath -o StrictHostKeyChecking=no $VmHost 'bash ~/crypto-scanner/ops/soak/post_soak_deploy.sh'
+& $ssh -i $KeyPath -o StrictHostKeyChecking=no $VmHost "DEPLOY_SHA=$DeploySha bash ~/crypto-scanner/ops/soak/post_soak_deploy.sh"
 $remote = $LASTEXITCODE
 
 Write-Host ''

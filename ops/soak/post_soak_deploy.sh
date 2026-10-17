@@ -28,7 +28,8 @@
 #   * subscribe ingest to the 50 symbols that reached ACTIVE on 2026-09-07.
 #     Same reason: one variable per shakedown.
 #
-# Usage, on the VM:   bash ops/soak/post_soak_deploy.sh
+# Usage, on the VM:   DEPLOY_SHA=<commit> bash ops/soak/post_soak_deploy.sh
+#   DEPLOY_SHA is required: the exact commit this deploy ships (see step 0).
 # From Windows:       ./ops/soak/post_soak_deploy.ps1
 
 set -uo pipefail
@@ -102,9 +103,21 @@ restarts=$(docker inspect --format '{{.RestartCount}}' scanner-dev-engine-1)
 git fetch -q origin || fail "git fetch failed"
 git diff --quiet && git diff --cached --quiet || fail "working tree is dirty"
 
-local_rev=$(git rev-parse main)
-remote_rev=$(git rev-parse origin/main)
-[ "$local_rev" = "$remote_rev" ] || git pull -q || fail "git pull failed"
+# Ship exactly DEPLOY_SHA (owner rule 2026-10-18), never "whatever main is now".
+# This replaces a `git pull` that deployed any merge landing after the freeze.
+# Rules and tests: ops/soak/deploy_sha.sh, ops/soak/test_deploy_sha.sh.
+. ops/soak/deploy_sha.sh || fail "ops/soak/deploy_sha.sh is missing"
+[ "$(git branch --show-current)" = "main" ] || fail "checkout is not on branch main (detached after a rollback? git checkout main first)"
+[ -n "${DEPLOY_SHA:-}" ] || fail "DEPLOY_SHA is not set -- DEPLOY_SHA=<commit> bash ops/soak/post_soak_deploy.sh"
+want=$(git rev-parse --verify -q "${DEPLOY_SHA}^{commit}") || fail "DEPLOY_SHA=$DEPLOY_SHA is not a commit in this clone, even after the fetch"
+head_now=$(git rev-parse HEAD)
+git merge-base --is-ancestor "$head_now" "$want" && behind=yes || behind=no
+sha_verdict=$(deploy_sha_verdict "$want" "$head_now" "$(git rev-parse origin/main)" "$behind") || fail "$sha_verdict"
+echo "   $sha_verdict"
+case "$sha_verdict" in
+  ff:*) git merge -q --ff-only "$want" || fail "fast-forward to ${want:0:7} failed" ;;
+esac
+[ "$(git rev-parse HEAD)" = "$want" ] || fail "HEAD is not ${want:0:7} after step 0"
 
 # The batch must be in the tree we are about to build. Greps name the code,
 # not commit hashes, because a squash merge rewrites hashes -- and they are
@@ -362,6 +375,7 @@ schema_now=$($PSQL -c "select version_num from alembic_version;" | tr -d '\r')
 running_release=$(docker exec scanner-dev-engine-1 printenv SCANNER_RELEASE 2>/dev/null | tr -d '
 ')
 [ "$running_release" = "$release" ]   || fail "running engine reports release '$running_release', expected '$release'"
+[ "$release" = "p1b-$(git rev-parse --short "$want")" ]   || fail "release '$release' is not the DEPLOY_SHA ${want:0:7} this run was started for"
 
 new_started=$(docker inspect --format '{{.State.StartedAt}}' scanner-dev-engine-1)
 [ "$new_started" != "$started" ] || fail "engine StartedAt did not change -- it was not restarted"
