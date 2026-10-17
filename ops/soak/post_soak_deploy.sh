@@ -216,6 +216,21 @@ step "3. Build ALL FOUR images (the 2026-08-26 lesson: never just one)"
 
 $DC build api engine worker ingest frontend || fail "build failed"
 
+# The image each service must run once step 4 is done, taken the moment it is
+# built. Step 5 compares every running container with it: one grep in one image
+# (the api check below) cannot see a container left on an old image, and on
+# 2026-10-15 the frontend turned out to run a 2026-08-28 image through three
+# deploys that had each rebuilt it -- `up -d` skips the `ui` profile.
+#
+# frontend is built but deliberately NOT verified or recreated here: owner
+# ruling 2026-10-17, "is dafa na chhoona" -- its rollout is a separate change.
+# >>> image-verify:record  (exercised by ops/soak/test_post_soak_deploy_verify.sh)
+declare -A built_image=()
+for svc in api engine worker ingest; do
+  built_image[$svc]=$(docker image inspect -f '{{.Id}}' "scanner-dev-$svc") || fail "no image for $svc after the build"
+done
+# <<< image-verify:record
+
 # ---------------------------------------------------------------------------
 step "3b. Migrate the schema BEFORE the new code starts"
 # ---------------------------------------------------------------------------
@@ -308,6 +323,19 @@ docker exec scanner-dev-engine-1 grep -qF 'RISK_STOP_PCT: dict[Timeframe, Decima
 docker exec scanner-dev-engine-1 grep -qF 'Timeframe.M5: TargetLadder(start_r=Decimal(2), step_r=Decimal(1))' /app/src/scanner/domain/confluence/levels.py   || fail "running engine: M5's TP ladder is not switched on"
 docker exec scanner-dev-engine-1 grep -qF 'Timeframe.M5: 48,' /app/src/scanner/domain/ranking/decay.py   || fail "running engine: M5's TTL is not 48"
 docker exec scanner-dev-api-1 grep -qF 'def targets_view' /app/src/scanner/interfaces/api/targets.py   || fail "running api: laddered targets are not priced (#315)"
+
+# >>> image-verify:check  (exercised by ops/soak/test_post_soak_deploy_verify.sh)
+for svc in api engine worker ingest; do
+  running=$(docker inspect -f '{{.Image}}' "scanner-dev-$svc-1" 2>/dev/null)
+  [ "$running" = "${built_image[$svc]}" ]   || fail "$svc runs image ${running:0:19}, this deploy built ${built_image[$svc]:0:19}"
+done
+echo "   api, engine, worker, ingest run the images this deploy built"
+
+# Reported, not enforced (see the frontend note at step 3).
+fe_running=$(docker inspect -f '{{.Image}}' scanner-dev-frontend-1 2>/dev/null)
+fe_built=$(docker image inspect -f '{{.Id}}' scanner-dev-frontend 2>/dev/null)
+[ "$fe_running" = "$fe_built" ] && echo "   frontend runs the image built now"   || echo "   frontend NOT updated by this deploy (by design): runs ${fe_running:0:19}, built ${fe_built:0:19}"
+# <<< image-verify:check
 
 schema_now=$($PSQL -c "select version_num from alembic_version;" | tr -d '\r')
 [ "$schema_now" = "$head_rev" ]   || fail "the new code is running on schema '$schema_now'; the tree head is '$head_rev'"
