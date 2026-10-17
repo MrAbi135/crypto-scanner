@@ -64,7 +64,7 @@ echo "acknowledgement triage"
 # 1. Unacknowledged violations still count. The existence of this file must not
 #    have quietly turned the whole check into a formality.
 run "# nothing acknowledged" "E. archetype term never met|A1|foo|10|10"
-check "an unacknowledged violation counts" "1" "$problems"
+check "an unacknowledged violation counts" "2" "$problems"  # THROWAWAY: deliberately wrong to prove CI goes red
 
 # 2. An acknowledged violation stops counting -- and is still printed.
 run "E. archetype term never met|A1|foo | $FUTURE | fixed in PR #148" \
