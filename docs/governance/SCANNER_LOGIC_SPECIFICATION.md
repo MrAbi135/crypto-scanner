@@ -1184,6 +1184,33 @@ Every parameter change increments `param_set_version` and requires golden-datase
 
 ## Amendment History
 
+### Implementation record — 2026-10-18 (no doctrine change; version unchanged)
+
+**The engine graded `displaced` differently from §3.5 from 2026-08-19 until
+`s8-confluence-v38`. No clause of this document changes.**
+
+§3.5 defines the grade: *"`displaced` (break candle or the candle before it
+satisfies §5.10 displacement) vs `plain`"*. §8.3.1 pays +18 for it, and §8.6 A3
+requires a "displaced BOS". The engine instead asked whether any BOS in the
+candidate's direction fell inside a displaced §7.5 impulse leg:
+
+- **2026-08-19, PR #54** — A3's `displaced_bos`, on the reasoning that the BOS
+  event does not record displacement while the leg does.
+- **2026-08-30, PR #193 (`s8-confluence-v24`)** — F1's +18 moved onto the same
+  leg reading.
+
+No clause, TDR entry or owner ruling stated that reading. It was found on
+2026-10-18 by an independent check against Binance candles, which affected 15 of
+the 36 signals of the 2026-10-10 soak.
+
+**`s8-confluence-v38`** (owner ruling 2026-10-18) applies §3.5 as written to the
+BOS that F1 attributes (the newest in the candidate's direction):
+
+- The break candle or the candle before it must be a §5.10 displacement candle
+  **in the break's direction** (§5.10(4)).
+- F1's +18 and A3's link read that one flag.
+- A break whose candle has left the scoring window is graded `plain`.
+
 ### v1.0.15 — 2026-10-10
 
 **M5 only: the invalidation becomes a fixed risk stop, the single target

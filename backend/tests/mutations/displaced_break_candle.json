@@ -1,0 +1,96 @@
+{
+  "description": "s8-confluence-v38: SLS 3.5's `displaced` grade (break candle or the candle before it is a 5.10 displacement in the break's direction), read once for F1's +18 and A3's displaced BOS. Each mutation puts back one way the grade could drift from the clause, including the v24-v37 impulse-leg reading. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/displaced_break_candle.json",
+  "pytest": [
+    "tests/unit/application/detection/test_confluence_replay.py"
+  ],
+  "mutations": [
+    {
+      "name": "displaced read off the impulse leg again (v24-v37)",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        displaced_break = _displaced_break(events, direction, legs)",
+      "new": "        displaced_break = (lambda leg: leg is not None and leg.displaced)(legs.latest(LegKind.IMPULSE, direction))",
+      "expect_failing": [
+        "test_a_break_inside_a_displaced_leg_on_plain_candles_is_plain",
+        "test_the_newest_break_is_graded_not_an_older_displaced_one"
+      ]
+    },
+    {
+      "name": "the candle before the break is not considered",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        for index in (at, at - 1)",
+      "new": "        for index in (at,)",
+      "expect_failing": [
+        "test_a_break_whose_previous_candle_displaced_is_displaced",
+        "test_the_candle_after_the_break_does_not_grade_it"
+      ]
+    },
+    {
+      "name": "the candle after the break is considered instead of the one before",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        for index in (at, at - 1)",
+      "new": "        for index in (at, at + 1)",
+      "expect_failing": [
+        "test_a_break_whose_previous_candle_displaced_is_displaced",
+        "test_the_candle_after_the_break_does_not_grade_it"
+      ]
+    },
+    {
+      "name": "direction ignored: any displacement candle grades the break",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        legs.displacement_direction.get(legs.open_times[index]) == direction",
+      "new": "        legs.open_times[index] in legs.displacement_direction",
+      "expect_failing": [
+        "test_a_displacement_against_the_break_does_not_grade_it"
+      ]
+    },
+    {
+      "name": "the oldest break is graded, not the newest",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        if record.event_type == wanted and (newest is None or record.event_at >= newest.event_at):",
+      "new": "        if record.event_type == wanted and (newest is None or record.event_at <= newest.event_at):",
+      "expect_failing": [
+        "test_the_newest_break_is_graded_not_an_older_displaced_one"
+      ]
+    },
+    {
+      "name": "a break outside the window is paid as displaced",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "    except ValueError:\n        return False\n\n    return any(",
+      "new": "    except ValueError:\n        return True\n\n    return any(",
+      "expect_failing": [
+        "test_a_break_outside_the_window_is_plain"
+      ]
+    },
+    {
+      "name": "A3 ignores the flag",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "                displaced_bos=displaced_break,",
+      "new": "                displaced_bos=True,",
+      "expect_failing": [
+        "test_a_break_inside_a_displaced_leg_on_plain_candles_is_plain",
+        "test_the_newest_break_is_graded_not_an_older_displaced_one"
+      ]
+    },
+    {
+      "name": "F1 ignores the flag",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "                    displaced=displaced_break,",
+      "new": "                    displaced=True,",
+      "expect_failing": [
+        "test_a_break_inside_a_displaced_leg_on_plain_candles_is_plain",
+        "test_the_newest_break_is_graded_not_an_older_displaced_one"
+      ]
+    },
+    {
+      "name": "a displacement's direction is mapped the wrong way round",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "                \"UP\" if detected.direction is DisplacementDirection.BULLISH else \"DOWN\"",
+      "new": "                \"DOWN\" if detected.direction is DisplacementDirection.BULLISH else \"UP\"",
+      "expect_failing": [
+        "test_a_displaced_break_classifies_as_a3",
+        "test_f1_pays_displacement_from_the_break_candle_not_from_mss_presence",
+        "test_a_break_whose_previous_candle_displaced_is_displaced"
+      ]
+    }
+  ]
+}

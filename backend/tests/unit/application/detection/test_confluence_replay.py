@@ -17,7 +17,9 @@ from scanner.application.detection.confluence_replay import (
     HTF_STATE_UNREACHABLE,
     UNREACHABLE_INPUTS,
     ConfluenceReplayService,
+    _displaced_break,
     _is_displacement_fvg,
+    _Legs,
     _read_labels,
     _read_participation,
     _size_skew,
@@ -2112,26 +2114,23 @@ def impulse_then_pullback() -> list:
 
 
 @pytest.mark.asyncio
-async def test_a_displaced_break_inside_the_impulse_classifies_as_a3() -> None:
-    """§8.6 A3, which had never classified and had no test.
+async def test_a_displaced_break_classifies_as_a3() -> None:
+    """§8.6 A3: trend + displaced BOS + retrace into a zone.
 
-    Its `displaced_bos` term asked whether any BOS fell inside the impulse leg
-    being retraced, and compared the leg's bounds -- offsets in the current
-    window -- against `break_index` from the event payload, an offset in
-    whichever window recorded the break. Two windows, one comparison.
+    "Displaced" is §3.5's grade: the break candle or the one before it is a
+    §5.10 displacement in the break's direction (v38). The fixture's only
+    displacement candle is index 25, so the break sits there; the current leg
+    is the retracement off the 43 high.
 
-    No fixture in this suite ever put `break_index` in a BOS payload, so the
-    set was empty in every test and A3 could not classify; in production the
-    numbers were real but unrelated, so it classified by coincidence. Neither
-    is a rule.
-
-    Both sides are times now. The break here sits at index 30, inside the
-    11->43 impulse, and the current leg is the retracement off its high.
+    History: until v37 this asked whether any BOS fell inside the displaced
+    impulse leg, and the break sat at index 30 -- inside the leg, on a plain
+    candle. That reading is pinned as no longer sufficient by
+    `test_a_break_inside_a_displaced_leg_on_plain_candles_is_plain`.
     """
     last_close = int(impulse_then_pullback()[-1].close)
 
     setup = bullish_setup()
-    setup["events"] = [event("BOS_UP", 30, direction="UP")]
+    setup["events"] = [event("BOS_UP", 25, direction="UP")]
     setup["zones"] = [
         zone(
             "ob",
@@ -3275,7 +3274,7 @@ async def test_scoring_pins_its_zone_read_to_the_current_versions() -> None:
 
 
 @pytest.mark.asyncio
-async def test_f1_pays_displacement_from_the_leg_not_from_mss_presence() -> None:
+async def test_f1_pays_displacement_from_the_break_candle_not_from_mss_presence() -> None:
     """§8.3.1's +18 is for a *displaced* break (§3.5's quality grade).
 
     Two directions of the same defect: an MSS with an undisplaced break must
@@ -3284,12 +3283,13 @@ async def test_f1_pays_displacement_from_the_leg_not_from_mss_presence() -> None
     terms on the identical MSS-presence predicate, so the first paid 28 for
     one fact and the second could never pay at all.
     """
-    # The A3 fixture verbatim: BOS at index 30 inside a displaced 11->43
-    # impulse, no MSS anywhere, a zone at the pullback's close so G4 holds.
+    # The A3 fixture verbatim: BOS on index 25, the fixture's displacement
+    # candle (§3.5, v38), no MSS anywhere, a zone at the pullback's close so
+    # G4 holds. Until v37 the break sat at 30 and the leg paid the 18.
     last_close = int(impulse_then_pullback()[-1].close)
 
     displaced = bullish_setup()
-    displaced["events"] = [event("BOS_UP", 30, direction="UP")]
+    displaced["events"] = [event("BOS_UP", 25, direction="UP")]
     displaced["zones"] = [
         zone(
             "ob",
@@ -3306,6 +3306,94 @@ async def test_f1_pays_displacement_from_the_leg_not_from_mss_presence() -> None
 
     assert "displaced" in contributions
     assert "mss" not in contributions
+
+
+async def _a3_candidate(*bos_indices: int):
+    """The A3 fixture with BOS_UP events at the given indices, scored UP."""
+    last_close = int(impulse_then_pullback()[-1].close)
+
+    setup = bullish_setup()
+    setup["events"] = [event("BOS_UP", index, direction="UP") for index in bos_indices]
+    setup["zones"] = [
+        zone("ob", band_low=Decimal(last_close - 1), band_high=Decimal(last_close + 1))
+    ]
+
+    svc, _ = service(**setup, candles=impulse_then_pullback(), htf_trend="BULLISH")
+
+    return next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
+
+
+@pytest.mark.asyncio
+async def test_a_break_whose_previous_candle_displaced_is_displaced() -> None:
+    """§3.5: "break candle *or the candle before it*" -- index 26 follows 25."""
+    up = await _a3_candidate(26)
+
+    assert "displaced" in {c.code for c in up.attribution["F1"]}
+    assert up.archetype == "A3"
+
+
+@pytest.mark.asyncio
+async def test_a_break_inside_a_displaced_leg_on_plain_candles_is_plain() -> None:
+    """The v24-v37 reading, now refused: being inside the leg is not §3.5.
+
+    Index 30 sits inside the displaced 11->43 impulse, but neither it nor 29
+    is a displacement candle. Until v37 this paid F1's 18 and closed A3; under
+    §3.5 the break is `plain`, F1 does not pay and A3's chain does not close.
+    """
+    up = await _a3_candidate(30)
+
+    assert "displaced" not in {c.code for c in up.attribution["F1"]}
+    assert up.archetype != "A3"
+
+
+@pytest.mark.asyncio
+async def test_the_newest_break_is_graded_not_an_older_displaced_one() -> None:
+    """The grade belongs to the break F1 attributes: the newest BOS_UP.
+
+    A displaced break at 25 does not lend its grade to a plain one at 30.
+    """
+    up = await _a3_candidate(25, 30)
+
+    assert "displaced" not in {c.code for c in up.attribution["F1"]}
+    assert up.archetype != "A3"
+
+
+def _legs_over(opens: list[datetime], directions: dict[datetime, str]) -> _Legs:
+    return _Legs(
+        legs=(),
+        displacement=frozenset(),
+        displacement_times=frozenset(directions),
+        displacement_direction=directions,
+        swings=(),
+        open_times=tuple(opens),
+    )
+
+
+def test_a_displacement_against_the_break_does_not_grade_it() -> None:
+    """§5.10(4) gives a displacement candle a direction; an up break needs an up one."""
+    opens = [BASE + TF.duration * i for i in range(10)]
+    breaks = (event("BOS_UP", 5, direction="UP"),)
+
+    assert _displaced_break(breaks, "UP", _legs_over(opens, {opens[5]: "UP"}))
+    assert not _displaced_break(breaks, "UP", _legs_over(opens, {opens[5]: "DOWN"}))
+    assert not _displaced_break(breaks, "UP", _legs_over(opens, {opens[4]: "DOWN"}))
+
+
+def test_a_break_outside_the_window_is_plain() -> None:
+    """Its candles cannot be measured, so it is not paid for (nothing persists the grade)."""
+    opens = [BASE + TF.duration * i for i in range(10, 20)]
+    breaks = (event("BOS_UP", 5, direction="UP"),)
+
+    assert not _displaced_break(breaks, "UP", _legs_over(opens, {opens[0]: "UP"}))
+
+
+def test_the_candle_after_the_break_does_not_grade_it() -> None:
+    """§3.5 names the break candle and the one BEFORE it, not the one after."""
+    opens = [BASE + TF.duration * i for i in range(10)]
+    breaks = (event("BOS_UP", 5, direction="UP"),)
+
+    assert _displaced_break(breaks, "UP", _legs_over(opens, {opens[4]: "UP"}))
+    assert not _displaced_break(breaks, "UP", _legs_over(opens, {opens[6]: "UP"}))
 
 
 @pytest.mark.asyncio

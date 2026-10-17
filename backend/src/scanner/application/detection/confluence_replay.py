@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -113,6 +113,7 @@ from scanner.domain.confluence import (
 )
 from scanner.domain.confluence.archetypes import Archetype
 from scanner.domain.ict import (
+    DisplacementDirection,
     PdContext,
     PdState,
     dealing_range_at,
@@ -219,7 +220,13 @@ from scanner.shared import Timeframe
 # v37: no rule of its own. It ships with s6-ob-v9 (#318), whose order blocks
 # feed F3, so a setup or signal scored on the new zones carries a version of
 # its own instead of sharing v36 with the ones scored on s6-ob-v8.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v37"
+# v38: `displaced` is SLS 3.5's own grade -- the break candle or the candle
+# before it is a 5.10 displacement candle in the break's direction -- and F1's
+# +18 and 8.6 A3's "displaced BOS" read that ONE flag, for the BOS F1 already
+# attributes (the newest BOS in the candidate's direction). Since v24 (#193)
+# F1, and since #54 A3, asked instead whether any BOS fell inside a displaced
+# 7.5 impulse leg -- a reading no SLS clause states. Owner ruling 2026-10-18.
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v38"
 
 # The published set when nothing is configured (owner ruling 2026-09-15). A
 # default that published everything would open M15/M5 the day a setting went
@@ -306,9 +313,12 @@ class _Legs:
     displacement: frozenset[int]
     # The same set as times, for consumers comparing against anything that
     # crossed the events table or the zones table: their indices froze in
-    # whichever window recorded them, and `_bos_inside`'s docstring already
+    # whichever window recorded them, and `_bos_break_times`'s docstring already
     # made this argument for BOS breaks.
     displacement_times: frozenset[datetime]
+    # 5.10(4): a displacement candle has a direction (its body sign). SLS 3.5's
+    # `displaced` grade needs it -- a down candle does not displace an up break.
+    displacement_direction: Mapping[datetime, str]
     swings: tuple[SwingPoint, ...]
 
     # The window's open times, positionally. Legs are indexed into the current
@@ -757,7 +767,9 @@ class ConfluenceReplayService:
         # Hoisted above the gates because two consumers need them now: G5's
         # failed-break clause here, and F1/A3 below. Computing twice invited
         # the two to drift.
-        impulse = legs.latest(LegKind.IMPULSE, direction)
+        # SLS 3.5's BOS quality grade, read once: F1's +18 (8.3.1) and A3's
+        # "displaced BOS" (8.6) are the same fact and must not drift apart.
+        displaced_break = _displaced_break(events, direction, legs)
         recent_failed_breaks = _count_failed_breaks(events, direction, opened_at, timeframe)
 
         # §3.5 gives every break a 3-candle failure window. Inside it, "no
@@ -880,8 +892,8 @@ class ConfluenceReplayService:
         structure_ids = _present(
             {
                 "break_confirmed": bos_key,
-                # §3.5's quality grade is read off the impulse leg, which has
-                # no persisted identity -- the displaced break IS the BOS.
+                # §3.5's quality grade belongs to the break itself, so the
+                # displaced term names the same BOS.
                 "displaced": bos_key,
                 "external": external_key,
                 "mss": mss_key,
@@ -904,15 +916,14 @@ class ConfluenceReplayService:
             Factor.STRUCTURE: structure_factor(
                 StructureEvidence(
                     break_confirmed=f"BOS_{direction}" in event_types,
-                    # §8.3.1 pays +18 for a *displaced* break (§3.5's quality
-                    # grade), and the BOS event does not record displacement --
-                    # the impulse leg it sits in does, which is exactly how
-                    # §8.6 A3 already reads it below. The first wiring keyed
-                    # this on MSS presence, the same predicate as `mss` two
-                    # lines down: one MSS paid 28 points for one fact, and the
-                    # common continuation case (displaced BOS, no MSS) could
-                    # never earn its 18.
-                    displaced=_bos_inside(impulse, bos_breaks.get(direction, frozenset()), legs),
+                    # §8.3.1 pays +18 for a *displaced* break: §3.5's quality
+                    # grade, "break candle or the candle before it satisfies
+                    # §5.10 displacement". The BOS event does not record it, so
+                    # it is measured on the window's candles (`_displaced_break`).
+                    # The first wiring keyed this on MSS presence (one MSS paid
+                    # 28 points for one fact); v24-v37 read it off the impulse
+                    # leg instead, a reading no SLS clause states.
+                    displaced=displaced_break,
                     external=any(
                         is_classification(t, strength=SwingStrength.EXTERNAL) for t in event_types
                     ),
@@ -1028,11 +1039,9 @@ class ConfluenceReplayService:
                 breaker_first_retest_respected=breaker_history.first_retest_respected,
                 entry_grade_confirmation=breaker_history.confirmed,
                 trend_active=trend_following,
-                # §8.6 A3 wants a *displaced* BOS and the BOS event does not
-                # record displacement. The impulse leg it sits in does -- and
-                # using the leg scopes it too, since a BOS from two months back
-                # is not what the current pullback is retracing.
-                displaced_bos=_bos_inside(impulse, bos_breaks.get(direction, frozenset()), legs),
+                # §8.6 A3's "displaced BOS" is §3.5's grade of the attributed
+                # break -- the same flag F1 pays its 18 on.
+                displaced_bos=displaced_break,
                 # G4 already established price is at this zone.
                 retraced_into_zone=True,
                 htf_aligned=htf == direction,
@@ -2346,11 +2355,14 @@ def _read_legs(series: list[Candle]) -> _Legs:
     """§7.5 legs over the window, with the §5.10 displacement they need."""
     atrs = wilder_atr_series(series)
 
-    displacement = frozenset(
-        index
+    found = {
+        index: detected
         for index, atr in enumerate(atrs)
-        if atr is not None and atr > 0 and detect_displacement(series, index, atr=atr) is not None
-    )
+        if atr is not None
+        and atr > 0
+        and (detected := detect_displacement(series, index, atr=atr)) is not None
+    }
+    displacement = frozenset(found)
 
     swings = detect_external_swings(series)
 
@@ -2358,6 +2370,12 @@ def _read_legs(series: list[Candle]) -> _Legs:
         legs=segment_legs(series, swings, displacement),
         displacement=displacement,
         displacement_times=frozenset(series[index].open_time for index in displacement),
+        displacement_direction={
+            series[index].open_time: (
+                "UP" if detected.direction is DisplacementDirection.BULLISH else "DOWN"
+            )
+            for index, detected in found.items()
+        },
         swings=swings,
         open_times=tuple(candle.open_time for candle in series),
     )
@@ -2430,24 +2448,46 @@ def _bos_break_times(
     return {key: frozenset(value) for key, value in breaks.items()}
 
 
-def _bos_inside(
-    impulse: Leg | None,
-    breaks: frozenset[datetime],
+def _displaced_break(
+    events: Sequence[EngineEventRecord],
+    direction: str,
     legs: _Legs,
 ) -> bool:
-    """§8.6 A3's "displaced BOS", scoped to the leg that is being retraced.
+    """SLS §3.5's BOS quality grade for the break F1 attributes.
 
-    The leg's bounds are offsets in the current window; the breaks arrive from
-    the events table. Comparing the two directly meant asking whether a number
-    from one window fell between two numbers from another. Both sides are
-    times now.
+    "BOS quality grade recorded: `displaced` (break candle or the candle before
+    it satisfies §5.10 displacement) vs `plain`." The break is the newest
+    `BOS_{direction}` -- the same record `_newest_event_key` names as F1's
+    `break_confirmed` and `displaced` evidence -- and its break candle is the
+    event's own candle (`event_at`, see `_bos_break_times`). The displacement
+    must run in the break's direction (§5.10(4): direction = body sign; owner
+    ruling 2026-10-18).
+
+    Compared in TIME against the current window. A break whose candle has left
+    the window cannot be measured here, so it grades `plain`: nothing persists
+    the grade, and paying 18 points for a measurement that was not made is the
+    flattery §15.4 forbids.
     """
-    if impulse is None or not impulse.displaced:
+    newest: EngineEventRecord | None = None
+    wanted = f"BOS_{direction}"
+
+    for record in events:
+        if record.event_type == wanted and (newest is None or record.event_at >= newest.event_at):
+            newest = record
+
+    if newest is None:
         return False
 
-    start, end = legs.span(impulse)
+    try:
+        at = legs.open_times.index(newest.event_at)
+    except ValueError:
+        return False
 
-    return any(start <= at <= end for at in breaks)
+    return any(
+        legs.displacement_direction.get(legs.open_times[index]) == direction
+        for index in (at, at - 1)
+        if index >= 0
+    )
 
 
 def _is_displacement_fvg(
@@ -2467,7 +2507,7 @@ def _is_displacement_fvg(
     the first version asked whether an old zone's frozen offset landed near
     today's right edge, which qualified stale gaps whenever an unrelated
     displacement printed there and refused genuine ones from mid-window. The
-    same conversion `_bos_inside` and `_age_in_candles` already made.
+    same conversion `_displaced_break` and `_age_in_candles` already made.
 
     `created_at` is the gap's third candle's CLOSE (§5.4 detection), so the
     three spanned candles OPEN at created_at - 3d .. created_at - d.
