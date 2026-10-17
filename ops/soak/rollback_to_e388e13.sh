@@ -108,7 +108,7 @@ fi
 step "3. Build all five images from the target (four images lie otherwise)"
 # ---------------------------------------------------------------------------
 
-run "$DC build api engine worker ingest frontend || fail 'build failed'"
+run "$DC build api engine worker ingest || fail 'build failed'"
 
 # ---------------------------------------------------------------------------
 step "4. Restart -- this resets T0"
