@@ -180,6 +180,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: ops/soak shell tests
+        # Every file runs even after one fails -- `set -e` stopped at the first
+        # failing file and hid the rest (shown on the throwaway PR #328).
         run: |
-          set -e
-          for t in ops/soak/test_*.sh; do echo "== $t"; bash "$t"; done
+          failed=""
+          for t in ops/soak/test_*.sh; do
+            echo "== $t"
+            bash "$t" || failed="$failed $t"
+          done
+          if [ -n "$failed" ]; then
+            echo "FAILED:$failed"
+            exit 1
+          fi
+          echo "all ops/soak shell tests passed"
