@@ -37,6 +37,7 @@ from scanner.application.ports.ict_zones import IctZoneRecord
 from scanner.application.ports.liquidity_detection import LiquidityPoolRecord
 from scanner.application.ports.signal_transitions import SignalTransitionRecord
 from scanner.domain.common import TradeAggregate
+from scanner.domain.momentum.legs import Leg, LegKind
 from scanner.domain.volume import WashRiskState
 from scanner.shared import Timeframe
 
@@ -3347,20 +3348,40 @@ async def test_a_break_inside_a_displaced_leg_on_plain_candles_is_plain() -> Non
 
 
 @pytest.mark.asyncio
-async def test_the_newest_break_is_graded_not_an_older_displaced_one() -> None:
-    """The grade belongs to the break F1 attributes: the newest BOS_UP.
+async def test_a_displaced_break_inside_the_retraced_leg_grades_it_beside_a_plain_one() -> None:
+    """SLS v1.0.16: the graded break is the one inside the impulse leg the pullback retraces.
 
-    A displaced break at 25 does not lend its grade to a plain one at 30.
+    Both breaks sit in the 11->43 impulse; 25 is on the displacement candle and
+    30 is plain. The displaced break is found, and F1's `displaced` evidence
+    names IT -- not the newer plain break, which does not borrow the grade.
     """
     up = await _a3_candidate(25, 30)
 
-    assert "displaced" not in {c.code for c in up.attribution["F1"]}
-    assert up.archetype != "A3"
+    displaced = [c for c in up.attribution["F1"] if c.code == "displaced"]
+
+    assert displaced and displaced[0].evidence_id == "BOS_UP-25"
+    assert up.archetype == "A3"
 
 
-def _legs_over(opens: list[datetime], directions: dict[datetime, str]) -> _Legs:
+def _legs_over(
+    opens: list[datetime], directions: dict[datetime, str], leg: tuple[int, int] | None = (0, 9)
+) -> _Legs:
+    """A window whose only leg is an UP impulse over `leg` (indices), or none."""
+    legs = ()
+    if leg is not None:
+        legs = (
+            Leg(
+                start_index=leg[0],
+                end_index=leg[1],
+                start_price=Decimal(100),
+                end_price=Decimal(120),
+                kind=LegKind.IMPULSE,
+                displaced=True,
+                net_progress_atr=Decimal(5),
+            ),
+        )
     return _Legs(
-        legs=(),
+        legs=legs,
         displacement=frozenset(),
         displacement_times=frozenset(directions),
         displacement_direction=directions,
@@ -3379,14 +3400,6 @@ def test_a_displacement_against_the_break_does_not_grade_it() -> None:
     assert not _displaced_break(breaks, "UP", _legs_over(opens, {opens[4]: "DOWN"}))
 
 
-def test_a_break_outside_the_window_is_plain() -> None:
-    """Its candles cannot be measured, so it is not paid for (nothing persists the grade)."""
-    opens = [BASE + TF.duration * i for i in range(10, 20)]
-    breaks = (event("BOS_UP", 5, direction="UP"),)
-
-    assert not _displaced_break(breaks, "UP", _legs_over(opens, {opens[0]: "UP"}))
-
-
 def test_the_candle_after_the_break_does_not_grade_it() -> None:
     """§3.5 names the break candle and the one BEFORE it, not the one after."""
     opens = [BASE + TF.duration * i for i in range(10)]
@@ -3394,6 +3407,36 @@ def test_the_candle_after_the_break_does_not_grade_it() -> None:
 
     assert _displaced_break(breaks, "UP", _legs_over(opens, {opens[4]: "UP"}))
     assert not _displaced_break(breaks, "UP", _legs_over(opens, {opens[6]: "UP"}))
+
+
+def test_a_displaced_break_outside_the_retraced_leg_does_not_grade_it() -> None:
+    """The graded break belongs to the move being retraced (§8.6 A3, §8.7).
+
+    A §3.5-displaced break before the impulse leg starts is another move's
+    break; the leg here spans indices 6..9 and the break sits at 2.
+    """
+    opens = [BASE + TF.duration * i for i in range(10)]
+    breaks = (event("BOS_UP", 2, direction="UP"),)
+
+    assert _displaced_break(breaks, "UP", _legs_over(opens, {opens[2]: "UP"}, leg=(0, 9)))
+    assert not _displaced_break(breaks, "UP", _legs_over(opens, {opens[2]: "UP"}, leg=(6, 9)))
+
+
+def test_no_impulse_leg_means_no_displaced_break() -> None:
+    """Without a leg being retraced there is no A3 move to grade."""
+    opens = [BASE + TF.duration * i for i in range(10)]
+    breaks = (event("BOS_UP", 5, direction="UP"),)
+
+    assert not _displaced_break(breaks, "UP", _legs_over(opens, {opens[5]: "UP"}, leg=None))
+
+
+def test_the_newest_displaced_break_in_the_leg_is_named() -> None:
+    """Two displaced breaks in the leg: the evidence names the newer one."""
+    opens = [BASE + TF.duration * i for i in range(10)]
+    breaks = (event("BOS_UP", 3, direction="UP"), event("BOS_UP", 7, direction="UP"))
+    found = _displaced_break(breaks, "UP", _legs_over(opens, {opens[3]: "UP", opens[7]: "UP"}))
+
+    assert found is not None and found.event_key == "BOS_UP-7"
 
 
 @pytest.mark.asyncio

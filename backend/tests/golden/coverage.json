@@ -219,6 +219,18 @@
           "blocked_on": "the grade is not in the recorded payload at all -- `_bos_payload` writes direction, swing and close, and no displaced/plain field -- so no dataset can assert it until the detector records it"
         },
         {
+          "id": "3.5-quality-grade-in-break-direction",
+          "rule": "the displacement that grades a break runs in the break's direction (5.10(4)); an opposite-direction displacement does not grade it",
+          "status": "pending",
+          "blocked_on": "the grade is measured at scoring time and not written into the BOS payload (see 3.5-quality-grade), so no dataset can assert it on the break; the confluence-side reading is pinned by unit tests in test_confluence_replay.py"
+        },
+        {
+          "id": "3.5-grade-belongs-to-its-break",
+          "rule": "the grade is measured on the break's own two candles and is never lent from one break to another",
+          "status": "pending",
+          "blocked_on": "the grade is measured at scoring time and not written into the BOS payload (see 3.5-quality-grade), so no dataset can assert it on the break; the confluence-side reading is pinned by unit tests in test_confluence_replay.py"
+        },
+        {
           "id": "3.5-failed-break",
           "rule": "a close back beyond the level within 3 candles records a failed break, and the BOS stands",
           "status": "covered"
@@ -1875,6 +1887,12 @@
           "id": "8.3.1-f1-break-quality",
           "rule": "F1 break quality 0-45: 15 for a confirmed break, +18 displaced, +12 external",
           "status": "covered"
+        },
+        {
+          "id": "8.3.1-scored-break-in-retraced-leg",
+          "rule": "+18 displaced (and 8.6 A3's displaced BOS) is paid for a 3.5-displaced BOS in D inside the impulse leg the pullback retraces; a displaced break outside it, or a plain break inside it, is not",
+          "status": "pending",
+          "blocked_on": "only the positive case exists in a dataset (the A3 golden's break is its displacement candle, inside its leg); asserting the rule needs a dataset with a displaced break OUTSIDE the retraced leg and a plain one inside it, so that loosening either half changes a golden"
         },
         {
           "id": "8.3.1-f1-mss-present",

@@ -5,7 +5,7 @@
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
 **Version:** 1.0.15
-**Ratified:** 2026-07-12 · **Last amended:** 2026-10-10 (v1.0.15; see Amendment History)
+**Ratified:** 2026-07-12 · **Last amended:** 2026-10-18 (v1.0.16; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -339,7 +339,7 @@ stateDiagram-v2
 
 *Compared alternatives.* Wick-break BOS (fastest, worst false-positive rate — rejected); single-close BOS (**chosen**: deterministic, timely, filters pure stop-hunts); two-consecutive-close BOS (available as strict mode `P.structure.bos_strict = false` by default — slower by one full candle, materially late on H4/D1).
 
-**Validation Rules.** Level must be a confirmed external swing not previously consumed; data continuity across break; trend-direction agreement. BOS quality grade recorded: `displaced` (break candle or the candle before it satisfies §5.10 displacement) vs `plain` — grade affects scoring (§8), not validity.
+**Validation Rules.** Level must be a confirmed external swing not previously consumed; data continuity across break; trend-direction agreement. BOS quality grade recorded: `displaced` (the break candle or the candle before it is a §5.10 displacement candle **whose direction (§5.10(4)) is the break's direction**) vs `plain` — grade affects scoring (§8), not validity. The grade belongs to the break alone: it is measured on that break's own two candles and is never lent from one break to another (v1.0.16).
 
 **Invalidation Rules.** BOS is a fact once confirmed. A **failed break** is recorded (fact, not deletion) if within `P.structure.failed_break_candles = 3` closed candles price closes back beyond the broken level in the opposite direction; downstream consumers (confluence, lifecycle) treat `failed: true` as strong contrary evidence.
 
@@ -762,6 +762,8 @@ and change only by amendment (Constitution §30.8).
 | Trend maturity | 0–30 | `min(pairs, 4) / 4 × 30` over consecutive unbroken HH/HL or LL/LH pairs (§7.4) |
 | Clean break record | 0–15 | 15 with no failed break against D in 20 candles · 7 with one · 0 with two or more |
 
+**The scored break (v1.0.16).** `+18 displaced` and §8.6 A3's "displaced BOS" read **one** answer: is there a confirmed `BOS` in D whose break candle lies inside the §7.5 impulse leg that the candidate's pullback retraces (the latest impulse leg in D), and whose §3.5 grade is `displaced`? If so, the newest such break is the scored break and F1's `displaced` evidence names it. A break outside that leg belongs to another move and does not grade this one; a break inside it on plain candles is `plain`, however displaced the leg.
+
 *Why these sizes.* Displacement outranks externality (18 vs 12) because §3.5's
 close-break law already requires a real break — displacement is the evidence
 that it was *intended*, while external/internal describes only which swing set
@@ -866,7 +868,7 @@ Every publishable setup must match exactly one archetype (classification is rule
 |---|---|---|---|
 | **A1 Sweep Reversal** | External sweep → MSS → retest of MSS-origin zone | Range-extreme PD (≤0.33/≥0.67); stop-hunt confirmed | 75 |
 | **A2 Breaker Retest** | Breaker formed → first retest with Respect (§5.9) | BRK_A grade or entry-grade Confirmation | 72 |
-| **A3 Continuation Pullback** | Trend + displaced BOS → retrace into OTE/OB/FVG | HTF aligned; retracement leg (§7.5), not counter-displacement | 70 |
+| **A3 Continuation Pullback** | Trend + displaced BOS (the scored break, §8.3.1) → retrace into OTE/OB/FVG | HTF aligned; retracement leg (§7.5), not counter-displacement | 70 |
 | **A4 FVG Continuation** | Displacement FVG → first touch in trend direction | HTF aligned; FVG age ≤ 30 candles | 70 |
 | **A5 Range Liquidity Play** | RANGING state; sweep of range extreme → rejection | Target = opposing range extreme; range ≥ 2 × ATR *(v1.0.8: unenforceable until §5.7's range width is persisted as evidence — A5 chains fail on their readable links, never on an invented width)* | 74 |
 
@@ -1010,7 +1012,7 @@ Publication checklist (§15.3) evaluated exactly once, atomically: payload compl
 
 ### 12.3 Monitoring (PUBLISHED / ACTIVE)
 
-Per closed candle on the signal's TF: entry-zone touch check (→ ACTIVE); invalidation check — a candle **close** beyond the invalidation level (wick-through alone records `stress_test: true` but does not fail the signal; consistent with zone grammar §5.9); target check — **touch** of target zone suffices (targets are liquidity pools; a wick into the pool is the pool being consumed — asymmetry with invalidation is deliberate and doctrine-consistent); premise checks — sweep reclaimed, MSS demoted, zone violated ⇒ `INVALIDATED_EARLY` (pre-touch only).
+Per closed candle on the signal's TF: entry-zone touch check (→ ACTIVE); invalidation check — a candle **close** beyond the invalidation level (wick-through alone records `stress_test: true` but does not fail the signal; consistent with zone grammar §5.9); target check — **touch** of target zone suffices (targets are liquidity pools; a wick into the pool is the pool being consumed — asymmetry with invalidation is deliberate and doctrine-consistent); premise checks — sweep reclaimed, MSS demoted, zone violated ⇒ `INVALIDATED_EARLY` (pre-touch only). **The activating candle (v1.0.16).** The closed candle that first touches the entry zone only activates the signal; invalidation and target are read from the next closed candle on. This is the engine's behaviour since the lifecycle was built, and the 2026-10-10 soak's outcomes reproduce from candles under it 33 of 33.
 
 **M5 (v1.0.15): risk stop, target ladder and trailing invalidation.** On M5 the entry is the zone's **proximal** edge, the invalidation is the §15.2 `risk_stop`, and the single target is replaced by a ladder `TPn = (n+1) × R` for n = 1, 2, 3, … with no upper bound. Monitoring differs from the rules above in three ways, and only on M5:
 
@@ -1018,7 +1020,7 @@ Per closed candle on the signal's TF: entry-zone touch check (→ ACTIVE); inval
 2. **Trailing.** When TPn is reached the invalidation moves to TP(n−1)'s level, TP0 being the entry: reaching 2R moves it to the entry, reaching 3R moves it to 2R, reaching 4R moves it to 3R, and onward. It never moves against D. A candle whose extreme passes several rungs advances through all of them.
 3. **Derived, never stored.** The live trailing level is recomputed from the candles the signal has lived through on every pass, exactly as §12.4's excursions are. It is never written onto the signal, which §15.3(5)'s seal keeps immutable; the published invalidation remains the *initial* one.
 
-Same-candle collision keeps v1.0.8's rule: a candle containing both the live invalidation and the next rung resolves to the **invalidation**, recorded with a reason naming the indeterminate order. Premise checks still apply before the entry is touched.
+Same-candle collision keeps v1.0.8's rule: a candle containing both the live invalidation and the next rung resolves to the **invalidation**, recorded with a reason naming the indeterminate order. A stop moved by a rung reached on a candle is live from the **next** candle (v1.0.16): within one candle the stop is read before the rungs, so the moved stop cannot also be touched on the candle that moved it. Premise checks still apply before the entry is touched.
 
 ### 12.4 Success / Failure Accounting
 
@@ -1184,49 +1186,46 @@ Every parameter change increments `param_set_version` and requires golden-datase
 
 ## Amendment History
 
-### Implementation record — 2026-10-18 (no doctrine change; version unchanged)
+### v1.0.16 — 2026-10-18
 
-**The engine graded `displaced` differently from §3.5 from 2026-08-19 until
-`s8-confluence-v38`. No clause of this document changes.**
+**§3.5, §8.3.1, §8.6: `displaced` is a break's own §3.5 grade, in the break's
+direction, read for the break the A3 pullback retraces, once for F1 and A3.**
 
-§3.5 defines the grade: *"`displaced` (break candle or the candle before it
-satisfies §5.10 displacement) vs `plain`"*. §8.3.1 pays +18 for it, and §8.6 A3
-requires a "displaced BOS". The engine instead asked whether any BOS in the
-candidate's direction fell inside a displaced §7.5 impulse leg:
+**Why.** §3.5 defines the grade on the break's candles. From 2026-08-19 (PR #54,
+A3) and 2026-08-30 (PR #193, F1, `s8-confluence-v24`), the engine graded
+`displaced` by whether the §7.5 impulse leg was displaced and any BOS fell inside
+it. So one displacement candle in a leg graded every break in that leg, whether
+or not the break's own candles displaced. No clause, TDR entry or owner ruling
+stated that reading; an independent check against Binance candles found it on
+2026-10-18. §3.5 also did not say which way the displacement must run, and
+§8.3.1 and §8.6 did not say which BOS is scored.
 
-- **2026-08-19, PR #54** — A3's `displaced_bos`, on the reasoning that the BOS
-  event does not record displacement while the leg does.
-- **2026-08-30, PR #193 (`s8-confluence-v24`)** — F1's +18 moved onto the same
-  leg reading.
+**What the owner was shown before ruling.** Three readings of "which break",
+against the old leg reading, all read-only:
 
-No clause, TDR entry or owner ruling stated that reading. It was found on
-2026-10-18 by an independent check against Binance candles, which affected 15 of
-the 36 signals of the 2026-10-10 soak.
+| reading | eq2 replay −18 / A3 lost / signals lost | 2026-10-10 soak, 36 signals: not published |
+|---|---|---|
+| (A) newest BOS in D | 86 / 12 / 1 | 13 (8 measured, 5 fallback unknown) |
+| (B) any displaced BOS in the window | 0 / 0 / 0 | 1 |
+| **(C) displaced BOS inside the retraced impulse leg — chosen** | 28 / 9 / 1 | 8 (3 measured, 5 fallback unknown) |
 
-**`s8-confluence-v38`** (owner ruling 2026-10-18) applies §3.5 as written to the
-BOS that F1 attributes (the newest in the candidate's direction):
+(B) was rejected because it lets a break up to 436 candles old lend its grade to
+a new one. (A) was rejected because it strips the grade from a continuation
+whose displaced break sits earlier in the same move. (C) reads §8.7's sequence:
+displaced break, then a pullback retracing that move.
 
-- The break candle or the candle before it must be a §5.10 displacement candle
-  **in the break's direction** (§5.10(4)).
-- F1's +18 and A3's link read that one flag.
-- A break whose candle has left the scoring window is graded `plain`.
+**Direction** follows §5.10(4) ("direction = body sign"): a down candle does not
+grade an up break. **The scored break** is the newest qualifying one, and F1's
+evidence names it.
 
-Two readings in that sentence are the owner's (2026-10-18) and are recorded here
-because §3.5 itself does not spell them out:
+**Not changed.** The grade is still measured at scoring time, not written into
+the BOS payload. Recording it at the break (structure `s4-v11`) is scoped
+separately and not adopted. Golden datasets: none change. The A3 golden (#251)'s
+break is its displacement candle and sits inside its impulse leg.
 
-1. **Direction.** §3.5 says only "the break candle or the candle before it
-   satisfies §5.10 displacement". It does not say in which direction. §5.10(4)
-   gives every displacement candle a direction ("direction = body sign"), so the
-   reasonable reading is that only a displacement *in the break's direction*
-   grades the break: a large down candle does not make an up-break `displaced`.
-2. **Which BOS.** §8.3.1 and §8.6 speak of "the" BOS, and §3.5 grades each
-   break on its own candles. The engine grades the **newest** `BOS` in the
-   candidate's direction, the same record F1 already names as its
-   `break_confirmed` evidence. An older displaced break in the window does not
-   lend its grade to a newer plain one.
+**Also clarified (§12.3, no behaviour change).** The candle that first touches the entry only activates the signal, and on M5 a stop moved by a rung is live from the next candle. Both are what the lifecycle code does (`domain/lifecycle/state.py`: `observe`, `walk_ladder`); §12.3 did not say so. An independent walk of the 2026-10-10 soak against Binance candles matched the engine on 33/33 outcomes, timing included, only under these two rules (30/33 without them).
 
-Neither reading changes a clause. If either should be a rule of this document,
-that is a separate, versioned amendment.
+**Implementation:** `s8-confluence-v38`.
 
 ### v1.0.15 — 2026-10-10
 
