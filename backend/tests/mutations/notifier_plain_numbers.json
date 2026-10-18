@@ -7,8 +7,8 @@
     {
       "name": "confidence printed as psql returned it",
       "file": "ops/notify/notify_signals.py",
-      "old": "confidence {_shown(row['confidence'])}",
-      "new": "confidence {row['confidence']}",
+      "old": "Confidence {_shown(row['confidence'])}/100",
+      "new": "Confidence {row['confidence']}/100",
       "expect_failing": [
         "test_numeric_columns_are_announced_without_eighteen_places"
       ]
@@ -16,8 +16,8 @@
     {
       "name": "entry printed as psql returned it",
       "file": "ops/notify/notify_signals.py",
-      "old": "f\"entry {_shown(row['entry_proximal'])} → {_shown(row['entry_distal'])}\\n\"",
-      "new": "f\"entry {row['entry_proximal']} → {row['entry_distal']}\\n\"",
+      "old": "(_shown(row[\"entry_proximal\"]), _shown(row[\"entry_distal\"])), key=_sort_key",
+      "new": "(row[\"entry_proximal\"], row[\"entry_distal\"]), key=_sort_key",
       "expect_failing": [
         "test_numeric_columns_are_announced_without_eighteen_places"
       ]
@@ -25,8 +25,8 @@
     {
       "name": "the pool-exit invalidation printed as psql returned it",
       "file": "ops/notify/notify_signals.py",
-      "old": "f\"invalidation {_shown(row['invalidation'])} (close beyond, not touch)\\n\"",
-      "new": "f\"invalidation {row['invalidation']} (close beyond, not touch)\\n\"",
+      "old": "f\"🛑 Stop: {_shown(row['invalidation'])} ({closes})\"",
+      "new": "f\"🛑 Stop: {row['invalidation']} ({closes})\"",
       "expect_failing": [
         "test_numeric_columns_are_announced_without_eighteen_places"
       ]
@@ -34,8 +34,8 @@
     {
       "name": "the laddered stop printed as psql returned it",
       "file": "ops/notify/notify_signals.py",
-      "old": "f\"stop {_shown(row['invalidation'])} (touch, not close)\\n\"",
-      "new": "f\"stop {row['invalidation']} (touch, not close)\\n\"",
+      "old": "f\"🛑 Stop: {_shown(row['invalidation'])} (on touch)\"",
+      "new": "f\"🛑 Stop: {row['invalidation']} (on touch)\"",
       "expect_failing": [
         "test_numeric_columns_are_announced_without_eighteen_places",
         "test_a_laddered_signal_is_announced_with_a_touch_stop_and_its_tps"

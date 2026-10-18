@@ -503,16 +503,17 @@ def test_the_notifier_prices_the_rungs_as_the_domain_does(notifier, direction, r
 def test_a_laddered_signal_is_announced_with_a_touch_stop_and_its_tps(notifier) -> None:
     text = notifier.format_signal(_laddered())
 
-    assert "stop 102.96 (touch, not close)" in text
-    assert "TP1 106.08 (2R) · TP2 107.12 (3R) · TP3 108.16 (4R) · no cap" in text
-    assert "trails" in text
-    assert "close beyond" not in text, "the pool-exit rule would tell the trader the opposite"
+    assert "🛑 Stop: 102.96 (on touch)" in text
+    assert "🎯 TP1: 106.08 (2R)\n🎯 TP2: 107.12 (3R)\n🎯 TP3: 108.16 (4R)" in text
+    assert "trails one TP behind · no cap" in text
+    assert "candle close" not in text, "the pool-exit rule would tell the trader the opposite"
 
 
 def test_a_pool_exit_signal_is_announced_as_before(notifier) -> None:
     text = notifier.format_signal(_signal("SIG_P"))
 
-    assert "invalidation 99 (close beyond, not touch)" in text
+    assert "🛑 Stop: 99 (candle close below)" in text
+    assert "🎯 Target: 110" in text
     assert "TP1" not in text
 
 
@@ -531,9 +532,9 @@ def test_numeric_columns_are_announced_without_eighteen_places(notifier) -> None
 
     text = notifier.format_signal(row)
 
-    assert "confidence 81\n" in text
-    assert "entry 80354.65 → 79000\n" in text
-    assert "invalidation 79000 (close beyond, not touch)" in text
+    assert "Confidence 81/100" in text
+    assert "📍 Entry zone: 79000 \u2013 80354.65\n" in text
+    assert "🛑 Stop: 79000 (candle close below)" in text
     assert "000000" not in text
 
     laddered = notifier.format_signal(_laddered())
@@ -545,7 +546,7 @@ def test_an_unparseable_number_is_shown_as_it_came(notifier) -> None:
     row = _signal("SIG_X")
     row["confidence"] = "n/a"
 
-    assert "confidence n/a" in notifier.format_signal(row)
+    assert "Confidence n/a/100" in notifier.format_signal(row)
 
 
 def test_an_unreadable_target_column_falls_back_to_the_pool_message(notifier) -> None:
@@ -553,7 +554,10 @@ def test_an_unreadable_target_column_falls_back_to_the_pool_message(notifier) ->
     row = _signal("SIG_B")
     row["target_bands"] = "not json"
 
-    assert "close beyond" in notifier.format_signal(row)
+    text = notifier.format_signal(row)
+
+    assert "candle close below" in text
+    assert "Target" not in text
 
 
 def test_a_close_the_loop_message_carries_the_booked_r(notifier) -> None:
@@ -565,10 +569,10 @@ def test_a_close_the_loop_message_carries_the_booked_r(notifier) -> None:
         "trigger_evidence": '{"rungs":"1","realised_r":"0"}',
     }
 
-    assert notifier.format_transition(row).endswith("realised 0R")
+    assert "💰 Result: 0R" in notifier.format_transition(row)
 
     row["trigger_evidence"] = '{"rungs":"2","realised_r":"2.000000000000000000"}'
-    assert notifier.format_transition(row).endswith("realised 2R")
+    assert "💰 Result: +2R" in notifier.format_transition(row)
 
 
 def test_a_pool_exit_close_carries_no_r(notifier) -> None:
@@ -580,4 +584,92 @@ def test_a_pool_exit_close_carries_no_r(notifier) -> None:
         "trigger_evidence": "{}",
     }
 
-    assert "realised" not in notifier.format_transition(row)
+    assert "Result" not in notifier.format_transition(row)
+
+
+def test_a_pool_exit_signal_states_its_side_target_and_risk_reward(notifier) -> None:
+    """The professional layout (owner, 2026-10-18): side first, then the levels a
+    trader acts on, the risk:reward, the setup by name, and when it was decided.
+
+    The fixture is LONG, zone 99-100 (mid 99.5), stop 99, target 110: risk 0.5,
+    reward 110 - 99.5 = 10.5, so 1 : 21.0 -- R from the mid and the target's
+    near edge, as SLS 12.4 measures a pool-exit signal.
+    """
+    text = notifier.format_signal(_signal("SIG_P"))
+
+    assert text.startswith("🟢 LONG · BTCUSDT · H1\n")
+    assert "📍 Entry zone: 99 \u2013 100" in text
+    assert "⚖️ Risk : Reward = 1 : 21.0" in text
+    assert "📐 Setup: A3 · Continuation Pullback" in text
+    assert "⭐ Grade A · Confidence 80/100" in text
+    assert "⏳ Valid for: 12 candles (~12 h)" in text
+    assert "\u2139\ufe0f Not financial advice" in text
+
+
+def test_a_short_reads_short_and_its_stop_closes_above(notifier) -> None:
+    row = _signal("SIG_S")
+    row.update(direction="DOWN", entry_proximal="100", entry_distal="101", invalidation="101")
+    row["target_bands"] = '{"primary":{"low":"90","high":"91","pool_id":"p1"},"secondary":null}'
+
+    text = notifier.format_signal(row)
+
+    assert text.startswith("🔴 SHORT · BTCUSDT · H1\n")
+    assert "🛑 Stop: 101 (candle close above)" in text
+    assert "🎯 Target: 90 \u2013 91" in text
+    # mid 100.5, risk 0.5, near edge 91: reward 9.5 -> 1 : 19.0
+    assert "⚖️ Risk : Reward = 1 : 19.0" in text
+
+
+def test_the_signal_time_is_its_candle_close_in_utc_and_pkt(notifier) -> None:
+    """`published_at` is the candle OPEN; the setup exists from its CLOSE."""
+    row = _signal("SIG_T", timeframe="M15")
+    row["published_at"] = "2026-10-17 13:15:00+00"
+
+    assert "🕒 17 Oct 13:30 UTC · 18:30 PKT" in notifier.format_signal(row)
+
+
+def test_an_unreadable_time_is_shown_as_it_came(notifier) -> None:
+    row = _signal("SIG_U")
+    row["published_at"] = "not a time"
+
+    assert "🕒 not a time" in notifier.format_signal(row)
+
+
+def test_wash_risk_is_still_flagged(notifier) -> None:
+    row = _signal("SIG_V")
+    row["condition_tags"] = '["wash_risk"]'
+
+    assert "⚠️ Wash-trading risk flagged on this pair" in notifier.format_signal(row)
+
+
+def test_the_close_the_loop_message_names_the_signal_it_closes(notifier) -> None:
+    row = {
+        "transition_id": "t-3",
+        "signal_id": "SIG_P",
+        "to_state": "FAILED",
+        "at": "2026-10-17 14:15:00+00",
+        "trigger_evidence": "{}",
+        "symbol": "DOGEUSDT",
+        "timeframe": "M15",
+        "direction": "DOWN",
+    }
+
+    text = notifier.format_transition(row)
+
+    assert text.startswith("❌ STOPPED OUT · DOGEUSDT · M15 · 🔴 SHORT\n")
+    assert "🕒 17 Oct 14:15 UTC · 19:15 PKT" in text
+
+
+def test_every_terminal_state_has_a_headline(notifier) -> None:
+    """A state with no headline would be announced by its raw code."""
+    assert set(notifier.TERMINAL_STATES) <= set(notifier.OUTCOME_HEADLINES)
+
+
+def test_the_transition_query_reads_the_signal_identity(notifier) -> None:
+    calls: list[str] = []
+    notifier._psql = lambda sql: calls.append(sql) or []
+
+    notifier.terminal_transitions(["SIG_1"])
+
+    assert "join detection.signals s on s.signal_id = t.signal_id" in calls[0]
+    assert "s.symbol" in calls[0] and "s.direction" in calls[0]
