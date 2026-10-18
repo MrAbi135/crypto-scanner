@@ -1211,6 +1211,23 @@ BOS that F1 attributes (the newest in the candidate's direction):
 - F1's +18 and A3's link read that one flag.
 - A break whose candle has left the scoring window is graded `plain`.
 
+Two readings in that sentence are the owner's (2026-10-18) and are recorded here
+because §3.5 itself does not spell them out:
+
+1. **Direction.** §3.5 says only "the break candle or the candle before it
+   satisfies §5.10 displacement". It does not say in which direction. §5.10(4)
+   gives every displacement candle a direction ("direction = body sign"), so the
+   reasonable reading is that only a displacement *in the break's direction*
+   grades the break: a large down candle does not make an up-break `displaced`.
+2. **Which BOS.** §8.3.1 and §8.6 speak of "the" BOS, and §3.5 grades each
+   break on its own candles. The engine grades the **newest** `BOS` in the
+   candidate's direction, the same record F1 already names as its
+   `break_confirmed` evidence. An older displaced break in the window does not
+   lend its grade to a newer plain one.
+
+Neither reading changes a clause. If either should be a rule of this document,
+that is a separate, versioned amendment.
+
 ### v1.0.15 — 2026-10-10
 
 **M5 only: the invalidation becomes a fixed risk stop, the single target
