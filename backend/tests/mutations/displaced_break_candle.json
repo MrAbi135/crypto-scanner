@@ -1,0 +1,129 @@
+{
+  "description": "s8-confluence-v38 (SLS v1.0.16): `displaced` is SLS 3.5's grade of a break inside the impulse leg the A3 pullback retraces, on the break's own candles, in the break's direction, read once for F1's +18 and A3. Each mutation puts back one way the grade could drift, including the v24-v37 leg reading. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/displaced_break_candle.json Also: SLS 5.1 Edge (3) -- one zone per (type, polarity, band) before stack counting.",
+  "pytest": [
+    "tests/unit/application/detection/test_confluence_replay.py"
+  ],
+  "mutations": [
+    {
+      "name": "the leg's displacement grades every break in it again (v24-v37)",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        displaced_record = _displaced_break(events, direction, legs)",
+      "new": "        displaced_record = next((r for r in events if r.event_type == f\"BOS_{direction}\" and (lambda leg: leg is not None and leg.displaced and legs.span(leg)[0] <= r.event_at <= legs.span(leg)[1])(legs.latest(LegKind.IMPULSE, direction))), None)",
+      "expect_failing": [
+        "test_a_break_inside_a_displaced_leg_on_plain_candles_is_plain"
+      ]
+    },
+    {
+      "name": "the candle before the break is not considered",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        for i in (index, index - 1)",
+      "new": "        for i in (index,)",
+      "expect_failing": [
+        "test_a_break_whose_previous_candle_displaced_is_displaced",
+        "test_the_candle_after_the_break_does_not_grade_it"
+      ]
+    },
+    {
+      "name": "the candle after the break is considered instead of the one before",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        for i in (index, index - 1)",
+      "new": "        for i in (index, index + 1)",
+      "expect_failing": [
+        "test_a_break_whose_previous_candle_displaced_is_displaced",
+        "test_the_candle_after_the_break_does_not_grade_it"
+      ]
+    },
+    {
+      "name": "direction ignored: any displacement candle grades the break",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        legs.displacement_direction.get(legs.open_times[i]) == direction",
+      "new": "        legs.open_times[i] in legs.displacement_direction",
+      "expect_failing": [
+        "test_a_displacement_against_the_break_does_not_grade_it"
+      ]
+    },
+    {
+      "name": "the leg scope is dropped: any break in the window can grade",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        if record.event_type != wanted or not start <= record.event_at <= end:",
+      "new": "        if record.event_type != wanted:",
+      "expect_failing": [
+        "test_a_displaced_break_outside_the_retraced_leg_does_not_grade_it"
+      ]
+    },
+    {
+      "name": "the oldest displaced break in the leg is named, not the newest",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        if best is None or record.event_at >= best.event_at:\n            best = record\n\n    return best\n\n\ndef _graded_displaced(",
+      "new": "        if best is None or record.event_at <= best.event_at:\n            best = record\n\n    return best\n\n\ndef _graded_displaced(",
+      "expect_failing": [
+        "test_the_newest_displaced_break_in_the_leg_is_named"
+      ]
+    },
+    {
+      "name": "F1's displaced evidence names the newest break instead of the one that earned it",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "                \"displaced\": displaced_record.event_key if displaced_record else None,",
+      "new": "                \"displaced\": bos_key,",
+      "expect_failing": [
+        "test_a_displaced_break_inside_the_retraced_leg_grades_it_beside_a_plain_one"
+      ]
+    },
+    {
+      "name": "A3 ignores the flag",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "                displaced_bos=displaced_break,",
+      "new": "                displaced_bos=True,",
+      "expect_failing": [
+        "test_a_break_inside_a_displaced_leg_on_plain_candles_is_plain"
+      ]
+    },
+    {
+      "name": "F1 ignores the flag",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "                    displaced=displaced_break,",
+      "new": "                    displaced=True,",
+      "expect_failing": [
+        "test_a_break_inside_a_displaced_leg_on_plain_candles_is_plain"
+      ]
+    },
+    {
+      "name": "a displacement's direction is mapped the wrong way round",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "                \"UP\" if detected.direction is DisplacementDirection.BULLISH else \"DOWN\"",
+      "new": "                \"DOWN\" if detected.direction is DisplacementDirection.BULLISH else \"UP\"",
+      "expect_failing": [
+        "test_a_displaced_break_classifies_as_a3",
+        "test_f1_pays_displacement_from_the_break_candle_not_from_mss_presence",
+        "test_a_break_whose_previous_candle_displaced_is_displaced"
+      ]
+    },
+    {
+      "name": "zones counted raw again (an OB stored twice is a stack)",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        matching_zones = _one_per_band(\n",
+      "new": "        matching_zones = (\n",
+      "expect_failing": [
+        "test_one_zone_recorded_twice_is_not_a_stack"
+      ]
+    },
+    {
+      "name": "dedup over-reaches: every same-polarity zone collapses",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        key = (str(zone.zone_type), zone.polarity, zone.band_low, zone.band_high)",
+      "new": "        key = (zone.polarity, zone.polarity, Decimal(0), Decimal(0))",
+      "expect_failing": [
+        "test_two_different_zones_on_price_are_still_a_stack"
+      ]
+    },
+    {
+      "name": "the weaker row of a duplicated band is kept",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        if held is None or (_zone_score(zone, 1), zone.created_at, zone.zone_id) > (",
+      "new": "        if held is None or (_zone_score(zone, 1), zone.created_at, zone.zone_id) < (",
+      "expect_failing": [
+        "test_the_stronger_row_of_a_duplicated_band_is_the_one_scored"
+      ]
+    }
+  ]
+}

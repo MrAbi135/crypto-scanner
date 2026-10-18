@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Roll the VM back from the 2026-10-12 build (#318 s6-ob-v9, #319, #320 off,
-# s8-confluence-v37) to e388e13 (release p1b-e388e13, s6-ob-v8, s8-confluence-v36).
+# s8-confluence-v37) -- or the 2026-10-18 build that adds #334 (s8-confluence-v38);
+# nothing here reads the running version -- to e388e13 (release p1b-e388e13,
+# s6-ob-v8, s8-confluence-v36).
 # Never run as part of a deploy; it exists so a bad deploy has a tested way back.
 #
 # Why a separate script: post_soak_deploy.sh cannot do this. Its step 0 runs

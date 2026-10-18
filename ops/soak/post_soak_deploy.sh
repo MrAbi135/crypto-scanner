@@ -7,7 +7,8 @@
 # which brings migration 025, and -- the 2026-10-12 batch -- #318 (s6-ob-v9,
 # order-block evidence read as of the deciding candle), #319 (one candle read
 # per pass, batched pool writes), #320 (engine shards, OFF) and the v37
-# marker. This runs the sequence with an assertion at
+# marker, and -- 2026-10-18 -- #334 (s8-confluence-v38, SLS v1.0.16: the
+# `displaced` grade on the retraced leg's own break). This runs the sequence with an assertion at
 # every step --
 # because the deploy days before it each lost hours to a step that "ran" and
 # did nothing: a patch whose replace matched nothing, a deploy that rebuilt
@@ -132,7 +133,10 @@ grep -qF 's6-ote-v7' backend/src/scanner/application/detection/ict_ote_replay.py
 grep -qF 's6-ob-v9' backend/src/scanner/application/detection/ict_ob_replay.py   || fail "#272 missing: ICT_OB_ALGO_VERSION is not s6-ob-v9 (evidence read as of the deciding candle)"
 grep -qF 's6-interaction-v6' backend/src/scanner/application/detection/ict_interaction_replay.py   || fail "#275 missing: ICT_INTERACTION_ALGO_VERSION is not s6-interaction-v6"
 grep -qF 's7-participation-v4' backend/src/scanner/application/detection/participation_replay.py   || fail "#273 missing: PARTICIPATION_ALGO_VERSION is not s7-participation-v4"
-grep -qF 's8-confluence-v37' backend/src/scanner/application/detection/confluence_replay.py   || fail "CONFLUENCE_ALGO_VERSION is not s8-confluence-v37 (the marker that ships with s6-ob-v9)"
+grep -qF 's8-confluence-v38' backend/src/scanner/application/detection/confluence_replay.py   || fail "CONFLUENCE_ALGO_VERSION is not s8-confluence-v38 (#334, SLS v1.0.16)"
+grep -qF 'def _graded_displaced' backend/src/scanner/application/detection/confluence_replay.py   || fail "#334 missing: displaced is not graded on the break's own candles"
+! grep -qF 'def _bos_inside' backend/src/scanner/application/detection/confluence_replay.py   || fail "#334 incomplete: the v24-v37 leg reading (_bos_inside) is still in the tree"
+grep -qF '### v1.0.16' docs/governance/SCANNER_LOGIC_SPECIFICATION.md   || fail "#334 missing: SLS v1.0.16 is not in the tree"
 grep -qF 'DEFAULT_SIGNAL_TIMEFRAMES' backend/src/scanner/application/detection/confluence_replay.py   || fail "signal gate missing: no fail-closed published-timeframe default"
 grep -qF 'def first_undecided_index' backend/src/scanner/application/detection/state.py   || fail "#272 missing: engines still re-decide the whole window"
 grep -qF 'CURRENT_EVENT_VERSIONS' backend/src/scanner/application/detection/event_versions.py   || fail "#274 missing: event reads are not pinned to the running versions"
@@ -200,7 +204,7 @@ pre_live_m5=$($PSQL -c "select count(*) from detection.signals s where s.timefra
 echo "   setups seen               : $pre_setups"
 echo "   signals published         : $pre_signals"
 echo "   of which on M5 or M15     : $pre_low_tf"
-echo "   M5 signals live right now : $pre_live_m5  (sealed under v36: same M5 rules as v37, they finish as sealed)"
+echo "   M5 signals live right now : $pre_live_m5  (sealed under v36: same M5 rules as v38, they finish as sealed)"
 
 # ---------------------------------------------------------------------------
 step "2b. Stamp the release with the commit actually being built"
@@ -331,7 +335,9 @@ docker exec scanner-dev-engine-1 grep -qF 's6-ote-v7' /app/src/scanner/applicati
 docker exec scanner-dev-engine-1 grep -qF 's6-ob-v9' /app/src/scanner/application/detection/ict_ob_replay.py   || fail "running engine: ICT_OB_ALGO_VERSION is not s6-ob-v9 (evidence read as of the deciding candle)"
 docker exec scanner-dev-engine-1 grep -qF 's6-interaction-v6' /app/src/scanner/application/detection/ict_interaction_replay.py   || fail "running engine: ICT_INTERACTION_ALGO_VERSION is not s6-interaction-v6"
 docker exec scanner-dev-engine-1 grep -qF 's7-participation-v4' /app/src/scanner/application/detection/participation_replay.py   || fail "running engine: PARTICIPATION_ALGO_VERSION is not s7-participation-v4"
-docker exec scanner-dev-engine-1 grep -qF 's8-confluence-v37' /app/src/scanner/application/detection/confluence_replay.py   || fail "running engine: CONFLUENCE_ALGO_VERSION is not s8-confluence-v37"
+docker exec scanner-dev-engine-1 grep -qF 's8-confluence-v38' /app/src/scanner/application/detection/confluence_replay.py   || fail "running engine: CONFLUENCE_ALGO_VERSION is not s8-confluence-v38"
+docker exec scanner-dev-engine-1 grep -qF 'def _graded_displaced' /app/src/scanner/application/detection/confluence_replay.py   || fail "running engine: #334's break-candle grade is absent"
+! docker exec scanner-dev-engine-1 grep -qF 'def _bos_inside' /app/src/scanner/application/detection/confluence_replay.py   || fail "running engine: still carries the v24-v37 leg reading"
 docker exec scanner-dev-engine-1 grep -qF 'def _known_by' /app/src/scanner/application/detection/ict_ob_replay.py   || fail "running engine: #318's OB evidence timing is absent"
 docker exec scanner-dev-engine-1 grep -qF 'candles = PassScopedCandles(' /app/src/scanner/runtime/wiring/detection.py   || fail "running engine: #319's per-pass candle read is absent"
 docker exec scanner-dev-engine-1 grep -qF 'def shard_of' /app/src/scanner/application/detection/shards.py   || fail "running engine: #320's shards module is absent"
@@ -418,20 +424,20 @@ cat <<NEXT
           -- all of them are grade B, and 10.1 pushes S and A only, so no
              Telegram alert is expected from them either.
 
-   3b. SLS v1.0.15 on the first NEW M5 signal (v37 -- the same M5 rules as v36,
+   3b. SLS v1.0.15 on the first NEW M5 signal (v38 -- the same M5 rules as v36,
        re-checked because the zones under them are now s6-ob-v9). Its levels are checked by
        hand, not by trusting the code that made them:
 
-        $PSQL -c "select signal_id, direction, entry_proximal, invalidation_level, ttl_candles, payload::jsonb -> 'invalidation' ->> 'rule' as rule, target_bands::jsonb -> 'ladder' as ladder from detection.signals where timeframe = 'M5' and algo_version = 's8-confluence-v37' order by published_at limit 3;"
+        $PSQL -c "select signal_id, direction, entry_proximal, invalidation_level, ttl_candles, payload::jsonb -> 'invalidation' ->> 'rule' as rule, target_bands::jsonb -> 'ladder' as ladder from detection.signals where timeframe = 'M5' and algo_version = 's8-confluence-v38' order by published_at limit 3;"
           -- want: rule risk_stop; invalidation = proximal x 0.99 (UP) or
              x 1.01 (DOWN); ttl_candles 48; ladder {start_r 2, step_r 1,
-             unbounded true}. Any M15/H1/H4 row under v37 must still have
+             unbounded true}. Any M15/H1/H4 row under v38 must still have
              NO ladder and a zone/sweep rule.
           -- the $pre_live_m5 M5 signal(s) live at deploy keep their sealed
              pool rule and TTL 24 -- correct, not a fault. Until they end, the
              feed sorts them as if their TTL were 48 (display only, <= 2h).
 
-        $PSQL -c "select engine, version, param_set_version from detection.algo_versions where version = 's8-confluence-v37';"
+        $PSQL -c "select engine, version, param_set_version from detection.algo_versions where version = 's8-confluence-v38';"
           -- want: one row, param set 2026.10.10.1, registered at first boot.
 
    3c. s6-ob-v9's first pass on every context decides its whole window, so
