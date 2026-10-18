@@ -1,5 +1,5 @@
 {
-  "description": "s8-confluence-v38 (SLS v1.0.16): `displaced` is SLS 3.5's grade of a break inside the impulse leg the A3 pullback retraces, on the break's own candles, in the break's direction, read once for F1's +18 and A3. Each mutation puts back one way the grade could drift, including the v24-v37 leg reading. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/displaced_break_candle.json",
+  "description": "s8-confluence-v38 (SLS v1.0.16): `displaced` is SLS 3.5's grade of a break inside the impulse leg the A3 pullback retraces, on the break's own candles, in the break's direction, read once for F1's +18 and A3. Each mutation puts back one way the grade could drift, including the v24-v37 leg reading. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/displaced_break_candle.json Also: SLS 5.1 Edge (3) -- one zone per (type, polarity, band) before stack counting.",
   "pytest": [
     "tests/unit/application/detection/test_confluence_replay.py"
   ],
@@ -96,6 +96,33 @@
         "test_a_displaced_break_classifies_as_a3",
         "test_f1_pays_displacement_from_the_break_candle_not_from_mss_presence",
         "test_a_break_whose_previous_candle_displaced_is_displaced"
+      ]
+    },
+    {
+      "name": "zones counted raw again (an OB stored twice is a stack)",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        matching_zones = _one_per_band(\n",
+      "new": "        matching_zones = (\n",
+      "expect_failing": [
+        "test_one_zone_recorded_twice_is_not_a_stack"
+      ]
+    },
+    {
+      "name": "dedup over-reaches: every same-polarity zone collapses",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        key = (str(zone.zone_type), zone.polarity, zone.band_low, zone.band_high)",
+      "new": "        key = (zone.polarity, zone.polarity, Decimal(0), Decimal(0))",
+      "expect_failing": [
+        "test_two_different_zones_on_price_are_still_a_stack"
+      ]
+    },
+    {
+      "name": "the weaker row of a duplicated band is kept",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        if held is None or (_zone_score(zone, 1), zone.created_at, zone.zone_id) > (",
+      "new": "        if held is None or (_zone_score(zone, 1), zone.created_at, zone.zone_id) < (",
+      "expect_failing": [
+        "test_the_stronger_row_of_a_duplicated_band_is_the_one_scored"
       ]
     }
   ]

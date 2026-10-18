@@ -687,11 +687,13 @@ class ConfluenceReplayService:
         # on real BTCUSDT H1, 9 BULLISH and 16 BEARISH zones, and the gate could
         # not fail. It also meant DOWN reached grade B with its nearest zone
         # 302.7 away, five times the 60.97 the tolerance allowed.
-        matching_zones = [
-            zone
-            for zone in live_zones
-            if zone.polarity == polarity and _near_price(zone, price, atr)
-        ]
+        matching_zones = _one_per_band(
+            [
+                zone
+                for zone in live_zones
+                if zone.polarity == polarity and _near_price(zone, price, atr)
+            ]
+        )
 
         sweeps = [
             _Sweep(r, reclaimed_pools=reclaimed_pools)
@@ -2962,6 +2964,40 @@ def _zone_score(
     and the chosen zone is scored with it.
     """
     return _zone_factor(zone, stack_depth).score
+
+
+def _one_per_band(zones: list[IctZoneRecord]) -> list[IctZoneRecord]:
+    """One zone per (type, polarity, band): §5.1 Edge (3) and §5.4 Edge (2).
+
+    "The confluence engine deduplicates by awarding zone-confluence once per
+    price band." The OB engine records one row per qualifying displacement, so
+    one candidate candle followed by two displacement candles inside
+    `ob_window` is stored twice -- same band, same created_at, an OB_B and an
+    OB_A -- and each row breeds its own breaker. Counted raw, that one physical
+    zone was a "stack" of two: F3's +15 stack term and §8.5's +5 zone_stack
+    for nothing (measured on the VM 2026-10-18: 1,456 same-version groups,
+    3,059 rows; BNBUSDT M15's breaker 06f2adfc/b1a27b18 among them).
+
+    Exact duplicates only: zones of different types (an OB inside an FVG) are
+    the stack §8.5 pays for, and they keep counting. The strongest row of a
+    band is kept.
+    """
+    best: dict[tuple[str, str, Decimal, Decimal], IctZoneRecord] = {}
+
+    for zone in zones:
+        key = (str(zone.zone_type), zone.polarity, zone.band_low, zone.band_high)
+        held = best.get(key)
+
+        if held is None or (_zone_score(zone, 1), zone.created_at, zone.zone_id) > (
+            _zone_score(held, 1),
+            held.created_at,
+            held.zone_id,
+        ):
+            best[key] = zone
+
+    kept = {id(zone) for zone in best.values()}
+
+    return [zone for zone in zones if id(zone) in kept]
 
 
 def _synergies(

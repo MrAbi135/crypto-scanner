@@ -762,6 +762,70 @@ async def test_the_record_carries_the_gate_results_and_the_attribution_tree() ->
     assert [item["code"] for item in f4] == ["volume_factor_score"]
 
 
+async def _stack_of(zones: list) -> tuple[set[str], list[str]]:
+    """F3's codes and the applied adjustment codes for the UP candidate over `zones`."""
+    setups = FakeSetups()
+    setup = bullish_setup()
+    setup["zones"] = zones
+    svc, _ = service(**setup, setups=setups)
+    up = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
+    row = next(r for r in setups.rows.values() if r.direction == "UP")
+    applied = [a["code"] for a in json.loads(row.adjustments)["applied"]]
+    return {c.code for c in up.attribution["F3"]}, applied
+
+
+@pytest.mark.asyncio
+async def test_one_zone_recorded_twice_is_not_a_stack() -> None:
+    """SLS 5.1 Edge (3): zone-confluence is awarded once per price band.
+
+    The OB engine stores one row per qualifying displacement, so one candidate
+    can sit in the table twice -- same type, polarity, band and created_at, an
+    OB_B and an OB_A. Counted raw that was a stack of two: F3's +15 and the
+    +5 zone_stack synergy for one physical zone.
+    """
+    same = dict(band_low=LAST_CLOSE - 1, band_high=LAST_CLOSE + 1, confirmed_index=5)
+    f3, applied = await _stack_of(
+        [zone("twin-a", grade="OB_A", **same), zone("twin-b", grade="OB_B", **same)]
+    )
+
+    assert "stack" not in f3
+    assert "zone_stack" not in applied
+
+
+@pytest.mark.asyncio
+async def test_two_different_zones_on_price_are_still_a_stack() -> None:
+    """The dedup is for duplicates only: an OB inside an FVG is the stack 8.5 pays for."""
+    f3, applied = await _stack_of(
+        [
+            zone("ob", zone_type="OB", grade="OB_A"),
+            zone(
+                "fvg",
+                zone_type="FVG",
+                grade="FVG",
+                state="OPEN",
+                band_low=LAST_CLOSE - 2,
+                band_high=LAST_CLOSE + 2,
+            ),
+        ]
+    )
+
+    assert "stack" in f3
+    assert "zone_stack" in applied
+
+
+@pytest.mark.asyncio
+async def test_the_stronger_row_of_a_duplicated_band_is_the_one_scored() -> None:
+    """Of the OB_A/OB_B twins, the OB_A row is kept, so the zone is scored at its best grade."""
+    same = dict(band_low=LAST_CLOSE - 1, band_high=LAST_CLOSE + 1, confirmed_index=5)
+    setups = FakeSetups()
+    setup = bullish_setup()
+    setup["zones"] = [zone("twin-b", grade="OB_B", **same), zone("twin-a", grade="OB_A", **same)]
+    svc, _ = service(**setup, setups=setups)
+    up = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
+
+    assert {c.evidence_id for c in up.attribution["F3"]} == {"twin-a"}
+
+
 @pytest.mark.asyncio
 async def test_a_gate_passing_candidate_is_stored_in_t16() -> None:
     """DDD T16: "every confluence candidate that passed gates".
