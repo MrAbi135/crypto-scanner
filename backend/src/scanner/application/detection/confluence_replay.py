@@ -1045,8 +1045,9 @@ class ConfluenceReplayService:
                 breaker_first_retest_respected=breaker_history.first_retest_respected,
                 entry_grade_confirmation=breaker_history.confirmed,
                 trend_active=trend_following,
-                # §8.6 A3's "displaced BOS" is §3.5's grade of the attributed
-                # break -- the same flag F1 pays its 18 on.
+                # §8.6 A3's "displaced BOS" is §3.5's grade of a break inside
+                # the leg this pullback retraces (§8.3.1's scored break) -- the
+                # same result F1 pays its 18 on.
                 displaced_bos=displaced_break,
                 # G4 already established price is at this zone.
                 retraced_into_zone=True,
