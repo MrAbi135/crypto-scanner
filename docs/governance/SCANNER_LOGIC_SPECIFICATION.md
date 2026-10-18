@@ -1233,6 +1233,16 @@ break is its displacement candle and sits inside its impulse leg.
 
 **Also clarified (§12.3, no behaviour change).** The candle that first touches the entry only activates the signal, and on M5 a stop moved by a rung is live from the next candle. Both are what the lifecycle code does (`domain/lifecycle/state.py`: `observe`, `walk_ladder`); §12.3 did not say so. An independent walk of the 2026-10-10 soak against Binance candles matched the engine on 33/33 outcomes, timing included, only under these two rules (30/33 without them).
 
+**Also brought into line (§5.1 Edge (3), §5.4 Edge (2); no clause changes).**
+Confluence now awards zone-confluence once per price band. It counted rows,
+while the OB engine stores one physical zone once per qualifying displacement
+(an OB_B and an OB_A for one candidate, each breeding a breaker): 1,456
+same-version duplicate groups and 3,059 rows on the VM on 2026-10-18. Each such
+duplicate paid F3's stack term and §8.5's zone_stack for one zone. Exact
+duplicates (same type, polarity and band) now count once, and the strongest row
+is kept. Which displacement's grade an OB should carry when two qualify is
+**not** decided here; the OB engine is unchanged.
+
 **Implementation:** `s8-confluence-v38`.
 
 ### v1.0.15 — 2026-10-10
