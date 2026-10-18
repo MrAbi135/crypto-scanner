@@ -360,8 +360,12 @@ def terminal_transitions(signal_ids: list[str]) -> list[dict[str, str]]:
                t.signal_id,
                t.to_state,
                t.at_candle_open_time,
-               t.trigger_evidence
+               t.trigger_evidence,
+               s.symbol,
+               s.timeframe,
+               s.direction
           from detection.signal_transitions t
+          join detection.signals s on s.signal_id = t.signal_id
          where t.signal_id in ({quoted})
            and t.to_state in ({states})
            and t.refresh = false
@@ -369,7 +373,16 @@ def terminal_transitions(signal_ids: list[str]) -> list[dict[str, str]]:
         """
     )
 
-    fields = ("transition_id", "signal_id", "to_state", "at", "trigger_evidence")
+    fields = (
+        "transition_id",
+        "signal_id",
+        "to_state",
+        "at",
+        "trigger_evidence",
+        "symbol",
+        "timeframe",
+        "direction",
+    )
 
     return [dict(zip(fields, row)) for row in rows]
 
@@ -669,44 +682,206 @@ def _shown(text: str) -> str:
         return text
 
 
-def format_signal(row: dict[str, str]) -> str:
-    tags = ""
+# SLS §8.6's names, so a trader reads the setup rather than a code.
+ARCHETYPE_NAMES = {
+    "A1": "Sweep Reversal",
+    "A2": "Breaker Retest",
+    "A3": "Continuation Pullback",
+    "A4": "FVG Continuation",
+    "A5": "Range Liquidity Play",
+}
+TF_MINUTES = {"M5": 5, "M15": 15, "H1": 60, "H4": 240, "D1": 1440}
+PKT = timedelta(hours=5)
+RULE = "━━━━━━━━━━━━━━━━━━"
 
-    if "wash_risk" in row["condition_tags"]:
-        tags = "\n⚠ wash_risk"
+OUTCOME_HEADLINES = {
+    "SUCCESS": "✅ TARGET HIT",
+    "FAILED": "❌ STOPPED OUT",
+    "EXPIRED_ACTIVE": "⌛ EXPIRED IN TRADE",
+    "EXPIRED_UNTOUCHED": "⌛ EXPIRED, ENTRY NEVER REACHED",
+    "INVALIDATED_EARLY": "🚫 CANCELLED BEFORE ENTRY",
+    "CLOSED_FLAT": "➖ CLOSED FLAT, STOP AT ENTRY",
+}
+
+
+def _side(direction: str) -> str:
+    if direction == "UP":
+        return "🟢 LONG"
+    if direction == "DOWN":
+        return "🔴 SHORT"
+    return direction
+
+
+def _parse_time(text: str) -> datetime | None:
+    """psql's timestamptz text ('2026-10-17 13:15:00+00') as an aware datetime."""
+    value = (text or "").strip().replace(" ", "T", 1)
+
+    if value.endswith("+00"):
+        value += ":00"
+
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _clock(moment: datetime) -> str:
+    utc = moment.astimezone(timezone.utc)
+    return f"{utc:%d %b %H:%M} UTC · {utc + PKT:%H:%M} PKT"
+
+
+def _signal_time(row: dict[str, str]) -> str:
+    """When the signal became actionable: its candle's CLOSE, not `published_at`.
+
+    `published_at` is the candle's OPEN time (see `dispatch_lifetime_seconds`);
+    the setup was decided when that candle closed one period later.
+    """
+    opened = _parse_time(row.get("published_at", ""))
+    minutes = TF_MINUTES.get(row.get("timeframe", ""))
+
+    if opened is None or minutes is None:
+        return row.get("published_at", "")
+
+    return _clock(opened + timedelta(minutes=minutes))
+
+
+def _valid_for(row: dict[str, str]) -> str:
+    try:
+        candles = int(row["ttl_candles"])
+    except (KeyError, ValueError):
+        return ""
+
+    minutes = TF_MINUTES.get(row.get("timeframe", ""))
+
+    if minutes is None:
+        return f"{candles} candles"
+
+    hours = candles * minutes / 60
+    span = f"{hours:g} h" if hours < 48 else f"{hours / 24:g} days"
+
+    return f"{candles} candles (~{span})"
+
+
+def _pool_target(row: dict[str, str]) -> tuple[Decimal, Decimal] | None:
+    primary = _json_object(row.get("target_bands")).get("primary")
+
+    if not isinstance(primary, dict):
+        return None
+
+    try:
+        return Decimal(str(primary["low"])), Decimal(str(primary["high"]))
+    except (KeyError, InvalidOperation):
+        return None
+
+
+def _risk_reward(row: dict[str, str], target: tuple[Decimal, Decimal]) -> str | None:
+    """Reward : risk as §12.4 measures it -- R from the entry mid, target on touch."""
+    try:
+        proximal = Decimal(row["entry_proximal"])
+        distal = Decimal(row["entry_distal"])
+        stop = Decimal(row["invalidation"])
+    except (KeyError, InvalidOperation):
+        return None
+
+    mid = (proximal + distal) / 2
+    risk = abs(mid - stop)
+    up = row.get("direction") == "UP"
+    near = target[0] if up else target[1]
+    reward = (near - mid) if up else (mid - near)
+
+    if risk <= 0 or reward <= 0:
+        return None
+
+    return f"1 : {reward / risk:.1f}"
+
+
+def _sort_key(text: str) -> tuple[int, Decimal]:
+    try:
+        return (0, Decimal(text))
+    except (InvalidOperation, TypeError, ValueError):
+        return (1, Decimal(0))
+
+
+def format_signal(row: dict[str, str]) -> str:
+    """The alert a trader reads: side, levels, risk, setup, time.
+
+    Plain text, no parse mode: a formatting error in Telegram's markup rejects
+    the whole message, and an alert lost to styling is the one failure this
+    file exists to prevent.
+    """
+    direction = row.get("direction", "")
+    lower, upper = sorted(
+        (_shown(row["entry_proximal"]), _shown(row["entry_distal"])), key=_sort_key
+    )
+    closes = "candle close below" if direction == "UP" else "candle close above"
+    lines = [f"{_side(direction)} · {row['symbol']} · {row['timeframe']}", RULE]
 
     ladder = ladder_of(row)
 
     if ladder is None:
-        exit_lines = f"invalidation {_shown(row['invalidation'])} (close beyond, not touch)\n"
+        lines.append(f"📍 Entry zone: {lower} – {upper}")
+        lines.append(f"🛑 Stop: {_shown(row['invalidation'])} ({closes})")
+        target = _pool_target(row)
+
+        if target is not None:
+            low, high = (_plain(v) for v in target)
+            lines.append(f"🎯 Target: {low if low == high else f'{low} – {high}'}")
+            ratio = _risk_reward(row, target)
+
+            if ratio:
+                lines.append(f"⚖️ Risk : Reward = {ratio}")
     else:
-        # SLS v1.0.15 §12.3: on a laddered signal the stop is a TOUCH, and it
-        # trails. "close beyond, not touch" -- the pool-exit rule -- would tell
-        # the trader the opposite of what the engine does.
+        # SLS v1.0.15 §12.3: on a laddered signal the entry is the zone's
+        # proximal edge, the stop is a TOUCH, and it trails behind the TPs.
+        lines.append(f"📍 Entry: {_shown(row['entry_proximal'])} (zone {lower} – {upper})")
+        lines.append(f"🛑 Stop: {_shown(row['invalidation'])} (on touch)")
+
         try:
-            rungs = " · ".join(
-                f"TP{n} {_plain(price)} ({_plain(r)}R)" for n, r, price in rung_prices(row, ladder)
-            )
+            rungs = rung_prices(row, ladder)
         except (KeyError, InvalidOperation):
-            rungs = "TP prices unavailable -- see the dashboard"
+            rungs = []
 
-        exit_lines = (
-            f"stop {_shown(row['invalidation'])} (touch, not close)\n"
-            f"{rungs} · no cap\n"
-            "stop moves to entry at TP1, then trails one TP behind\n"
-        )
+        if rungs:
+            for n, r, price in rungs:
+                lines.append(f"🎯 TP{n}: {_plain(price)} ({_plain(r)}R)")
+            lines.append("🔁 At TP1 the stop moves to entry, then trails one TP behind · no cap")
+        else:
+            lines.append("🎯 TP prices unavailable -- see the dashboard")
 
-    return (
-        f"{row['symbol']} {row['timeframe']} {row['direction']}\n"
-        f"{row['archetype']} · grade {row['grade']} · confidence {_shown(row['confidence'])}\n"
-        f"entry {_shown(row['entry_proximal'])} → {_shown(row['entry_distal'])}\n"
-        f"{exit_lines}"
-        f"published {row['published_at']}{tags}"
-    )
+    lines.append(RULE)
+    code = row.get("archetype", "")
+    name = ARCHETYPE_NAMES.get(code, "")
+    lines.append(f"📐 Setup: {code}{f' · {name}' if name else ''}")
+    lines.append(f"⭐ Grade {row['grade']} · Confidence {_shown(row['confidence'])}/100")
+
+    valid = _valid_for(row)
+
+    if valid:
+        lines.append(f"⏳ Valid for: {valid}")
+
+    lines.append(f"🕒 {_signal_time(row)}")
+
+    if "wash_risk" in row.get("condition_tags", ""):
+        lines.append("⚠️ Wash-trading risk flagged on this pair")
+
+    lines.append("ℹ️ Not financial advice")
+
+    return "\n".join(lines)
 
 
 def format_transition(row: dict[str, str]) -> str:
-    message = f"{row['signal_id'][:12]}… → {row['to_state']}\nat {row['at']}"
+    """The close-the-loop message: what happened to a signal already alerted."""
+    state = row["to_state"]
+    headline = OUTCOME_HEADLINES.get(state, state)
+    parts = [row.get("symbol", ""), row.get("timeframe", "")]
+
+    if row.get("direction"):
+        parts.append(_side(row["direction"]))
+
+    who = " · ".join(part for part in parts if part)
+    lines = [f"{headline}{f' · {who}' if who else ''}", RULE]
 
     # SLS v1.0.15: a laddered signal books what its trailing stop locked in,
     # so SUCCESS alone does not say whether that was 2R or 6R.
@@ -714,11 +889,16 @@ def format_transition(row: dict[str, str]) -> str:
 
     if realised not in (None, ""):
         try:
-            message += f"\nrealised {_plain(Decimal(str(realised)))}R"
+            booked = Decimal(str(realised))
+            lines.append(f"💰 Result: {'+' if booked > 0 else ''}{_plain(booked)}R")
         except InvalidOperation:
             pass
 
-    return message
+    moment = _parse_time(row.get("at", ""))
+    lines.append(f"🕒 {_clock(moment) if moment else row.get('at', '')}")
+    lines.append(f"🔖 Signal {row['signal_id'][:12]}…")
+
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------

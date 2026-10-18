@@ -1,0 +1,83 @@
+{
+  "description": "The professional Telegram layout (owner, 2026-10-18): each mutation breaks one thing a trader reads -- the signal's time, its side, its stop rule, its risk:reward, or which signal a close-the-loop message names. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/notifier_pro_format.json",
+  "pytest": [
+    "tests/unit/test_interim_notifier_behaviour.py"
+  ],
+  "mutations": [
+    {
+      "name": "the signal time is the candle OPEN, a period before the setup existed",
+      "file": "ops/notify/notify_signals.py",
+      "old": "    return _clock(opened + timedelta(minutes=minutes))",
+      "new": "    return _clock(opened)",
+      "expect_failing": [
+        "test_the_signal_time_is_its_candle_close_in_utc_and_pkt"
+      ]
+    },
+    {
+      "name": "PKT is printed as UTC",
+      "file": "ops/notify/notify_signals.py",
+      "old": "PKT = timedelta(hours=5)",
+      "new": "PKT = timedelta(hours=0)",
+      "expect_failing": [
+        "test_the_signal_time_is_its_candle_close_in_utc_and_pkt",
+        "test_the_close_the_loop_message_names_the_signal_it_closes"
+      ]
+    },
+    {
+      "name": "a short is told its stop closes below",
+      "file": "ops/notify/notify_signals.py",
+      "old": "closes = \"candle close below\" if direction == \"UP\" else \"candle close above\"",
+      "new": "closes = \"candle close below\"",
+      "expect_failing": [
+        "test_a_short_reads_short_and_its_stop_closes_above"
+      ]
+    },
+    {
+      "name": "risk is measured from the proximal edge instead of the zone mid",
+      "file": "ops/notify/notify_signals.py",
+      "old": "    mid = (proximal + distal) / 2",
+      "new": "    mid = proximal",
+      "expect_failing": [
+        "test_a_pool_exit_signal_states_its_side_target_and_risk_reward",
+        "test_a_short_reads_short_and_its_stop_closes_above"
+      ]
+    },
+    {
+      "name": "a short's reward runs to the target's far edge",
+      "file": "ops/notify/notify_signals.py",
+      "old": "    near = target[0] if up else target[1]",
+      "new": "    near = target[0]",
+      "expect_failing": [
+        "test_a_short_reads_short_and_its_stop_closes_above"
+      ]
+    },
+    {
+      "name": "a long is announced as a short",
+      "file": "ops/notify/notify_signals.py",
+      "old": "    if direction == \"UP\":\n        return \"🟢 LONG\"",
+      "new": "    if direction == \"UP\":\n        return \"🔴 SHORT\"",
+      "expect_failing": [
+        "test_a_pool_exit_signal_states_its_side_target_and_risk_reward"
+      ]
+    },
+    {
+      "name": "the close-the-loop query no longer reads which signal it closes",
+      "file": "ops/notify/notify_signals.py",
+      "old": "          join detection.signals s on s.signal_id = t.signal_id\n",
+      "new": "",
+      "expect_failing": [
+        "test_the_transition_query_reads_the_signal_identity"
+      ]
+    },
+    {
+      "name": "an outcome loses its headline and is announced by its raw code",
+      "file": "ops/notify/notify_signals.py",
+      "old": "    \"FAILED\": \"❌ STOPPED OUT\",\n",
+      "new": "",
+      "expect_failing": [
+        "test_every_terminal_state_has_a_headline",
+        "test_the_close_the_loop_message_names_the_signal_it_closes"
+      ]
+    }
+  ]
+}
