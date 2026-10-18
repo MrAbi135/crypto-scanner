@@ -1209,6 +1209,14 @@ against the old leg reading, all read-only:
 | (B) any displaced BOS in the window | 0 / 0 / 0 | 1 |
 | **(C) displaced BOS inside the retraced impulse leg — chosen** | 28 / 9 / 1 | 8 (3 measured, 5 fallback unknown) |
 
+**Confirmed by running the engine** (`s8-confluence-v38` against v37, local
+replays of the production pipeline): eq2 moved exactly as predicted, 28 lose +18
+/ 9 lose A3 / 1 signal lost. Of the 16 soak signals that the v37 replay
+reproduces, 14 still publish, and the 2 that do not are exactly the two the
+read-only reading predicted (DOGEUSDT M5 10-14 02:15, BTCUSDT M5 10-16 10:05).
+Both have `displaced_bos` as their only unmet A3 link and no fallback archetype.
+The engine created no new signals.
+
 (B) was rejected because it lets a break up to 436 candles old lend its grade to
 a new one. (A) was rejected because it strips the grade from a continuation
 whose displaced break sits earlier in the same move. (C) reads §8.7's sequence:
