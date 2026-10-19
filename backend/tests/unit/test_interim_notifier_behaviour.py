@@ -151,7 +151,8 @@ def test_the_first_signal_after_a_cold_start_is_not_swallowed(notifier, monkeypa
 
 
 def test_grade_and_tier_caps_are_applied_through_main(notifier, monkeypatch) -> None:
-    """§10.1, driven the same way: B never pushes and an ineligible tier never does."""
+    """§10.1, driven the same way: B pushes since v1.0.17, a grade that no
+    published signal carries never does, and an ineligible tier never does."""
 
     _offline(notifier, monkeypatch, [])
     notifier.main()
@@ -161,6 +162,7 @@ def test_grade_and_tier_caps_are_applied_through_main(notifier, monkeypatch) -> 
         monkeypatch,
         [
             _signal("SIG_GRADE_B", grade="B"),
+            _signal("SIG_GRADE_X", grade="C"),
             _signal("SIG_INELIGIBLE", tier="INELIGIBLE"),
             _signal("SIG_GOOD"),
         ],
@@ -169,7 +171,9 @@ def test_grade_and_tier_caps_are_applied_through_main(notifier, monkeypatch) -> 
 
     lines = notifier.LOG.read_text(encoding="utf-8")
 
-    assert "suppressed grade=B" in lines
+    assert "DRY RUN would send signal SIG_GRADE_B" in lines
+    assert "suppressed grade=B" not in lines
+    assert "suppressed grade=C" in lines
     assert "suppressed tier=INELIGIBLE" in lines
     assert "DRY RUN would send signal SIG_GOOD" in lines
 

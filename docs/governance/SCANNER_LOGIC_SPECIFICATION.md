@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.15
-**Ratified:** 2026-07-12 · **Last amended:** 2026-10-18 (v1.0.16; see Amendment History)
+**Version:** 1.0.17
+**Ratified:** 2026-07-12 · **Last amended:** 2026-10-19 (v1.0.17; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -937,7 +937,7 @@ Alerts spend user attention — the scarcest resource in the system. The engine 
 |---|---|---|
 | **High** | Grade S, archetype A1/A2/A5, TF ≥ H1, Tier 1–2 symbol | Immediate push (Telegram v1) |
 | **Medium** | Grade A any archetype, or Grade S on M15/A3/A4, Tier 1–3 | Push, batchable ≤ 60 s |
-| **Low** | Grade B | No push; dashboard feed + optional digest |
+| **Low** | Grade B, Tier 1–3 | Push (Telegram v1) and dashboard feed (v1.0.17) |
 
 User filters may *narrow* eligibility (symbols, TFs, archetypes, categories) but never widen beyond these caps. `wash_risk` symbols cap at Medium (§6.6).
 
@@ -1185,6 +1185,32 @@ Every parameter change increments `param_set_version` and requires golden-datase
 ---
 
 ## Amendment History
+
+### v1.0.17 — 2026-10-19
+
+**§10.1: grade B pushes. The Low row now reads "Push (Telegram v1) and
+dashboard feed", capped at Tier 1–3 like Medium.**
+
+**Why.** It is the owner's ruling (2026-10-19: "mujhy teeno grads ky signals
+chaiye"). Every signal published since 2026-09-07 is grade B, so under the old
+row the phone never received one. The rest of §10 is unchanged: the daily cap
+(`P.alert.user_daily_cap = 25`), `wash_risk` capped at Medium, honest
+suppression, and the §10.3 close-the-loop message for a pushed signal.
+
+**What the owner was shown before ruling** (live database, read-only,
+2026-10-19). Grade B's record by the engine's own §12 states: 82 signals, 13
+`SUCCESS`, 42 `FAILED`, 20 `EXPIRED_ACTIVE`, 6 `INVALIDATED_EARLY`, 1
+`EXPIRED_UNTOUCHED`. Grade A: 2 signals, both `FAILED`. No grade S has ever
+published. These are lifecycle labels, not returns: §12.2's target is a touch
+and its invalidation is a close. Volume: about 5 grade B signals a day over the
+last 14 days, 11 at most, so the cap of 25 does not bind.
+
+**Header erratum.** v1.0.16 updated "Last amended" but left the Version line at
+1.0.15. This revision corrects it.
+
+**Code.** `ops/notify/notify_signals.py` `PUSH_GRADES` is S, A and B. A B signal
+that the ledger already marked `suppressed-grade` stays decided and is not sent
+late. No engine, scoring or algo-version change.
 
 ### v1.0.16 — 2026-10-18
 

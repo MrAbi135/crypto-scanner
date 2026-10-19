@@ -26,7 +26,8 @@ What it does implement, because skipping these would make it lie:
 * Only signals the ledger has not already decided, scanned over a bounded
   `LOOKBACK`. Freshness at dispatch is a TTL test, not a window test -- see
   `LOOKBACK` for the measurement showing why a window could never be one.
-* Only grades S and A. §10.1 puts grade B on the dashboard, never on a push.
+* Only grades S, A and B -- every grade a published signal can carry. §10.1
+  pushed S and A only until v1.0.17 (owner, 2026-10-19), which pushes B too.
 * Only tiers 1–3, which is §10.1's cap. Two symbols in the scanned set are
   INELIGIBLE (LISTAUSDT, LITEBUSDT — they are there to prove G1b's
   unselected-symbol criterion) and must never push.
@@ -121,9 +122,11 @@ TIMEFRAME_SECONDS = {
 # about one period old by the paragraph above.
 TTL_FALLBACK_CANDLES = 2
 
-# §10.1: High is grade S, Medium is grade A, and "Low | Grade B | No push;
-# dashboard feed + optional digest".
-PUSH_GRADES = frozenset({"S", "A"})
+# §10.1 (v1.0.17): High is grade S, Medium is grade A, Low is grade B, and all
+# three push. Until v1.0.17 Low read "No push; dashboard feed + optional
+# digest"; the owner ruled on 2026-10-19 that B reaches Telegram as well. A
+# published signal has no other grade, so this rejects only a malformed row.
+PUSH_GRADES = frozenset({"S", "A", "B"})
 
 # §10.1 again: High is "Tier 1-2", Medium is "Tier 1-3". Nothing pushes above
 # tier 3. Read live rather than hardcoded because tiers move — the daily
