@@ -659,8 +659,7 @@ def test_the_booked_r_is_shown_to_two_places(notifier) -> None:
         "direction": "DOWN",
     }
 
-    assert "💰 Result: -0.3R
-" in notifier.format_transition(row)
+    assert "💰 Result: -0.3R\n" in notifier.format_transition(row)
 
 
 def test_an_expiry_in_trade_names_its_r_as_open_not_booked(notifier) -> None:
@@ -677,8 +676,7 @@ def test_an_expiry_in_trade_names_its_r_as_open_not_booked(notifier) -> None:
 
     text = notifier.format_transition(row)
 
-    assert "💰 Open at expiry: +0.01R
-" in text
+    assert "💰 Open at expiry: +0.01R\n" in text
     assert "Result" not in text
 
 
