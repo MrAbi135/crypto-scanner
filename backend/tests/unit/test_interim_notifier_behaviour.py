@@ -646,6 +646,42 @@ def test_wash_risk_is_still_flagged(notifier) -> None:
     assert "⚠️ Wash-trading risk flagged on this pair" in notifier.format_signal(row)
 
 
+def test_the_booked_r_is_shown_to_two_places(notifier) -> None:
+    """2026-10-21: the phone showed "+0.01449065352847413418345167367R"."""
+    row = {
+        "transition_id": "t-4",
+        "signal_id": "SIG_P",
+        "to_state": "FAILED",
+        "at": "2026-10-21 07:35:00+00",
+        "trigger_evidence": '{"realised_r":"-0.3021148036253776435045317221"}',
+        "symbol": "TRXUSDT",
+        "timeframe": "M5",
+        "direction": "DOWN",
+    }
+
+    assert "💰 Result: -0.3R
+" in notifier.format_transition(row)
+
+
+def test_an_expiry_in_trade_names_its_r_as_open_not_booked(notifier) -> None:
+    row = {
+        "transition_id": "t-5",
+        "signal_id": "SIG_P",
+        "to_state": "EXPIRED_ACTIVE",
+        "at": "2026-10-21 07:35:00+00",
+        "trigger_evidence": '{"realised_r":"0.01449065352847413418345167367"}',
+        "symbol": "TRXUSDT",
+        "timeframe": "M5",
+        "direction": "DOWN",
+    }
+
+    text = notifier.format_transition(row)
+
+    assert "💰 Open at expiry: +0.01R
+" in text
+    assert "Result" not in text
+
+
 def test_the_close_the_loop_message_names_the_signal_it_closes(notifier) -> None:
     row = {
         "transition_id": "t-3",
