@@ -1,0 +1,27 @@
+{
+  "description": "The close-the-loop R (2026-10-23): shown to two places, and an EXPIRED_ACTIVE's open R is not called a result. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/notifier_r_display.json",
+  "pytest": [
+    "tests/unit/test_interim_notifier_behaviour.py"
+  ],
+  "mutations": [
+    {
+      "name": "the booked R is printed with every digit realised_r carries",
+      "file": "ops/notify/notify_signals.py",
+      "old": "            booked = Decimal(str(realised)).quantize(Decimal(\"0.01\"))",
+      "new": "            booked = Decimal(str(realised))",
+      "expect_failing": [
+        "test_the_booked_r_is_shown_to_two_places",
+        "test_an_expiry_in_trade_names_its_r_as_open_not_booked"
+      ]
+    },
+    {
+      "name": "an expiry in trade announces its open R as a result",
+      "file": "ops/notify/notify_signals.py",
+      "old": "            label = \"Open at expiry\" if state == \"EXPIRED_ACTIVE\" else \"Result\"",
+      "new": "            label = \"Result\"",
+      "expect_failing": [
+        "test_an_expiry_in_trade_names_its_r_as_open_not_booked"
+      ]
+    }
+  ]
+}

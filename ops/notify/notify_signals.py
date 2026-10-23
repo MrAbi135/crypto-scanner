@@ -892,8 +892,14 @@ def format_transition(row: dict[str, str]) -> str:
 
     if realised not in (None, ""):
         try:
-            booked = Decimal(str(realised))
-            lines.append(f"💰 Result: {'+' if booked > 0 else ''}{_plain(booked)}R")
+            # Two places: realised_r is a ratio of prices and arrives with up
+            # to 28 digits (2026-10-21: "+0.01449065352847413418345167367R"
+            # reached the phone).
+            booked = Decimal(str(realised)).quantize(Decimal("0.01"))
+            # EXPIRED_ACTIVE's R is the open R when the TTL ran out, not one
+            # a stop or target booked, so it must not read as a result.
+            label = "Open at expiry" if state == "EXPIRED_ACTIVE" else "Result"
+            lines.append(f"💰 {label}: {'+' if booked > 0 else ''}{_plain(booked)}R")
         except InvalidOperation:
             pass
 
