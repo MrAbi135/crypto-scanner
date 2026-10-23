@@ -92,10 +92,38 @@ _VOLUME_ROW = st.tuples(
 )
 
 
-def _with_volume(series: list, rows: list[tuple[int, int, bool]]) -> list:
+# Quiet stretches: (first candle, length). Independent droughts almost never
+# line up five in a row, so §6.3's contraction (five candles of low RVOL and
+# narrow range) and §7.2's compression would stay unexercised. Inside a
+# stretch the volume is a third of normal and the wicks are cut to the body.
+# Placed past the warm-up floor, where both properties decide candles.
+_QUIET = st.lists(
+    st.tuples(
+        st.integers(min_value=_WARM - 10, max_value=_MAX_SERIES),
+        st.integers(min_value=5, max_value=14),
+    ),
+    min_size=1,
+    max_size=4,
+)
+
+
+def _with_volume(
+    series: list,
+    rows: list[tuple[int, int, bool]],
+    quiet: list[tuple[int, int]] = (),  # type: ignore[assignment]
+) -> list:
+    hushed = {i for start, length in quiet for i in range(start, start + length)}
     out = []
 
-    for candle, (multiple, taker, follow) in zip(series, rows, strict=False):
+    for index, (candle, (multiple, taker, follow)) in enumerate(zip(series, rows, strict=False)):
+        if index in hushed:
+            multiple = 0
+            candle = dataclasses.replace(
+                candle,
+                high=max(candle.open, candle.close),
+                low=min(candle.open, candle.close),
+            )
+
         volume = Decimal(100) * multiple if multiple else Decimal(30)
         trades = int(volume / 10) if follow else 10
         out.append(
@@ -122,16 +150,18 @@ def _events(candles: list) -> list[dict[str, Any]]:
 @given(
     walk=walking_candle_series(min_size=_WARM + 20, max_size=_MAX_SERIES, timeframe=_TIMEFRAME),
     rows=st.lists(_VOLUME_ROW, min_size=_MAX_SERIES, max_size=_MAX_SERIES),
+    quiet=_QUIET,
     data=st.data(),
 )
 def test_a_participation_event_is_never_revoked_or_rewritten(
     walk: list,
     rows: list[tuple[int, int, bool]],
+    quiet: list[tuple[int, int]],
     data: st.DataObject,
 ) -> None:
     """§6 and §7 decide each candle once, from the candles up to it."""
 
-    series = _with_volume(walk, rows)
+    series = _with_volume(walk, rows, quiet)
     split = data.draw(st.integers(min_value=_WARM, max_value=len(series) - 1), label="prefix")
 
     early = _events(series[:split])
@@ -148,3 +178,80 @@ def test_a_participation_event_is_never_revoked_or_rewritten(
         )
 
         later[key] -= 1
+
+
+_RUN = 30
+
+_CLOSE_SETTINGS = settings(
+    max_examples=25,
+    deadline=None,
+    suppress_health_check=[
+        HealthCheck.too_slow,
+        HealthCheck.data_too_large,
+        HealthCheck.large_base_example,
+    ],
+)
+
+
+@_CLOSE_SETTINGS
+@given(
+    walk=walking_candle_series(min_size=_WARM + 40, max_size=_MAX_SERIES, timeframe=_TIMEFRAME),
+    rows=st.lists(_VOLUME_ROW, min_size=_MAX_SERIES, max_size=_MAX_SERIES),
+    quiet=_QUIET,
+    data=st.data(),
+)
+def test_each_candle_is_decided_on_its_own_close(
+    walk: list,
+    rows: list[tuple[int, int, bool]],
+    quiet: list[tuple[int, int]],
+    data: st.DataObject,
+) -> None:
+    """What a live pass decides about its newest candle is what history says.
+
+    The prefix-against-whole test above sees a one-candle look-ahead only when
+    an event sits on the prefix's very last candle: measured 2026-10-24, three
+    battery runs caught 4, 3 and 3 of seven one-candle look-aheads. Here every
+    candle of a run of thirty is decided as the newest candle of its own
+    prefix -- exactly the live engine's situation at that close -- and those
+    verdicts must equal the whole series' events on the same candles, in both
+    directions: nothing decided at the close may change later, and nothing may
+    appear later that the close did not decide.
+    """
+
+    series = _with_volume(walk, rows, quiet)
+    last_first = len(series) - _RUN
+
+    # Aimed runs: a contraction is decided on the fifth quiet candle, which a
+    # uniform start reached in 1 of 25 examples, so half the runs end their
+    # first close inside a quiet stretch.
+    aimed = sorted({start + 1 for start, _ in quiet if _WARM <= start + 1 <= last_first})
+
+    if aimed and data.draw(st.booleans(), label="start the run inside a quiet stretch"):
+        event("run starts inside a quiet stretch")
+        first = data.draw(st.sampled_from(aimed), label="first newest candle")
+    else:
+        first = data.draw(
+            st.integers(min_value=_WARM, max_value=last_first), label="first newest candle"
+        )
+    newest = [series[length - 1].open_time.isoformat() for length in range(first, first + _RUN)]
+
+    at_close: Counter[str] = Counter()
+
+    for length in range(first, first + _RUN):
+        candle_at = series[length - 1].open_time.isoformat()
+
+        for item in _events(series[:length]):
+            if item["event_at"] == candle_at:
+                at_close[json.dumps(item, sort_keys=True)] += 1
+
+    in_history: Counter[str] = Counter(
+        json.dumps(item, sort_keys=True) for item in _events(series) if item["event_at"] in newest
+    )
+
+    for key in at_close:
+        event(f"a close decided a {json.loads(key)['event_type']}")
+
+    assert at_close == in_history, (
+        f"decided at the close but not in history: {sorted((at_close - in_history).elements())}\n"
+        f"in history but not decided at the close: {sorted((in_history - at_close).elements())}"
+    )
