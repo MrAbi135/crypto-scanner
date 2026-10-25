@@ -1,0 +1,78 @@
+{
+  "description": "G2 criterion 3 for S7 (SLS §6, §7): each mutation lets one participation detector read a candle after the one it decides, or measures every candle against the window's final ATR. The prefix-vs-full property is probabilistic, so run the battery several times and report the catch rate per mutation. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/participation_no_repaint.json",
+  "pytest": [
+    "tests/property/test_no_repaint_participation.py"
+  ],
+  "mutations": [
+    {
+      "name": "range expansion's window reaches one candle past the one it decides",
+      "file": "backend/src/scanner/domain/momentum/phases.py",
+      "old": "    window = candles[index - EXPANSION_WINDOW + 1 : index + 1]",
+      "new": "    window = candles[index - EXPANSION_WINDOW + 2 : index + 2]",
+      "expect_failing": [
+        "test_a_participation_event_is_never_revoked_or_rewritten",
+        "test_each_candle_is_decided_on_its_own_close"
+      ]
+    },
+    {
+      "name": "compression's window reaches one candle past the one it decides",
+      "file": "backend/src/scanner/domain/momentum/phases.py",
+      "old": "    window = candles[index - COMPRESSION_WINDOW + 1 : index + 1]",
+      "new": "    window = candles[index - COMPRESSION_WINDOW + 2 : index + 2]",
+      "expect_failing": [
+        "test_a_participation_event_is_never_revoked_or_rewritten",
+        "test_each_candle_is_decided_on_its_own_close"
+      ]
+    },
+    {
+      "name": "contraction reads the next candle's RVOL",
+      "file": "backend/src/scanner/domain/volume/detectors.py",
+      "old": "    window = range(index - CONTRACTION_WINDOW + 1, index + 1)",
+      "new": "    window = range(index - CONTRACTION_WINDOW + 2, min(index + 2, len(candles)))",
+      "expect_failing": [
+        "test_a_participation_event_is_never_revoked_or_rewritten",
+        "test_each_candle_is_decided_on_its_own_close"
+      ]
+    },
+    {
+      "name": "the trade-count baseline includes the candle and the one after it",
+      "file": "backend/src/scanner/domain/volume/detectors.py",
+      "old": "    window = candles[max(0, index - TRADE_COUNT_WINDOW) : index]",
+      "new": "    window = candles[max(0, index - TRADE_COUNT_WINDOW + 2) : index + 2]",
+      "expect_failing": [
+        "test_a_participation_event_is_never_revoked_or_rewritten",
+        "test_each_candle_is_decided_on_its_own_close"
+      ]
+    },
+    {
+      "name": "RVOL at a candle is the next candle's",
+      "file": "backend/src/scanner/domain/common/rvol.py",
+      "old": "    if rvols is not None:\n        return rvols[index]",
+      "new": "    if rvols is not None:\n        return rvols[min(index + 1, len(rvols) - 1)]",
+      "expect_failing": [
+        "test_a_participation_event_is_never_revoked_or_rewritten",
+        "test_each_candle_is_decided_on_its_own_close"
+      ]
+    },
+    {
+      "name": "the momentum score's window reaches one candle past the one it decides",
+      "file": "backend/src/scanner/domain/momentum/score.py",
+      "old": "    window = candles[index - WINDOW + 1 : index + 1]",
+      "new": "    window = candles[index - WINDOW + 2 : index + 2]",
+      "expect_failing": [
+        "test_a_participation_event_is_never_revoked_or_rewritten",
+        "test_each_candle_is_decided_on_its_own_close"
+      ]
+    },
+    {
+      "name": "every candle is measured against the window's final ATR",
+      "file": "backend/src/scanner/application/detection/participation_replay.py",
+      "old": "        atrs = wilder_atr_series(series)\n",
+      "new": "        atrs = [wilder_atr_series(series)[-1]] * len(series) if series else []\n",
+      "expect_failing": [
+        "test_a_participation_event_is_never_revoked_or_rewritten",
+        "test_each_candle_is_decided_on_its_own_close"
+      ]
+    }
+  ]
+}
