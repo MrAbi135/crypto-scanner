@@ -1,41 +1,56 @@
 {
   "description": "Owner 2026-10-26 ('warning jodo'): the alert warns when 0.2% round-trip fees cost a quarter of R or more. Each mutation breaks one part of that measurement. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/notifier_fee_warning.json",
-  "pytest": ["tests/unit/test_interim_notifier_behaviour.py"],
+  "pytest": [
+    "tests/unit/test_interim_notifier_behaviour.py"
+  ],
   "mutations": [
     {
       "name": "the warning is never appended",
       "file": "ops/notify/notify_signals.py",
       "old": "    if fee_line:\n        lines.append(fee_line)",
       "new": "    if False:\n        lines.append(fee_line)",
-      "expect_failing": ["test_a_tight_stop_is_warned_with_its_fee_cost", "test_a_short_is_measured_the_same_way"]
+      "expect_failing": [
+        "test_a_tight_stop_is_warned_with_its_fee_cost",
+        "test_a_short_is_measured_the_same_way"
+      ]
     },
     {
       "name": "the threshold excludes a stop that costs exactly a quarter of R",
       "file": "ops/notify/notify_signals.py",
       "old": "    if fee_r < FEE_WARN_R:",
       "new": "    if fee_r <= FEE_WARN_R:",
-      "expect_failing": ["test_the_warning_starts_exactly_at_a_quarter_of_r"]
-    },
-    {
-      "name": "a risk stop is measured from the zone mid instead of the proximal edge",
-      "file": "ops/notify/notify_signals.py",
-      "old": "    if row.get(\"invalidation_rule\") == RISK_STOP_RULE:\n        anchor = proximal\n    else:\n        anchor = (proximal + distal) / 2\n\n    if anchor <= 0:",
-      "new": "    anchor = (proximal + distal) / 2\n\n    if anchor <= 0:",
-      "expect_failing": ["test_the_m5_one_percent_risk_stop_is_not_warned"]
+      "expect_failing": [
+        "test_the_warning_starts_exactly_at_a_quarter_of_r"
+      ]
     },
     {
       "name": "the fee is counted on one side only",
       "file": "ops/notify/notify_signals.py",
       "old": "ROUND_TRIP_FEE_PCT = Decimal(\"0.2\")",
       "new": "ROUND_TRIP_FEE_PCT = Decimal(\"0.1\")",
-      "expect_failing": ["test_a_tight_stop_is_warned_with_its_fee_cost", "test_the_warning_starts_exactly_at_a_quarter_of_r"]
+      "expect_failing": [
+        "test_a_tight_stop_is_warned_with_its_fee_cost",
+        "test_the_warning_starts_exactly_at_a_quarter_of_r"
+      ]
     },
     {
       "name": "the stop distance is taken against the stop instead of the entry",
       "file": "ops/notify/notify_signals.py",
       "old": "    stop_pct = abs(anchor - stop) / anchor * 100",
       "new": "    stop_pct = abs(anchor - stop) / stop * 100",
-      "expect_failing": ["test_a_tight_stop_is_warned_with_its_fee_cost", "test_a_short_is_measured_the_same_way"]
+      "expect_failing": [
+        "test_a_tight_stop_is_warned_with_its_fee_cost",
+        "test_a_short_is_measured_the_same_way"
+      ]
+    },
+    {
+      "name": "the fee warning measures R from its own mid instead of the shared anchor",
+      "file": "ops/notify/notify_signals.py",
+      "old": "    anchor = r_anchor(row, proximal, distal)\n\n    if anchor <= 0:",
+      "new": "    anchor = (proximal + distal) / 2\n\n    if anchor <= 0:",
+      "expect_failing": [
+        "test_the_m5_one_percent_risk_stop_is_not_warned"
+      ]
     }
   ]
 }

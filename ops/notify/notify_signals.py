@@ -636,6 +636,18 @@ def ladder_of(row: dict[str, str]) -> dict | None:
     return ladder if isinstance(ladder, dict) and ladder else None
 
 
+def r_anchor(row: dict[str, str], proximal: Decimal, distal: Decimal) -> Decimal:
+    """Where R is measured from: the proximal edge for a risk stop, else the mid.
+
+    `SignalLevels.anchor` in the domain. The rungs and the fee warning both
+    read it here, so the two cannot measure R from different places.
+    """
+    if row.get("invalidation_rule") == RISK_STOP_RULE:
+        return proximal
+
+    return (proximal + distal) / 2
+
+
 def rung_prices(row: dict[str, str], ladder: dict) -> list[tuple[int, Decimal, Decimal]]:
     """(n, R-multiple, price) for the first rungs, from the sealed row.
 
@@ -648,11 +660,7 @@ def rung_prices(row: dict[str, str], ladder: dict) -> list[tuple[int, Decimal, D
     distal = Decimal(row["entry_distal"])
     invalidation = Decimal(row["invalidation"])
 
-    if row.get("invalidation_rule") == RISK_STOP_RULE:
-        anchor = proximal
-    else:
-        anchor = (proximal + distal) / 2
-
+    anchor = r_anchor(row, proximal, distal)
     unit = abs(anchor - invalidation)
     sign = 1 if row["direction"] == "UP" else -1
     start = Decimal(str(ladder["start_r"]))
@@ -822,11 +830,7 @@ def _fee_warning(row: dict[str, str]) -> str | None:
     except (KeyError, InvalidOperation):
         return None
 
-    # The same anchor R is measured from everywhere else in this file.
-    if row.get("invalidation_rule") == RISK_STOP_RULE:
-        anchor = proximal
-    else:
-        anchor = (proximal + distal) / 2
+    anchor = r_anchor(row, proximal, distal)
 
     if anchor <= 0:
         return None
