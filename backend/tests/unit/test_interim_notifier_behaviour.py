@@ -711,3 +711,61 @@ def test_the_transition_query_reads_the_signal_identity(notifier) -> None:
 
     assert "join detection.signals s on s.signal_id = t.signal_id" in calls[0]
     assert "s.symbol" in calls[0] and "s.direction" in calls[0]
+
+
+def test_a_tight_stop_is_warned_with_its_fee_cost(notifier) -> None:
+    """Owner, 2026-10-26: fees of 0.2% a round trip against the stop's distance.
+
+    The fixture's zone is 99-100 (mid 99.5) with its stop at 99: 0.5 / 99.5 is
+    0.50% of price, so fees are 0.2 / 0.5025 = 0.4R of the trade.
+    """
+    text = notifier.format_signal(_signal("SIG_F"))
+
+    assert "⚠️ Tight stop: 0.50% from entry · fees (0.2% round trip) ≈ 0.4R of this trade" in text
+    assert text.index("Tight stop") < text.index("Not financial advice")
+
+
+def test_a_wide_stop_carries_no_fee_warning(notifier) -> None:
+    row = _signal("SIG_W")
+    row["invalidation"] = "90"  # mid 99.5 -> 9.5% away, fees 0.02R
+
+    assert "Tight stop" not in notifier.format_signal(row)
+
+
+def test_the_m5_one_percent_risk_stop_is_not_warned(notifier) -> None:
+    """SLS v1.0.15's M5 stop is 1% of the PROXIMAL edge: fees 0.2R, under 0.25R.
+
+    The zone is deliberately wide, so measuring from the mid instead of the
+    proximal edge would put the stop 0.5% away and warn.
+    """
+    row = _signal("SIG_M", timeframe="M5")
+    row.update(
+        entry_proximal="100", entry_distal="99", invalidation="99", invalidation_rule="risk_stop"
+    )
+
+    assert "Tight stop" not in notifier.format_signal(row)
+
+
+def test_the_warning_starts_exactly_at_a_quarter_of_r(notifier) -> None:
+    """0.8% away costs 0.2 / 0.8 = 0.25R: the threshold itself warns."""
+    row = _signal("SIG_E", timeframe="M5")
+    row.update(
+        entry_proximal="100", entry_distal="99", invalidation="99.2", invalidation_rule="risk_stop"
+    )
+
+    assert "≈ 0.2R of this trade" in notifier.format_signal(row)
+
+
+def test_a_short_is_measured_the_same_way(notifier) -> None:
+    row = _signal("SIG_SF")
+    row.update(direction="DOWN", entry_proximal="100", entry_distal="101", invalidation="101")
+
+    assert "Tight stop: 0.50% from entry" in notifier.format_signal(row)
+
+
+def test_an_unreadable_level_drops_the_warning_not_the_alert(notifier) -> None:
+    row = _signal("SIG_X")
+    row["invalidation"] = "not a number"
+
+    assert "Not financial advice" in notifier.format_signal(row)
+    assert "Tight stop" not in notifier.format_signal(row)

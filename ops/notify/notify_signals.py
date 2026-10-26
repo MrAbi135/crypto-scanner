@@ -800,6 +800,53 @@ def _risk_reward(row: dict[str, str], target: tuple[Decimal, Decimal]) -> str | 
     return f"1 : {reward / risk:.1f}"
 
 
+# Binance spot taker fee, 0.1% a side with no BNB discount; a trade pays it on
+# the way in and on the way out.
+ROUND_TRIP_FEE_PCT = Decimal("0.2")
+
+# Owner, 2026-10-26 ("warning jodo"): warn when fees alone cost a quarter of R
+# or more. Measured on the 98 resolved v35/v36/v38 signals
+# (deploy-baseline/audit/QUALITY_FINDINGS_20261026.md): the median stop was
+# 0.41% of price, so fees were ~0.5R a trade, and zone-edge signals netted
+# -1.1R to -2.4R a trade after them. M5's 1% risk stop costs 0.2R and stays
+# quiet. Presentation only: what is published does not change.
+FEE_WARN_R = Decimal("0.25")
+
+
+def _fee_warning(row: dict[str, str]) -> str | None:
+    """The tight-stop line, or None when fees are a small share of R."""
+    try:
+        proximal = Decimal(row["entry_proximal"])
+        distal = Decimal(row["entry_distal"])
+        stop = Decimal(row["invalidation"])
+    except (KeyError, InvalidOperation):
+        return None
+
+    # The same anchor R is measured from everywhere else in this file.
+    if row.get("invalidation_rule") == RISK_STOP_RULE:
+        anchor = proximal
+    else:
+        anchor = (proximal + distal) / 2
+
+    if anchor <= 0:
+        return None
+
+    stop_pct = abs(anchor - stop) / anchor * 100
+
+    if stop_pct <= 0:
+        return None
+
+    fee_r = ROUND_TRIP_FEE_PCT / stop_pct
+
+    if fee_r < FEE_WARN_R:
+        return None
+
+    return (
+        f"⚠️ Tight stop: {stop_pct:.2f}% from entry · "
+        f"fees (0.2% round trip) ≈ {fee_r:.1f}R of this trade"
+    )
+
+
 def _sort_key(text: str) -> tuple[int, Decimal]:
     try:
         return (0, Decimal(text))
@@ -868,6 +915,11 @@ def format_signal(row: dict[str, str]) -> str:
 
     if "wash_risk" in row.get("condition_tags", ""):
         lines.append("⚠️ Wash-trading risk flagged on this pair")
+
+    fee_line = _fee_warning(row)
+
+    if fee_line:
+        lines.append(fee_line)
 
     lines.append("ℹ️ Not financial advice")
 
