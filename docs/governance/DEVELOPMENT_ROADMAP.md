@@ -4,7 +4,7 @@
 
 **Document Status:** Official Development Roadmap — the executable build sequence for the frozen governance stack
 **Authority:** Subordinate to all eight governance documents (Constitution, SLS, TDR, PRD, TAD, DDD, API Specification, UI/UX Blueprint — frozen; each document's current version is stated in its own header); authoritative over build order, sprint scope, and release gating
-**Version:** 2.1.1 | **Ratified:** 2026-07-12 · **Last amended:** 2026-09-20 (S18 gains the retirement of an interim notifier built ahead of it; see Amendment History at the end of this document)
+**Version:** 2.2.0 | **Ratified:** 2026-07-12 · **Last amended:** 2026-10-26 (G2's soak audit may be an independent machine check; see Amendment History at the end of this document)
 **Sprint IDs are stable identifiers, not an execution order.** S0–S22 keep the numbers they were ratified with — they are cited by the SLS, the ADRs, and code docstrings, and renumbering them would edit a frozen document to no purpose. §7 is the only authority on what runs when. A `b` suffix (S4b) means *reopened*: scope that its original sprint was declared done without.
 **Team model:** One developer + AI assistance (Claude / ChatGPT), full-time equivalent
 **Amendment Rule:** Scope moves between sprints via roadmap revision; governance documents are never modified by scheduling pressure (Constitution §43.5, §46.1)
@@ -345,7 +345,7 @@ None of these are deleted. They re-enter after R1 beta feedback, alongside R2.
 - **APIs:** CLI: `signals tail`, `signals verify-hashes`.
 - **Testing:** Lifecycle exhaustive transition tests; immutability attack tests (UPDATE/DELETE attempts at app role must fail); refresh-merge property (duplicate key never re-alerts); **load verification: full-universe simultaneous H1 close ⇒ close→detection p95 ≤ 2 s on staging hardware** (SLS §14); 7-day staging soak producing real signals.
 - **Expected output:** Staging runs the complete doctrine 24/7, producing sealed, hash-verified signals with outcomes resolving.
-- **DoD:** Budgets met and dashboarded; immutability proven; 7-day soak signal set manually spot-audited by the developer against charts (the founder's own J4); **Gate G2 passed — the product's core claim is now real**.
+- **DoD:** Budgets met and dashboarded; immutability proven; 7-day soak signal set manually spot-audited by the developer against charts (the founder's own J4), or independently machine-checked against the exchange's own candles with the tool and its results committed (v2.2.0); **Gate G2 passed — the product's core claim is now real**.
 
 ---
 
@@ -594,7 +594,7 @@ Standing rule, unchanged: **derive the expectation from the SLS; never paste the
 | **G0** | S0 | Clean-clone bootstrap ≤ 15 min; CI red-blocks; staging pipeline works |
 | **G1** | S3 | 72 h clean ingest soak; replay determinism ×3; golden harness operational; all SLS §2 validation implemented |
 | **G1b** ⭐ | S13a | **The doctrine is observable.** Engine runs unattended ≥ 72 h; every candle close for the seeded universe produces a detection pass with no manual invocation; the chart renders live structure/liquidity/zone objects for a symbol the developer did not pre-select; kill -9 on the engine loses no closes (resume proven, not assumed) |
-| **G2** | S9 | Golden **rule-coverage map complete and CI-enforced** per §8.1 — every subsection enumerated, every rule either covered or `blocked_on`-explained — 100% pass; **zero datasets left `pending developer verification`** (§8.2); no-repaint properties hold; close→detection p95 ≤ 2 s full-universe; 7-day signal soak hand-audited; immutability attack-tested |
+| **G2** | S9 | Golden **rule-coverage map complete and CI-enforced** per §8.1 — every subsection enumerated, every rule either covered or `blocked_on`-explained — 100% pass; **zero datasets left `pending developer verification`** (§8.2); no-repaint properties hold; close→detection p95 ≤ 2 s full-universe; 7-day signal soak audited — by hand, or by an independent check against the exchange's candles (v2.2.0); immutability attack-tested |
 | **G3** | S12 | Contract suite green (row-for-row vs API Spec); WS resume/entitlement wire-proven; 1k-conn soak |
 | **G4** | S16 | J2 journey E2E; one-truth stats test; a11y clean; zero-layout-shift verified |
 | **G5** | S18 | J3 E2E ≤ 3 s alert p95. *(v2.0.0: the AI validator criteria move with S19 past beta — they gate the AI release, not this one. No criterion is dropped; it is attached to the thing it actually guards.)* |
@@ -676,6 +676,28 @@ v2.0.0 does not soften that belief; it removes a way of failing it. Doctrine bui
 ---
 
 ## 17. Amendment History
+
+### v2.2.0 — 2026-10-26 — G2's soak audit may be an independent machine check
+
+**Trigger.** The 7-day soak of `s8-confluence-v38` (2026-10-18T20:20Z → 10-25T20:20Z) ended, and §9 asked for it to be "hand-audited", S9 for it to be "manually spot-audited by the developer against charts". A hand-audit sheet was built, and so was an independent check: a script that re-derives every evidence claim of every published signal from Binance's public candles, imports nothing from the engine, and names the SLS clause of each check. The owner was offered both routes and ruled: **"(b) machine jaanch kaafi hai"**, the machine check suffices.
+
+**Impact review against dependent sections.**
+
+| Section | Change | Nature |
+|---|---|---|
+| §9, G2 row | "hand-audited" becomes "audited — by hand, or by an independent check against the exchange's candles" | Gate wording |
+| Sprint S9 DoD | The same alternative, with the tool and its results committed | Gate wording |
+| Header, §17 | Version 2.2.0, this entry | Additive |
+
+**What was NOT changed.** No frozen document was touched. Every other G2 criterion is unchanged, including the 2 s close→detection budget, which is still not met. No sprint, ID, order or gate boundary moved.
+
+**Rationale.**
+
+1. *The machine check is stricter where it can decide, and says so where it cannot.* It checked 763 claims across 27 signals: 679 PASS, 0 FAIL, and 84 CANNOT, each with its clause, with outcomes matched candle by candle 23/23. A person reading ten cards on a chart would have seen a fraction of that, and could not re-derive an ATR or a fractal by eye.
+2. *The checker was itself tested.* Its first run on this soak reported five FAILs that were the checker's own defects. They were fixed from the engine's own definitions and controlled against the previous soak, whose verdict counts did not move.
+3. *Recorded, not assumed.* The tool, its inputs, its outputs and their SHA-256 sums are committed under `docs/evidence/G2/criterion5/`, so the result can be re-run rather than trusted.
+
+**What this amendment does not excuse.** The check proves the engine did what the SLS says. It says nothing about whether that makes money. The same soak's signals won 2 and lost 9, and they lose to trading costs. And it is not a human reading: that judgement was waived by the owner, not performed.
 
 ### v2.1.1 — 2026-09-20 — S18 gains the retirement of an interim notifier built ahead of it
 
