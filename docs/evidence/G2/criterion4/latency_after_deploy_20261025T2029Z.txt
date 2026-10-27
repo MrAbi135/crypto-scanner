@@ -1,0 +1,21 @@
+soak T0 2026-10-18T20:20:39.995560301Z; measured at 2026-10-25T20:29:57+00:00; passes matched 6000
+stage                 p50      p95      p99      max
+close->stored       0.401    1.230    2.233    3.300
+stored->stream      0.498    0.958    1.004    1.043
+stream->start       6.909   22.849   33.102   42.840
+pass                0.654    0.867    1.097    1.865
+total               8.446   25.297   36.395   47.234
+
+total by timeframe:
+  M5   n= 4170 p50=   8.09s p95=  21.59s
+  M15  n= 1380 p50=   8.97s p95=  25.26s
+  H1   n=  345 p50=  12.18s p95=  32.96s
+  H4   n=   90 p50=  11.81s p95=  31.53s
+  D1   n=   15 p50=  23.95s p95=  41.80s
+
+total by passes per boundary:
+   15 passes/boundary  n= 2790 p50=   6.29s p95=  10.62s
+   30 passes/boundary  n= 2070 p50=  11.26s p95=  20.07s
+   45 passes/boundary  n=  765 p50=  16.10s p95=  29.29s
+   60 passes/boundary  n=  300 p50=  22.29s p95=  39.87s
+   75 passes/boundary  n=   75 p50=  25.15s p95=  44.79s

@@ -4,7 +4,7 @@
 
 **Document Status:** Official Development Roadmap — the executable build sequence for the frozen governance stack
 **Authority:** Subordinate to all eight governance documents (Constitution, SLS, TDR, PRD, TAD, DDD, API Specification, UI/UX Blueprint — frozen; each document's current version is stated in its own header); authoritative over build order, sprint scope, and release gating
-**Version:** 2.2.0 | **Ratified:** 2026-07-12 · **Last amended:** 2026-10-26 (G2's soak audit may be an independent machine check; see Amendment History at the end of this document)
+**Version:** 2.2.1 | **Ratified:** 2026-07-12 · **Last amended:** 2026-10-27 (G2's 2 s criterion is SLS §14 row 2 as amended in v1.0.18; see Amendment History at the end of this document)
 **Sprint IDs are stable identifiers, not an execution order.** S0–S22 keep the numbers they were ratified with — they are cited by the SLS, the ADRs, and code docstrings, and renumbering them would edit a frozen document to no purpose. §7 is the only authority on what runs when. A `b` suffix (S4b) means *reopened*: scope that its original sprint was declared done without.
 **Team model:** One developer + AI assistance (Claude / ChatGPT), full-time equivalent
 **Amendment Rule:** Scope moves between sprints via roadmap revision; governance documents are never modified by scheduling pressure (Constitution §43.5, §46.1)
@@ -594,7 +594,7 @@ Standing rule, unchanged: **derive the expectation from the SLS; never paste the
 | **G0** | S0 | Clean-clone bootstrap ≤ 15 min; CI red-blocks; staging pipeline works |
 | **G1** | S3 | 72 h clean ingest soak; replay determinism ×3; golden harness operational; all SLS §2 validation implemented |
 | **G1b** ⭐ | S13a | **The doctrine is observable.** Engine runs unattended ≥ 72 h; every candle close for the seeded universe produces a detection pass with no manual invocation; the chart renders live structure/liquidity/zone objects for a symbol the developer did not pre-select; kill -9 on the engine loses no closes (resume proven, not assumed) |
-| **G2** | S9 | Golden **rule-coverage map complete and CI-enforced** per §8.1 — every subsection enumerated, every rule either covered or `blocked_on`-explained — 100% pass; **zero datasets left `pending developer verification`** (§8.2); no-repaint properties hold; close→detection p95 ≤ 2 s full-universe; 7-day signal soak audited — by hand, or by an independent check against the exchange's candles (v2.2.0); immutability attack-tested |
+| **G2** | S9 | Golden **rule-coverage map complete and CI-enforced** per §8.1 — every subsection enumerated, every rule either covered or `blocked_on`-explained — 100% pass; **zero datasets left `pending developer verification`** (§8.2); no-repaint properties hold; per-context detection p95 ≤ 2 s on the full universe (SLS §14 row 2, v1.0.18); 7-day signal soak audited — by hand, or by an independent check against the exchange's candles (v2.2.0); immutability attack-tested |
 | **G3** | S12 | Contract suite green (row-for-row vs API Spec); WS resume/entitlement wire-proven; 1k-conn soak |
 | **G4** | S16 | J2 journey E2E; one-truth stats test; a11y clean; zero-layout-shift verified |
 | **G5** | S18 | J3 E2E ≤ 3 s alert p95. *(v2.0.0: the AI validator criteria move with S19 past beta — they gate the AI release, not this one. No criterion is dropped; it is attached to the thing it actually guards.)* |
@@ -676,6 +676,28 @@ v2.0.0 does not soften that belief; it removes a way of failing it. Doctrine bui
 ---
 
 ## 17. Amendment History
+
+### v2.2.1 — 2026-10-27 — G2's 2 s criterion follows SLS §14 row 2 as amended
+
+**Trigger.** G2 named "close→detection p95 ≤ 2 s full-universe". Taken as the
+time from a close to every context's pass finishing, that cannot be met on any
+shared-core system (SLS v1.0.18 gives the arithmetic), and it duplicates SLS
+§14 row 1's end-to-end budget with an impossible number. The owner ruled
+**R1** on 2026-10-27: the criterion is the per-context detection work, which
+SLS v1.0.18 now states.
+
+| Section | Change | Nature |
+|---|---|---|
+| §9, G2 row | "close→detection p95 ≤ 2 s full-universe" becomes "per-context detection p95 ≤ 2 s on the full universe (SLS §14 row 2, v1.0.18)" | Gate wording |
+| Header, §17 | Version 2.2.1, this entry | Additive |
+
+**Result under the ruling.** Over the v38 soak, a pass took p95 0.86 s (n = 43,575)
+on all 15 symbols. The evidence is in `docs/evidence/G2/criterion4/`.
+
+**What this does not excuse.** SLS §14 row 1, the full-universe cycle at
+≤ 30 s p95, is measured at 30.69 s and is not met. It is not a G2 criterion
+and was not made one here, but it is a binding SLS maximum. Speed step 1 (two
+engine shards, deploy-baseline/SPEED_PLAN_G2_C4.md) exists to meet it.
 
 ### v2.2.0 — 2026-10-26 — G2's soak audit may be an independent machine check
 
