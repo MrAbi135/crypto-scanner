@@ -74,7 +74,7 @@ echo "   now running : $from_release (checkout $from_rev), engine started $start
 echo "   rolling to  : $TARGET"
 
 shards=$(docker exec scanner-dev-engine-1 printenv SCANNER_ENGINE_SHARD_COUNT 2>/dev/null | tr -d '\r')
-[ -z "$shards" ] || [ "$shards" = 1 ]   || fail "SCANNER_ENGINE_SHARD_COUNT=$shards: e388e13 has no shards; undo the sharding first"
+[ -z "$shards" ] || [ "$shards" = 1 ]   || fail "SCANNER_ENGINE_SHARD_COUNT=$shards: e388e13 has no shards; undo the sharding first with ops/soak/shards_off.sh"
 
 # The schema must already be what the target expects, because nothing here downgrades it.
 target_head=$(git show "$TARGET:backend/src/scanner/infrastructure/persistence/alembic/versions/" \

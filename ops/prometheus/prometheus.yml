@@ -12,7 +12,7 @@ scrape_configs:
   - job_name: scanner-processes
     metrics_path: /internal/metrics
     static_configs:
-      - targets: ["api:8000", "ingest:8001", "engine:8002", "worker:8003"]
+      - targets: ["api:8000", "ingest:8001", "engine:8002", "engine-shard1:8002", "worker:8003"]
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]

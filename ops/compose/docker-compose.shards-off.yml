@@ -1,0 +1,16 @@
+# Overlay used ONLY by ops/soak/shards_off.sh, which runs one engine again after
+# speed step 1's two shards. Never `up` with this by hand: the single `engine`
+# group must first be re-created where the shards stopped, and that script
+# does it.
+#
+# Base file + this overlay = one engine owning every symbol under group
+# `engine` (shard count 1), with engine-shard1 parked behind a profile nothing
+# activates. The base file alone still says two shards, so the next
+# post_soak_deploy.sh switches them back on unless the base file changes first.
+services:
+  engine:
+    environment:
+      SCANNER_ENGINE_SHARD_COUNT: "1"
+      SCANNER_ENGINE_SHARD_INDEX: "0"
+  engine-shard1:
+    profiles: ["shards-off-parked"]

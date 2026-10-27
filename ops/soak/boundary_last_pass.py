@@ -2,7 +2,7 @@
 
 Run on the VM:   python3 - < ops/soak/boundary_last_pass.py      (nothing is written on the VM)
 
-Input: `docker logs --since T0 scanner-dev-engine-1`, every `detection_pass_completed` line.
+Input: `docker logs --since T0` of every engine container, every `detection_pass_completed` line.
 A boundary is one close instant (e.g. 12:15:00). Its passes are every (symbol, timeframe)
 whose candle closes at that instant. "last done" is the newest pass timestamp among them.
 A boundary counts as complete only when it has exactly symbols x due-timeframes passes;
@@ -15,11 +15,20 @@ from datetime import datetime, timedelta, timezone
 
 TF = {"M5": 5, "M15": 15, "H1": 60, "H4": 240, "D1": 1440}
 T0 = open("/home/ubuntu/soak-logs/T0").read().strip()
-out = subprocess.run(["docker", "logs", "--since", T0, "scanner-dev-engine-1"], capture_output=True, text=True)
+
+# Every engine process. Speed step 1 runs two shards (ops/compose/docker-compose.dev.yml);
+# a boundary's passes are split between them, so reading one would mark every
+# boundary incomplete. A container that does not exist is skipped.
+ENGINES = ("scanner-dev-engine-1", "scanner-dev-engine-shard1-1")
+log_text = ""
+for name in ENGINES:
+    out = subprocess.run(["docker", "logs", "--since", T0, name], capture_output=True, text=True)
+    if out.returncode == 0:
+        log_text += out.stdout + out.stderr
 
 passes = defaultdict(list)          # close -> [(symbol, tf, done)]
 symbols = set()
-for line in (out.stdout + out.stderr).splitlines():
+for line in log_text.splitlines():
     if "detection_pass_completed" not in line:
         continue
     try:

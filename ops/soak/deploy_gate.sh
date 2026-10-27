@@ -68,8 +68,27 @@ wait_for_deploy_window() {
 gate_now() { date -u +%s; }
 gate_sleep() { sleep "$1"; }
 
-# Live inputs, for the script: lag and pending of the engine group, read-only.
+# lag_pending_of < XINFO GROUPS output  -> "<worst lag> <total pending>"
+#   Over EVERY group. The first version kept only the last group printed: with
+#   one group that was the engine's, but speed step 1 runs two shard groups,
+#   and a reading that ignores one of them can open the gate while that shard
+#   is still busy. A nil lag (Redis cannot compute it) is "unknown", never 0,
+#   and so is a stream with no group.
+lag_pending_of() {
+  awk '
+    BEGIN        { worst = 0; total = 0 }
+    p=="lag"     { n_lag++; if ($0 == "") unknown = 1; else if ($0 + 0 > worst) worst = $0 + 0 }
+    p=="pending" { n_pd++; total += $0 }
+    { p = $0 }
+    END {
+      lag = (n_lag == 0 || unknown) ? "unknown" : worst
+      pd = (n_pd == 0) ? "unknown" : total
+      print lag, pd
+    }'
+}
+
+# Live inputs, for the script: lag and pending over all groups, read-only.
 stream_lag_pending() {
-  docker exec scanner-dev-redis-1 redis-cli XINFO GROUPS scanner:stream:candle-closed \
-    | tr -d '\r' | awk 'p=="pending"{pd=$0} p=="lag"{lg=$0} {p=$0} END{print (lg==""?"unknown":lg), (pd==""?"unknown":pd)}'
+  docker exec scanner-dev-redis-1 redis-cli XINFO GROUPS scanner:stream:candle-closed </dev/null \
+    | tr -d '\r' | lag_pending_of
 }
