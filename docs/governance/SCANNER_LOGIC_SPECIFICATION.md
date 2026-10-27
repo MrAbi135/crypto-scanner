@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.17
-**Ratified:** 2026-07-12 · **Last amended:** 2026-10-19 (v1.0.17; see Amendment History)
+**Version:** 1.0.18
+**Ratified:** 2026-07-12 · **Last amended:** 2026-10-27 (v1.0.18; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -1076,7 +1076,7 @@ Binding maxima (p95 unless noted), measured continuously, regressions block rele
 | Metric | Target |
 |---|---|
 | Full-universe scan cycle (all due TFs at any close boundary) | ≤ 30 s; ≤ 60 s p99 |
-| Candle close → all detectors evaluated (per symbol-TF) | ≤ 2 s |
+| All detectors evaluated for one symbol-TF: the detection work of that context's pass, from its start (v1.0.18; time queued behind other contexts at a boundary is the scan cycle's budget, above) | ≤ 2 s |
 | Detection → signal published (gates, scoring, lifecycle) | ≤ 1 s |
 | Signal published → alert dispatched (High priority) | ≤ 3 s; end-to-end close→Telegram ≤ 10 s p99 |
 | Signal/state change → dashboard visible (stream push) | ≤ 1 s |
@@ -1185,6 +1185,30 @@ Every parameter change increments `param_set_version` and requires golden-datase
 ---
 
 ## Amendment History
+
+### v1.0.18 — 2026-10-27
+
+**§14 row 2 says what it measures: one context's detection work, not the wait
+before it.**
+
+**Why.** The row read "Candle close → all detectors evaluated (per symbol-TF)
+≤ 2 s". Read end to end, from the close to every context's pass finishing, it
+cannot be met by any design that shares cores: the stages before the engine
+take ~0.9 s at p50, so each context would need a core of its own the moment
+its close lands, which is 15 cores on an M5 boundary and 75 on a daily one at
+today's 15 symbols, and hundreds at the ~400-symbol capacity this section
+assumes. Read that way, the row also contradicts row 1 (the full-universe
+cycle ≤ 30 s), which is the end-to-end budget for exactly that queue. The owner
+was shown both readings with the measurements and ruled **R1** on 2026-10-27:
+row 2 is the per-context detection work; row 1 carries the end-to-end promise.
+
+**Measured** over the v38 soak (2026-10-18 → 10-25, 43,575 passes): a pass took
+p50 0.65 s, p95 0.86 s, max 1.93 s, so **row 2 is met**. Row 1 is at 30.69 s
+p95 (42.03 s p99) and is the subject of speed step 1 (two engine shards).
+
+**Not changed.** Every other row, and the capacity line. TAD §4 (Module: Detection Orchestrator) paraphrases
+this row as "close→detected ≤ 2 s". TAD is frozen and defers to this document
+on trading-logic budgets, so its paraphrase is read by this row as amended.
 
 ### v1.0.17 — 2026-10-19
 
