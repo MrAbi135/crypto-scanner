@@ -77,17 +77,54 @@ services:
       timeout: 3s
       retries: 6
 
+  # Speed step 1 (owner, 2026-10-27; deploy-baseline/SPEED_PLAN_G2_C4.md): two
+  # engine processes share the symbols by SHA-256 hash (#320,
+  # application/detection/shards.py). On the 2-OCPU VM one engine used ~0.85
+  # of a core through a close burst while the second core idled. The split of
+  # today's 15 symbols is 6/9, so a burst should finish ~1.67x sooner.
+  #
+  # The shard count lives HERE, not in ops/env/dev.env, so that every
+  # `compose up` of this file produces the same topology. A count of 2 on one
+  # service and 1 on another would put two processes on the same symbols.
+  # Going back to one engine is ops/soak/shards_off.sh, never an edit here: the
+  # single `engine` group must first be moved to where the shards stopped.
   engine:
     build:
       context: ../..
       dockerfile: ops/docker/backend.Dockerfile
+    image: scanner-dev-engine
     command: ["python", "-m", "scanner.runtime.engine"]
     env_file: [../env/dev.env]
     environment:
       SCANNER_HEALTH_PORT: "8002"
+      SCANNER_ENGINE_SHARD_COUNT: "2"
+      SCANNER_ENGINE_SHARD_INDEX: "0"
     read_only: true
     tmpfs: ["/tmp"]
     depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8002/internal/health/ready', timeout=2).status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  # Shard 1 of 2: the same image as `engine` (built once, by that service), so
+  # the two can never run different code.
+  engine-shard1:
+    image: scanner-dev-engine
+    pull_policy: never
+    command: ["python", "-m", "scanner.runtime.engine"]
+    env_file: [../env/dev.env]
+    environment:
+      SCANNER_HEALTH_PORT: "8002"
+      SCANNER_ENGINE_SHARD_COUNT: "2"
+      SCANNER_ENGINE_SHARD_INDEX: "1"
+    read_only: true
+    tmpfs: ["/tmp"]
+    depends_on:
+      engine: {condition: service_started}
       db: {condition: service_healthy}
       redis: {condition: service_healthy}
     healthcheck:

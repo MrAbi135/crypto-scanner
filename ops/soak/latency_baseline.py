@@ -53,8 +53,13 @@ for line in sh("docker", "logs", "--since", T0, "scanner-dev-ingest-1").splitlin
         r = json.loads(line[line.index("{"):])
         stored[(r["symbol"], r["timeframe"], r["open_time"])] = datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00"))
 
+# Every engine process: speed step 1 runs two shards, each passing its own
+# symbols. A container that does not exist contributes nothing.
+ENGINES = ("scanner-dev-engine-1", "scanner-dev-engine-shard1-1")
+engine_text = "".join(sh("docker", "logs", "--since", T0, name) for name in ENGINES)
+
 rows = []
-for line in sh("docker", "logs", "--since", T0, "scanner-dev-engine-1").splitlines():
+for line in engine_text.splitlines():
     if "detection_pass_completed" not in line:
         continue
     try:

@@ -24,7 +24,13 @@ set -uo pipefail
 
 cd ~/crypto-scanner || exit 2
 C="docker compose -f ops/compose/docker-compose.dev.yml"
-LOG="docker logs scanner-dev-engine-1"
+# Every engine process. Speed step 1 runs two shards, each passing its own
+# symbols (ops/compose/docker-compose.dev.yml). A container that does not
+# exist is skipped, so this reads one engine before the switch and both after.
+ENGINES="scanner-dev-engine-1 scanner-dev-engine-shard1-1"
+present_engines() { for e in $ENGINES; do docker inspect "$e" >/dev/null 2>&1 && echo "$e"; done; }
+engine_logs() { for e in $(present_engines); do docker logs "$e" 2>&1; done; }
+LOG=engine_logs
 
 # A pass older than this means the engine has stopped doing its job. The
 # fastest timeframe closes every 5 minutes and a pass took 82s at its worst, so
@@ -41,8 +47,9 @@ echo "now: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo
 
 echo "-- containers (restarts must stay 0) --"
-for c in db redis ingest engine worker api; do
+for c in db redis ingest engine engine-shard1 worker api; do
   n="scanner-dev-${c}-1"
+  [ "$c" = engine-shard1 ] && ! docker inspect "$n" >/dev/null 2>&1 && continue
   status=$(docker inspect -f "{{.State.Status}}" "$n" 2>/dev/null)
   restarts=$(docker inspect -f "{{.RestartCount}}" "$n" 2>/dev/null)
   printf "%-8s %s restarts=%s\n" "$c" "${status:-MISSING}" "${restarts:-?}"
@@ -51,11 +58,15 @@ for c in db redis ingest engine worker api; do
 done
 echo
 
-echo "-- last completed pass --"
-last=$($LOG 2>&1 | grep -a detection_pass_completed | tail -1)
+echo "-- last completed pass, per engine --"
+# Per engine, not overall: with two shards, one that stops is hidden by the
+# other's fresh passes in any reading of "the" newest pass.
+for e in $(present_engines); do
+last=$(docker logs "$e" 2>&1 | grep -a detection_pass_completed | tail -1)
+echo "$e:"
 
 if [ -z "$last" ]; then
-  flag "no detection pass has ever completed"
+  flag "$e: no detection pass has ever completed"
 else
   # The log line's own timestamp, not the container's clock: a pass that
   # completed is dated by when it completed.
@@ -68,9 +79,10 @@ else
 
   # The check the old script did not have.
   if [ "$age_min" -ge "$STALE_AFTER_MIN" ]; then
-    flag "last pass is ${age_min} min old (>= ${STALE_AFTER_MIN}); the engine is up but not working"
+    flag "$e: last pass is ${age_min} min old (>= ${STALE_AFTER_MIN}); the engine is up but not working"
   fi
 fi
+done
 echo
 
 echo "-- stream --"
@@ -82,7 +94,10 @@ echo "-- stream --"
 groups=$($C exec -T redis redis-cli XINFO GROUPS scanner:stream:candle-closed 2>/dev/null \
   | paste - - - - - - - - | tr '\t' ' ')
 echo "$groups"
-lag=$(echo "$groups" | grep -oE "lag +[0-9]+" | grep -oE "[0-9]+" | tail -1)
+# The worst lag over every group (deploy_gate.sh's reader). `tail -1` read the
+# last group printed, which with two shards is one shard of two.
+. ops/soak/deploy_gate.sh
+lag=$($C exec -T redis redis-cli XINFO GROUPS scanner:stream:candle-closed 2>/dev/null | tr -d '\r' | lag_pending_of | cut -d' ' -f1)
 
 if ! echo "${lag:-x}" | grep -qE '^[0-9]+$'; then
   # A non-numeric reading is itself an alert. Silently skipping it is how the

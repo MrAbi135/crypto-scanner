@@ -612,7 +612,18 @@ verify_check_labels
 # candles on purpose -- so it needs the engine's start, which only the
 # container knows. Unreadable, it would exclude nothing or everything; either
 # way the check would not be the check, so that is flagged, not guessed.
-ENGINE_STARTED=$(docker inspect --format '{{.State.StartedAt}}' scanner-dev-engine-1 2>/dev/null)
+#
+# With two engine shards (speed step 1) it is the LATEST start of either: a
+# shard restarted on its own catches up on its own symbols' old candles too.
+latest_engine_start() {
+  local e s best=""
+  for e in scanner-dev-engine-1 scanner-dev-engine-shard1-1; do
+    s=$(docker inspect --format '{{.State.StartedAt}}' "$e" 2>/dev/null) || continue
+    [ -z "$best" ] || [ "$s" \> "$best" ] && best="$s"
+  done
+  echo "$best"
+}
+ENGINE_STARTED=$(latest_engine_start)
 
 if [ -z "$ENGINE_STARTED" ]; then
   flag "cannot read the engine start time -- check J ran over nothing"
@@ -688,7 +699,7 @@ else
       flag "check G read $(printf '%s\n' "$states" | wc -l) Redis replies for $(printf '%s\n' "$newest_rows" | wc -l) contexts -- it did not run"
     else
       decided=$(printf '%s\n' "$states" | sed -n 's/.*"last_processed_open_time": *"\([^"]*\)".*/\1/p; t; s/.*//p')
-      engine_started_s=$(date -u -d "$(docker inspect --format '{{.State.StartedAt}}' scanner-dev-engine-1 2>/dev/null)" +%s 2>/dev/null || echo 0)
+      engine_started_s=$(date -u -d "$(latest_engine_start)" +%s 2>/dev/null || echo 0)
 
       g_rows=$(paste -d'|' <(printf '%s\n' "$newest_rows") <(printf '%s\n' "$decided") \
                  | decided_lag_violations "$engine_started_s" "$(date -u +%s)")

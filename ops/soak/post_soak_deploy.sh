@@ -8,7 +8,10 @@
 # order-block evidence read as of the deciding candle), #319 (one candle read
 # per pass, batched pool writes), #320 (engine shards, OFF) and the v37
 # marker, and -- 2026-10-18 -- #334 (s8-confluence-v38, SLS v1.0.16: the
-# `displaced` grade on the retraced leg's own break). This runs the sequence with an assertion at
+# `displaced` grade on the retraced leg's own break), and -- 2026-10-27 --
+# speed step 1: TWO engine shards, set in ops/compose/docker-compose.dev.yml
+# (deploy-baseline/SPEED_PLAN_G2_C4.md), with certifi 2026.10.19 (#338) riding
+# along. This runs the sequence with an assertion at
 # every step --
 # because the deploy days before it each lost hours to a step that "ran" and
 # did nothing: a patch whose replace matched nothing, a deploy that rebuilt
@@ -98,8 +101,11 @@ if [ "$started_s" -gt $(( t0_s + 120 )) ]; then
   echo "   restart since T0, declared: $RESTART_REASON"
 fi
 
-restarts=$(docker inspect --format '{{.RestartCount}}' scanner-dev-engine-1)
-[ "$restarts" = "0" ] || fail "engine restarted $restarts times during the soak -- investigate before deploying on top"
+for e in scanner-dev-engine-1 scanner-dev-engine-shard1-1; do
+  docker inspect "$e" >/dev/null 2>&1 || continue
+  restarts=$(docker inspect --format '{{.RestartCount}}' "$e")
+  [ "$restarts" = "0" ] || fail "$e restarted $restarts times during the soak -- investigate before deploying on top"
+done
 
 git fetch -q origin || fail "git fetch failed"
 git diff --quiet && git diff --cached --quiet || fail "working tree is dirty"
@@ -162,21 +168,29 @@ grep -qF 'Timeframe.M5: 48,' backend/src/scanner/domain/ranking/decay.py   || fa
 grep -qF 'def walk_ladder' backend/src/scanner/domain/lifecycle/state.py   || fail "#313 missing: no trailing-ladder walk"
 grep -qF 'def ladder_of' ops/notify/notify_signals.py   || fail "notifier would announce a laddered M5 signal with the pool-exit stop rule"
 
-# The 2026-10-12 batch. #320's shards ship switched OFF: one engine, group
-# 'engine', exactly as before. Turning them on is its own change (a second
-# engine service, its metrics, and soak checks that read both groups), so a
-# shard count in the env file refuses this deploy rather than half-enabling it.
+# The 2026-10-12 batch (#318-#320).
 grep -qF 'def _known_by' backend/src/scanner/application/detection/ict_ob_replay.py   || fail "#318 missing: OB evidence is not read as of the deciding candle"
 grep -qF 'candles = PassScopedCandles(' backend/src/scanner/runtime/wiring/detection.py   || fail "#319 missing: the pipeline does not share one candle read per pass"
 grep -qF 'def shard_of' backend/src/scanner/application/detection/shards.py   || fail "#320 missing: no engine shards module"
-! grep -q '^SCANNER_ENGINE_SHARD_COUNT=' ops/env/dev.env   || fail "ops/env/dev.env sets SCANNER_ENGINE_SHARD_COUNT -- shards are not part of this deploy"
+# Speed step 1 (owner, 2026-10-27). #320's shards switch ON here, and the
+# topology lives in the compose file so every `compose up` produces it. A
+# shard setting in the env file would override the compose value for BOTH
+# engines and put two processes on the same symbols, so its presence refuses
+# the deploy.
+! grep -q '^SCANNER_ENGINE_SHARD_' ops/env/dev.env   || fail "ops/env/dev.env sets SCANNER_ENGINE_SHARD_* -- the shard topology lives in ops/compose/docker-compose.dev.yml"
+$DC config --services 2>/dev/null | grep -qx 'engine-shard1'   || fail "speed step 1 missing: compose has no engine-shard1 service"
+[ "$($DC config 2>/dev/null | grep -c 'SCANNER_ENGINE_SHARD_COUNT: "2"')" = "2" ]   || fail "speed step 1 incomplete: compose does not give both engines SCANNER_ENGINE_SHARD_COUNT 2"
+[ "$($DC config 2>/dev/null | grep -c 'SCANNER_ENGINE_SHARD_INDEX: "[01]"')" = "2" ]   || fail "speed step 1 incomplete: compose does not give the engines indexes 0 and 1"
+test -f ops/soak/shards_off.sh   || fail "speed step 1 has no way back: ops/soak/shards_off.sh is missing"
+. ops/soak/shard_groups.sh || fail "ops/soak/shard_groups.sh is missing"
+grep -A1 '^name = "certifi"' backend/uv.lock | grep -qF '2026.10.19'   || fail "#338 missing: certifi is not 2026.10.19 (PYSEC-2026-4320)"
 
 # The published set is decided in code (SLS v1.0.14, owner ruling 2026-10-05:
 # M5, M15, H1, H4). An override in the env file would silently replace it, so
 # its presence refuses the deploy.
 ! grep -q '^SCANNER_SIGNAL_TIMEFRAMES=' ops/env/dev.env   || fail "ops/env/dev.env sets SCANNER_SIGNAL_TIMEFRAMES -- the published set lives in code (SLS v1.0.14)"
 
-echo "   all 32 batch markers present, signal-timeframe and shard overrides absent, tree at $(git rev-parse --short HEAD)"
+echo "   all 32 batch markers present, signal-timeframe override absent, two-shard topology in compose, tree at $(git rev-parse --short HEAD)"
 
 # ---------------------------------------------------------------------------
 step "1. Invariants before touching anything (expect: exit 0, 1 acknowledged)"
@@ -246,6 +260,8 @@ declare -A built_image=()
 for svc in api engine worker ingest; do
   built_image[$svc]=$(docker image inspect -f '{{.Id}}' "scanner-dev-$svc") || fail "no image for $svc after the build"
 done
+# engine-shard1 has no build of its own: it runs the image `engine` builds.
+built_image[engine-shard1]=${built_image[engine]}
 # <<< image-verify:record
 
 # ---------------------------------------------------------------------------
@@ -320,6 +336,23 @@ step "4. Deploy -- this resets T0, which is the point"
 wait_for_deploy_window 900 | sed 's/^/   /'
 [ "${PIPESTATUS[0]}" -eq 0 ] || fail "no safe deploy minute in 15 min -- nothing restarted; re-run this script (never \`docker compose up -d\` by hand)"
 
+# Speed step 1: the consumer groups before the switch (ops/soak/shard_groups.sh
+# states the rule: only the current topology's groups exist). One engine runs
+# today, so any shard group is a leftover of an earlier switch and stands where
+# that switch stopped. A shard resuming it would re-run every close since, so
+# it goes, and each shard group is created fresh from `engine` at the point the
+# old engine stops (runtime/engine.py, event_consumer.py `_resume_point`).
+if ! docker inspect scanner-dev-engine-shard1-1 >/dev/null 2>&1; then
+  groups_before=$(stream_groups)
+  printf '%s\n' "$groups_before" | grep -qx engine   || fail "one engine runs but there is no 'engine' group -- the shards would have nothing to start from"
+  for g in $SHARD_GROUPS; do
+    if printf '%s\n' "$groups_before" | grep -qx "$g"; then
+      [ "$(redis_cli XGROUP DESTROY "$CANDLE_STREAM" "$g")" = "1" ]   || fail "could not remove the stale group $g"
+      echo "   removed a stale $g left by an earlier switch"
+    fi
+  done
+fi
+
 $DC up -d || fail "compose up failed"
 sleep 15
 
@@ -341,7 +374,8 @@ docker exec scanner-dev-engine-1 grep -qF 'def _graded_displaced' /app/src/scann
 docker exec scanner-dev-engine-1 grep -qF 'def _known_by' /app/src/scanner/application/detection/ict_ob_replay.py   || fail "running engine: #318's OB evidence timing is absent"
 docker exec scanner-dev-engine-1 grep -qF 'candles = PassScopedCandles(' /app/src/scanner/runtime/wiring/detection.py   || fail "running engine: #319's per-pass candle read is absent"
 docker exec scanner-dev-engine-1 grep -qF 'def shard_of' /app/src/scanner/application/detection/shards.py   || fail "running engine: #320's shards module is absent"
-[ -z "$(docker exec scanner-dev-engine-1 printenv SCANNER_ENGINE_SHARD_COUNT 2>/dev/null)" ]   || fail "running engine has SCANNER_ENGINE_SHARD_COUNT set -- shards must be off"
+[ "$(docker exec scanner-dev-engine-1 printenv SCANNER_ENGINE_SHARD_COUNT 2>/dev/null | tr -d '\r')/$(docker exec scanner-dev-engine-1 printenv SCANNER_ENGINE_SHARD_INDEX 2>/dev/null | tr -d '\r')" = "2/0" ]   || fail "running engine is not shard 0 of 2"
+[ "$(docker exec scanner-dev-engine-shard1-1 printenv SCANNER_ENGINE_SHARD_COUNT 2>/dev/null | tr -d '\r')/$(docker exec scanner-dev-engine-shard1-1 printenv SCANNER_ENGINE_SHARD_INDEX 2>/dev/null | tr -d '\r')" = "2/1" ]   || fail "engine-shard1 is not shard 1 of 2"
 docker exec scanner-dev-engine-1 grep -qF 'DEFAULT_SIGNAL_TIMEFRAMES' /app/src/scanner/application/detection/confluence_replay.py   || fail "running engine: no fail-closed published-timeframe default"
 docker exec scanner-dev-engine-1 grep -qF 'def first_undecided_index' /app/src/scanner/application/detection/state.py   || fail "running engine: engines still re-decide the whole window"
 docker exec scanner-dev-engine-1 grep -qF 'CURRENT_EVENT_VERSIONS' /app/src/scanner/application/detection/event_versions.py   || fail "running engine: event reads are not pinned to the running versions"
@@ -363,11 +397,11 @@ docker exec scanner-dev-engine-1 grep -qF 'Timeframe.M5: 48,' /app/src/scanner/d
 docker exec scanner-dev-api-1 grep -qF 'def targets_view' /app/src/scanner/interfaces/api/targets.py   || fail "running api: laddered targets are not priced (#315)"
 
 # >>> image-verify:check  (exercised by ops/soak/test_post_soak_deploy_verify.sh)
-for svc in api engine worker ingest; do
+for svc in api engine engine-shard1 worker ingest; do
   running=$(docker inspect -f '{{.Image}}' "scanner-dev-$svc-1" 2>/dev/null)
   [ "$running" = "${built_image[$svc]}" ]   || fail "$svc runs image ${running:0:19}, this deploy built ${built_image[$svc]:0:19}"
 done
-echo "   api, engine, worker, ingest run the images this deploy built"
+echo "   api, engine, engine-shard1, worker, ingest run the images this deploy built"
 
 # Reported, not enforced (see the frontend note at step 3).
 fe_running=$(docker inspect -f '{{.Image}}' scanner-dev-frontend-1 2>/dev/null)
@@ -386,10 +420,25 @@ running_release=$(docker exec scanner-dev-engine-1 printenv SCANNER_RELEASE 2>/d
 new_started=$(docker inspect --format '{{.State.StartedAt}}' scanner-dev-engine-1)
 [ "$new_started" != "$started" ] || fail "engine StartedAt did not change -- it was not restarted"
 
-for c in scanner-dev-engine-1 scanner-dev-worker-1 scanner-dev-ingest-1 scanner-dev-api-1; do
+for c in scanner-dev-engine-1 scanner-dev-engine-shard1-1 scanner-dev-worker-1 scanner-dev-ingest-1 scanner-dev-api-1; do
   running=$(docker inspect --format '{{.State.Running}}' "$c")
   [ "$running" = "true" ] || fail "$c is not running after the deploy"
 done
+
+# Each shard creates its group when its consumer starts, seeded from `engine`.
+# Only once BOTH exist is `engine` retired; before that, retiring it would
+# leave the slower shard nothing to seed from, and it would start at "0".
+waited=0
+until [ "$(stream_groups | grep -cxE 'engine-shard-[01]-of-2')" = "2" ]; do
+  [ "$waited" -ge 120 ] && fail "the two shard groups did not both appear within 120 s -- $(stream_groups | tr '\n' ' ')"
+  sleep 5
+  waited=$((waited + 5))
+done
+if stream_groups | grep -qx engine; then
+  [ "$(redis_cli XGROUP DESTROY "$CANDLE_STREAM" engine)" = "1" ]   || fail "could not retire the single-engine group 'engine'"
+fi
+stream_groups | grep -qx engine   && fail "'engine' group still present after retiring it"
+echo "   consumer groups: $(stream_groups | tr '\n' ' ')(engine retired)"
 
 mkdir -p ~/soak-logs
 echo "$new_started" > ~/soak-logs/T0
@@ -400,57 +449,44 @@ step "6. What to do next (the parts that need hours, not a script)"
 # ---------------------------------------------------------------------------
 
 cat <<NEXT
-   1. After the first M5 close (~15 min), no pass may have failed. A schema
-      or wiring defect shows here before anywhere else -- on 2026-09-15 it
-      was 30 of these within five minutes:
+   1. After the first M5 close (~15 min), no pass may have failed on EITHER
+      engine. A schema or wiring defect shows here before anywhere else -- on
+      2026-09-15 it was 30 of these within five minutes:
 
-        docker logs --since "$new_started" scanner-dev-engine-1 2>&1 | grep -c detection_pass_failed
-          -- want: 0
+        for e in scanner-dev-engine-1 scanner-dev-engine-shard1-1; do docker logs --since "$new_started" \$e 2>&1 | grep -c detection_pass_failed; done
+          -- want: 0 and 0
 
-   2. After the first-pass burst (~30 min), nothing may be left pending:
+   2. Each shard really took its own symbols. The consumer-start line names
+      the group and the shard, and each engine passes only its symbols (the
+      hash split of today's 15 is 6 / 9):
 
-        docker exec scanner-dev-redis-1 redis-cli XPENDING scanner:stream:candle-closed engine
-          -- want: a first field of 0
+        for e in scanner-dev-engine-1 scanner-dev-engine-shard1-1; do docker logs --since "$new_started" \$e 2>&1 | grep engine_consumer_started | tail -1; done
+          -- want: group engine-shard-0-of-2 shard 0/2, and engine-shard-1-of-2 shard 1/2
+        for e in scanner-dev-engine-1 scanner-dev-engine-shard1-1; do docker logs --since "$new_started" \$e 2>&1 | grep -o '"symbol": "[A-Z]*"' | sort -u | wc -l; done
+          -- want: two counts that add up to 15, and no symbol in both
 
-   3. The signal gate. SLS v1.0.14 opened M5 and M15, so this reads the
-      opposite way round to every deploy before 2026-10-05: a count here is
-      correct, and a long run of zero is what deserves a look.
+   3. After the first-pass burst (~30 min), nothing may be left pending in
+      either group, and no group but the two shards' may exist:
 
-        $PSQL -c "select count(*) from detection.signals where timeframe in ('M5','M15') and published_at >= '$new_started';"
-          -- was: $pre_low_tf before this deploy
-          -- want: rising. Measured over 18 days before the ruling, M5 and M15
-             together were worth ~4 a day, so a 2-4 hour shakedown may well
-             show none -- judge it over a day, not over the shakedown.
-          -- all of them are grade B, and 10.1 pushes S and A only, so no
-             Telegram alert is expected from them either.
+        docker exec scanner-dev-redis-1 redis-cli XINFO GROUPS scanner:stream:candle-closed
+          -- want: exactly engine-shard-0-of-2 and engine-shard-1-of-2, pending 0, lag 0
+          -- until each shard has read the newest close (the first M5 close,
+             <= 5 min) Redis reports its lag as nil: a group created at an
+             explicit id has no entries-read until it reaches the stream's end
+             (rehearsed on a real Redis: ops/soak/rehearse_shard_groups_redis.sh).
+             soak_status.sh flags that as "could not read stream lag" -- an
+             alarm only if it outlives the first M5 close.
 
-   3b. SLS v1.0.15 on the first NEW M5 signal (v38 -- the same M5 rules as v36,
-       re-checked because the zones under them are now s6-ob-v9). Its levels are checked by
-       hand, not by trusting the code that made them:
-
-        $PSQL -c "select signal_id, direction, entry_proximal, invalidation_level, ttl_candles, payload::jsonb -> 'invalidation' ->> 'rule' as rule, target_bands::jsonb -> 'ladder' as ladder from detection.signals where timeframe = 'M5' and algo_version = 's8-confluence-v38' order by published_at limit 3;"
-          -- want: rule risk_stop; invalidation = proximal x 0.99 (UP) or
-             x 1.01 (DOWN); ttl_candles 48; ladder {start_r 2, step_r 1,
-             unbounded true}. Any M15/H1/H4 row under v38 must still have
-             NO ladder and a zone/sweep rule.
-          -- the $pre_live_m5 M5 signal(s) live at deploy keep their sealed
-             pool rule and TTL 24 -- correct, not a fault. Until they end, the
-             feed sorts them as if their TTL were 48 (display only, <= 2h).
-
-        $PSQL -c "select engine, version, param_set_version from detection.algo_versions where version = 's8-confluence-v38';"
-          -- want: one row, param set 2026.10.10.1, registered at first boot.
-
-   3c. s6-ob-v9's first pass on every context decides its whole window, so
-       the first close of each timeframe is slower than usual (estimated
-       ~0.2 s per context on this VM, not measured here). Then the speed:
-       the same two read-only measurements as before the deploy, compared
-       line by line with deploy-baseline/*_20261011* and *_20261012*:
+   3c. The speed, which is the point of this deploy. The same read-only
+       measurements, compared line by line with the v38 soak's
+       deploy-baseline/latency_after_deploy_20261025T2029Z.txt and
+       boundary_after_deploy_20261025T2029Z.txt (all-boundary p95 30.69 s):
 
         python3 - < ops/soak/latency_baseline.py
         python3 - < ops/soak/boundary_last_pass.py
-          -- want: the 'pass' stage and every passes/boundary row lower than
-             before (#319). SLS 14's targets are NOT expected to be met by
-             this deploy -- it is a step, measured, not the fix.
+          -- want: every passes/boundary row lower. The estimate is about
+             1.5-1.67x, so ~20 s all-boundary p95 -- an estimate, so the
+             24 h and 7 d numbers decide, not this.
 
    4. Invariants, then a 2-4 hour shakedown. The :17 cron keeps running;
       read ~/soak-logs/alerts.log before trusting anything:
@@ -463,6 +499,10 @@ cat <<NEXT
 
    6. Still deliberately NOT done here: SCANNER_INGEST_TRADES, and widening
       the ingest subscription. Each is its own step after a clean shakedown.
+
+   7. The way back to one engine is ops/soak/shards_off.sh (dry run by
+      default). Never an edit to the compose file followed by \`up -d\`: the
+      single \`engine\` group must first be re-created where the shards stopped.
 NEXT
 
 echo

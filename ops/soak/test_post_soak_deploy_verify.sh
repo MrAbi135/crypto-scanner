@@ -75,21 +75,27 @@ run() {
   fi
 }
 
-ALL_NEW=(scanner-dev-api-1=BUILT_api scanner-dev-engine-1=BUILT_engine scanner-dev-worker-1=BUILT_worker scanner-dev-ingest-1=BUILT_ingest)
+# engine-shard1 has no build of its own (speed step 1): it must run the image
+# the `engine` service built, BUILT_engine.
+ALL_NEW=(scanner-dev-api-1=BUILT_api scanner-dev-engine-1=BUILT_engine scanner-dev-engine-shard1-1=BUILT_engine scanner-dev-worker-1=BUILT_worker scanner-dev-ingest-1=BUILT_ingest)
+SHARD1_NEW=scanner-dev-engine-shard1-1=BUILT_engine
 
 echo "image-id verification"
 
-run 0 "all four backend containers run this deploy's images" "${ALL_NEW[@]}" scanner-dev-frontend-1=OLD_frontend
+run 0 "all five backend containers run this deploy's images" "${ALL_NEW[@]}" scanner-dev-frontend-1=OLD_frontend
 run 0 "frontend on a new image changes nothing" "${ALL_NEW[@]}" scanner-dev-frontend-1=BUILT_frontend
-run 1 "ingest left on an old image fails" scanner-dev-api-1=BUILT_api scanner-dev-engine-1=BUILT_engine scanner-dev-worker-1=BUILT_worker scanner-dev-ingest-1=OLD_ingest
-run 1 "api left on an old image fails" scanner-dev-api-1=OLD_api scanner-dev-engine-1=BUILT_engine scanner-dev-worker-1=BUILT_worker scanner-dev-ingest-1=BUILT_ingest
-run 1 "a missing worker container fails" scanner-dev-api-1=BUILT_api scanner-dev-engine-1=BUILT_engine scanner-dev-ingest-1=BUILT_ingest
-run 1 "two services swapped fails" scanner-dev-api-1=BUILT_engine scanner-dev-engine-1=BUILT_api scanner-dev-worker-1=BUILT_worker scanner-dev-ingest-1=BUILT_ingest
+run 1 "ingest left on an old image fails" scanner-dev-api-1=BUILT_api scanner-dev-engine-1=BUILT_engine $SHARD1_NEW scanner-dev-worker-1=BUILT_worker scanner-dev-ingest-1=OLD_ingest
+run 1 "api left on an old image fails" scanner-dev-api-1=OLD_api scanner-dev-engine-1=BUILT_engine $SHARD1_NEW scanner-dev-worker-1=BUILT_worker scanner-dev-ingest-1=BUILT_ingest
+run 1 "a missing worker container fails" scanner-dev-api-1=BUILT_api scanner-dev-engine-1=BUILT_engine $SHARD1_NEW scanner-dev-ingest-1=BUILT_ingest
+run 1 "two services swapped fails" scanner-dev-api-1=BUILT_engine scanner-dev-engine-1=BUILT_api $SHARD1_NEW scanner-dev-worker-1=BUILT_worker scanner-dev-ingest-1=BUILT_ingest
+run 1 "shard 1 left on an old engine image fails" scanner-dev-api-1=BUILT_api scanner-dev-engine-1=BUILT_engine scanner-dev-engine-shard1-1=OLD_engine scanner-dev-worker-1=BUILT_worker scanner-dev-ingest-1=BUILT_ingest
+run 1 "a missing shard 1 fails" scanner-dev-api-1=BUILT_api scanner-dev-engine-1=BUILT_engine scanner-dev-worker-1=BUILT_worker scanner-dev-ingest-1=BUILT_ingest
+run 1 "shard 1 on some other service's new image fails" scanner-dev-api-1=BUILT_api scanner-dev-engine-1=BUILT_engine scanner-dev-engine-shard1-1=BUILT_worker scanner-dev-worker-1=BUILT_worker scanner-dev-ingest-1=BUILT_ingest
 
 # The frontend is reported, never enforced (owner ruling 2026-10-17), and the
 # report must say which way it is.
 report=$(
-  declare -A RUNNING=([scanner-dev-api-1]=BUILT_api [scanner-dev-engine-1]=BUILT_engine [scanner-dev-worker-1]=BUILT_worker [scanner-dev-ingest-1]=BUILT_ingest [scanner-dev-frontend-1]=OLD_frontend)
+  declare -A RUNNING=([scanner-dev-api-1]=BUILT_api [scanner-dev-engine-1]=BUILT_engine [scanner-dev-engine-shard1-1]=BUILT_engine [scanner-dev-worker-1]=BUILT_worker [scanner-dev-ingest-1]=BUILT_ingest [scanner-dev-frontend-1]=OLD_frontend)
   fail() { echo "!! $*"; exit 1; }
   docker() { case "$1" in image) echo "BUILT_${5#scanner-dev-}" ;; inspect) echo "${RUNNING[$4]:-}" ;; esac; }
   eval "$RECORD"; eval "$CHECK"
