@@ -78,6 +78,7 @@ def _signal(
     timeframe: str = "H1",
     ttl_candles: str = "12",
     age_seconds: str = "3660",
+    invalidation_rule: str = "zone_distal_edge",
 ) -> dict[str, str]:
     """A row as `published_since` returns it, defaulted to a signal at FIRST SIGHT.
 
@@ -106,8 +107,24 @@ def _signal(
         "age_seconds": age_seconds,
         # A pool-exit signal: no ladder, sealed under the zone rule.
         "target_bands": '{"primary":{"low":"110","high":"110","pool_id":"p1"},"secondary":null}',
-        "invalidation_rule": "zone_distal_edge",
+        "invalidation_rule": invalidation_rule,
     }
+
+
+def _m5(signal_id: str, **kwargs: str) -> dict[str, str]:
+    """A row the notifier pushes since the owner's Z4 ruling: M5 under `risk_stop`.
+
+    One M5 period plus a minute old at first sight, for the same reason
+    `_signal` defaults H1 to 3660 s.
+    """
+    fields = {
+        "timeframe": "M5",
+        "age_seconds": "360",
+        "ttl_candles": "48",
+        "invalidation_rule": "risk_stop",
+    }
+    fields.update(kwargs)
+    return _signal(signal_id, **fields)
 
 
 def test_a_cold_start_with_no_signals_still_ends_the_cold_start(notifier, monkeypatch) -> None:
@@ -137,7 +154,7 @@ def test_the_first_signal_after_a_cold_start_is_not_swallowed(notifier, monkeypa
     _offline(notifier, monkeypatch, [])
     assert notifier.main() == 0
 
-    _offline(notifier, monkeypatch, [_signal("SIG_FIRST_EVER")])
+    _offline(notifier, monkeypatch, [_m5("SIG_FIRST_EVER")])
     assert notifier.main() == 0
 
     lines = notifier.LOG.read_text(encoding="utf-8").splitlines()
@@ -161,10 +178,10 @@ def test_grade_and_tier_caps_are_applied_through_main(notifier, monkeypatch) -> 
         notifier,
         monkeypatch,
         [
-            _signal("SIG_GRADE_B", grade="B"),
-            _signal("SIG_GRADE_X", grade="C"),
-            _signal("SIG_INELIGIBLE", tier="INELIGIBLE"),
-            _signal("SIG_GOOD"),
+            _m5("SIG_GRADE_B", grade="B"),
+            _m5("SIG_GRADE_X", grade="C"),
+            _m5("SIG_INELIGIBLE", tier="INELIGIBLE"),
+            _m5("SIG_GOOD"),
         ],
     )
     notifier.main()
@@ -263,7 +280,7 @@ def test_the_measured_317_second_signal_is_dispatched(notifier, monkeypatch) -> 
     _offline(
         notifier,
         monkeypatch,
-        [_signal("SIG_317", timeframe="M5", age_seconds="317", ttl_candles="12")],
+        [_m5("SIG_317", age_seconds="317", ttl_candles="12")],
     )
     notifier.main()
 
@@ -296,6 +313,105 @@ def test_a_signal_past_its_own_ttl_is_suppressed_and_said_so(notifier, monkeypat
     assert "DRY RUN would send signal SIG_STALE" not in log, "an expired signal was pushed"
     assert "suppressed stale" in log, "it was dropped without saying why: " + log
     assert "ttl=7200s" in log, "the log must show the lifetime it was measured against"
+
+
+def test_only_risk_stop_signals_are_pushed_and_the_rest_say_why(notifier, monkeypatch) -> None:
+    """Owner ruling 2026-11-08 (Z4), driven through `main()`.
+
+    The three stop rules the engine has published since v35: the M5 `risk_stop`
+    pushes; a zone-edge M15/H1 signal and a swept-extreme H4 signal are dropped
+    with a reason in the log and a verdict in the ledger, so they are decided
+    once and never earn a close-the-loop message.
+    """
+    _offline(notifier, monkeypatch, [])
+    notifier.main()
+
+    _offline(
+        notifier,
+        monkeypatch,
+        [
+            _m5("SIG_RISK"),
+            _signal(
+                "SIG_ZONE", timeframe="M15", age_seconds="960", invalidation_rule="zone_distal_edge"
+            ),
+            _signal(
+                "SIG_SWEPT", timeframe="H4", age_seconds="14460", invalidation_rule="swept_extreme"
+            ),
+            _signal("SIG_BLANK", invalidation_rule=""),
+        ],
+    )
+    notifier.main()
+
+    log = notifier.LOG.read_text(encoding="utf-8")
+
+    assert "DRY RUN would send signal SIG_RISK" in log
+    for sid in ("SIG_ZONE", "SIG_SWEPT", "SIG_BLANK"):
+        assert f"DRY RUN would send signal {sid}" not in log, f"{sid} was pushed"
+    assert "suppressed stop-rule=zone_distal_edge" in log, log
+    assert "suppressed stop-rule=swept_extreme" in log, log
+    assert "suppressed stop-rule=(none)" in log, (
+        "an empty rule must be dropped and named, not pushed"
+    )
+
+    decided, pushed = notifier.load_ledger()
+
+    assert {"SIG_ZONE", "SIG_SWEPT", "SIG_BLANK"} <= decided, "a suppression must be decided once"
+    assert not {"SIG_ZONE", "SIG_SWEPT", "SIG_BLANK"} & pushed, (
+        "a suppressed signal must not close the loop"
+    )
+    assert notifier.ledger_count_today(NOW) == 0, "a suppression must not consume the daily cap"
+
+
+def test_an_earlier_suppression_keeps_its_own_reason(notifier, monkeypatch) -> None:
+    """The stop-rule check runs last, so an off-grade or stale zone signal is
+    still logged for the reason it always was."""
+    _offline(notifier, monkeypatch, [])
+    notifier.main()
+
+    _offline(
+        notifier,
+        monkeypatch,
+        [
+            _signal("SIG_ZONE_C", grade="C"),
+            _signal("SIG_ZONE_STALE", ttl_candles="2", age_seconds="20000"),
+        ],
+    )
+    notifier.main()
+
+    log = notifier.LOG.read_text(encoding="utf-8")
+
+    assert "suppressed grade=C" in log
+    assert "suppressed stale" in log
+    assert "suppressed stop-rule" not in log
+
+
+def test_a_zone_signal_pushed_before_the_rule_still_gets_its_ending(notifier, monkeypatch) -> None:
+    """A trader told about an entry must be told how it ended, whatever the
+    entry rule says today. Pushed before Z4 = in the ledger as `signal`."""
+    _offline(notifier, monkeypatch, [])
+    notifier.main()
+    notifier.ledger_append(NOW, "signal", "SIG_ZONE_OLD")
+
+    asked: list[list[str]] = []
+
+    def transitions(ids: list[str]) -> list[dict[str, str]]:
+        asked.append(ids)
+        return [
+            {
+                "transition_id": "t-zone",
+                "signal_id": "SIG_ZONE_OLD",
+                "to_state": "FAILED",
+                "at": NOW.isoformat(),
+                "trigger_evidence": "{}",
+            }
+        ]
+
+    _offline(notifier, monkeypatch, [])
+    monkeypatch.setattr(notifier, "terminal_transitions", transitions)
+    notifier.main()
+
+    assert asked == [["SIG_ZONE_OLD"]]
+    assert "DRY RUN would send transition t-zone" in notifier.LOG.read_text(encoding="utf-8")
 
 
 def test_an_absent_ttl_falls_back_to_two_candles_not_to_forever(notifier) -> None:
