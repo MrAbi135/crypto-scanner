@@ -85,6 +85,19 @@ If it dies, detection does not notice.
 §10.1 requires "honest suppression, never silent", which is why the third file
 records the drops as loudly as the sends.
 
+## Which signals it pushes (owner ruling 2026-11-08, "Z4")
+
+Only signals whose stop rule is `risk_stop` (`PUSH_STOP_RULES`). Since SLS
+v1.0.15 that is the M5 1% stop, so in practice only M5 signals reach Telegram.
+Zone-edge and swept-extreme signals are still published and recorded by the
+engine; the notifier logs `suppressed stop-rule=…` and writes `suppressed-zone`
+to the ledger instead of sending them. A signal pushed before this rule still
+gets its close-the-loop message. §10.1 permits this: user filters may narrow
+eligibility, never widen it.
+
+To undo: revert the commit and pull it on the VM. Signals suppressed in the
+meantime stay decided, so nothing is replayed.
+
 ## Expect it to be quiet
 
 Nine signals exist in the project's history and the most recent was published

@@ -133,6 +133,14 @@ PUSH_GRADES = frozenset({"S", "A", "B"})
 # universe job demotes and promotes symbols every midnight.
 PUSH_TIERS = frozenset({"T1", "T2", "T3"})
 
+# Owner ruling 2026-11-08 ("Z4"): only `risk_stop` signals reach Telegram.
+# The reasoning and its evidence are the owner's record, kept outside this
+# repository. The engine still publishes and records the other signals; this
+# only stops the push. §10.1 allows exactly this: "user filters may
+# *narrow* eligibility ... but never widen". Since SLS v1.0.15 `risk_stop` is
+# the M5 stop, so in practice this pushes M5 only.
+PUSH_STOP_RULES = frozenset({"risk_stop"})
+
 # §10.1: "P.alert.user_daily_cap = 25 push alerts/day default".
 DAILY_CAP = 25
 
@@ -1029,6 +1037,20 @@ def main() -> int:
                 f"{row['symbol']} {row['timeframe']} {row['signal_id'][:12]} (§10.2)"
             )
             ledger_append(now, "suppressed-stale", row["signal_id"])
+            continue
+
+        # Last, so a signal that is also off-grade, off-tier or stale keeps the
+        # reason it always had. Recorded in the ledger like every other verdict,
+        # so it is decided once; and because only a *sent* signal is in
+        # `pushed`, a zone signal suppressed here never gets a close-the-loop
+        # message, while one pushed before this rule still gets its ending.
+        if row["invalidation_rule"] not in PUSH_STOP_RULES:
+            log(
+                f"suppressed stop-rule={row['invalidation_rule'] or '(none)'} "
+                f"{row['symbol']} {row['timeframe']} {row['signal_id'][:12]} "
+                "(owner Z4, §10.1 narrowing)"
+            )
+            ledger_append(now, "suppressed-zone", row["signal_id"])
             continue
 
         pending.append(("signal", row["signal_id"], format_signal(row)))
