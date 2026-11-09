@@ -7,6 +7,20 @@ Repo-level context for Claude Code sessions working in this repository.
 API spec. Where this file and those disagree, they win. Where the code and the
 SLS disagree, the SLS says the code is wrong.
 
+## Public repository: no performance results
+
+`crypto-scanner` is a **public** repository. Never put performance results in
+anything that reaches GitHub: commit messages, PR titles or descriptions, code
+comments, branch names, issues, docs, or test names. This covers R values, win
+rate, P&L, returns, trade counts tied to results, signal outcomes, and
+quality-gate statistics.
+
+- Such numbers stay in `deploy-baseline/` (outside git) or in memory.
+- Before every push, check the diff and the commit message for them.
+- If a result must be referenced, write "see private record" instead.
+- Public facts that define the doctrine (a rule's parameters as written in the
+  SLS) are not results and may appear.
+
 ## Future Integration: the Hybrid Trading Bot
 
 There is a second, **separate** project on this account — the **Hybrid Trading
@@ -56,9 +70,9 @@ easily get them backwards:
    stop records only `stress_test`. A bot holding a real stop exits on that
    wick. So a consumer must re-simulate outcomes with execution-realistic fills
    plus fees and slippage, and must never present this engine's published hit
-   rate as its own expected performance. This is not hypothetical: the same
-   signals scored PF 1.121 under close-based stops and PF 0.697 under
-   touch-based stops when it was measured.
+   rate as its own expected performance. This is not hypothetical: close-based
+   and touch-based stops gave materially different results on the same
+   signals (see private record).
 
 There is no export, webhook or public-API surface for scan results today, and
 the public API programme is deferred. The two integration paths that exist are
