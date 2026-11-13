@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.18
-**Ratified:** 2026-07-12 · **Last amended:** 2026-10-27 (v1.0.18; see Amendment History)
+**Version:** 1.0.19
+**Ratified:** 2026-07-12 · **Last amended:** 2026-11-13 (v1.0.19; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -1102,7 +1102,7 @@ A signal is a claim backed by evidence (Constitution §28.1). Anything less than
 | Risk | Invalidation distance in ATR and %, R-multiple to target, market-condition tags (wash_risk, funding extreme, exhaustion_watch, news_risk) | §12, §6, §7 |
 | Invalidation | Exact price level + rule that set it (zone distal edge / swept extreme per archetype). **On M5: `risk_stop`**, `P.risk.stop_pct[M5]` = 1.0% of the entry **proximal** edge, against D (v1.0.15) | §5, §8.6, §12.3 |
 | Entry Zone | Zone band [proximal, distal] + zone object id + refined sub-zone where defined | §5 |
-| Target Zone | Primary: nearest opposing external liquidity pool band; Secondary: next pool / range extreme; both with pool ids and strengths. **On M5: a ladder `TPn = (n+1) × R`** from `P.risk.tp_ladder_start` = 2R in steps of `P.risk.tp_ladder_step` = 1R, unbounded; the pool bands are still recorded as evidence but do not set the exit (v1.0.15) | §4.5, §12.3 |
+| Target Zone | Primary: nearest opposing external liquidity pool band; Secondary: next pool / range extreme; both with pool ids and strengths. **On M5: a ladder `TPn = (n+1) × R`** from `P.risk.tp_ladder_start` = 2R in steps of `P.risk.tp_ladder_step` = 1R, unbounded; the pool bands are still recorded as evidence but do not set the exit (v1.0.15). **The primary pool band is still required on M5:** a candidate with no opposing external pool is suppressed `INCOMPLETE_PAYLOAD` under §15.3(1), with the missing row named (v1.0.19) | §4.5, §12.3 |
 | Supported Timeframes | Signal TF + HTF bias chain states at creation (snapshot) | §3.7 |
 | Versions | algo_version, param_set_version, model/prompt versions (if AI text attached) | §0.4 |
 
@@ -1185,6 +1185,29 @@ Every parameter change increments `param_set_version` and requires golden-datase
 ---
 
 ## Amendment History
+
+### v1.0.19 — 2026-11-13
+
+**§15.2 Target Zone, M5: the primary pool band is still required. A candidate
+with no opposing external pool is suppressed `INCOMPLETE_PAYLOAD`.**
+
+**Why.** v1.0.15 moved M5's exit to the R-ladder and said the pool bands "are
+still recorded as evidence". It did not say what happens when there is no pool
+to record. §15.3(1) requires every §15.2 row to be non-null, and the engine has
+read the row that way since v1.0.15: no pool, no signal, a suppression naming
+`primary_target`. The owner was shown the reading, the alternatives (publish
+without a pool; fall back to the first ladder rung as the target) and how
+rarely the case occurs, and ruled on 2026-11-13 to keep the requirement and
+write it down. Keeping it also keeps the M5 signal set the same as the one the
+current pilot and the registered quality gate are drawn from.
+
+**Not changed.** The ladder, the risk stop, the trailing rule, the TTL, and
+§15.3(3). Other timeframes, where the pool band already sets the target.
+
+**Code.** None. `application/detection/confluence_replay.py` (`_levels_for`)
+already behaves this way, and the suppression already records
+`payload_unmet: ["primary_target"]` (since #296). No algo-version change, no
+redeploy.
 
 ### v1.0.18 — 2026-10-27
 
