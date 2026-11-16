@@ -1,0 +1,54 @@
+window 2026-10-28T04:20:39+00:00 -> 2026-11-04T04:20:39+00:00
+passes by TF: {'M5': 30240, 'M15': 10080, 'H1': 2520, 'H4': 630, 'D1': 105}
+duplicates (same sym,tf,close): 0
+ALL per-context                    n= 43575 p50= 0.782 p95= 1.492 p99= 1.881 max= 4.111 >2s=231
+E0                                 n= 17430 p50= 0.856 p95= 1.687 p99= 2.048 max= 4.111 >2s=211
+E1                                 n= 26145 p50= 0.735 p95= 1.308 p99= 1.625 max= 2.739 >2s=20
+symbols: {'E0': ['BNBUSDT', 'BTCUSDT', 'ETHUSDT', 'PUMPUSDT', 'SUIUSDT', 'XRPUSDT'], 'E1': ['ADAUSDT', 'DOGEUSDT', 'LINKUSDT', 'LISTAUSDT', 'LITEBUSDT', 'SOLUSDT', 'TRXUSDT', 'UNIUSDT', 'ZECUSDT']}
+TF M5                              n= 30240 p50= 0.774 p95= 1.489 p99= 1.883 max= 4.111 >2s=156
+TF M15                             n= 10080 p50= 0.798 p95= 1.470 p99= 1.814 max= 2.699 >2s=41
+TF H1                              n=  2520 p50= 0.784 p95= 1.554 p99= 1.932 max= 2.460 >2s=14
+TF H4                              n=   630 p50= 0.858 p95= 1.798 p99= 2.470 max= 3.080 >2s=16
+TF D1                              n=   105 p50= 0.749 p95= 1.856 p99= 2.739 max= 2.955 >2s=4
+
+--- per symbol, M5 only
+E1 ADAUSDT    n=2016 p50=0.832 p95=1.394  pools p50=109
+E0 BNBUSDT    n=2016 p50=0.912 p95=1.760  pools p50=116
+E0 BTCUSDT    n=2016 p50=1.147 p95=1.945  pools p50=127
+E1 DOGEUSDT   n=2016 p50=0.966 p95=1.456  pools p50=126
+E0 ETHUSDT    n=2016 p50=1.147 p95=1.800  pools p50=129
+E1 LINKUSDT   n=2016 p50=0.933 p95=1.403  pools p50=119
+E1 LISTAUSDT  n=2016 p50=0.776 p95=1.346  pools p50=85
+E1 LITEBUSDT  n=2016 p50=0.818 p95=1.361  pools p50=125
+E0 PUMPUSDT   n=2016 p50=0.799 p95=1.335  pools p50=127
+E1 SOLUSDT    n=2016 p50=0.681 p95=1.040  pools p50=125
+E0 SUIUSDT    n=2016 p50=0.777 p95=1.208  pools p50=119
+E1 TRXUSDT    n=2016 p50=0.609 p95=0.948  pools p50=80
+E1 UNIUSDT    n=2016 p50=0.649 p95=0.930  pools p50=118
+E0 XRPUSDT    n=2016 p50=0.741 p95=1.115  pools p50=127
+E1 ZECUSDT    n=2016 p50=0.623 p95=0.742  pools p50=127
+
+--- pass time by overlap with the other engine (same engine, M5 only, to hold the workload fixed)
+E0 M5 alone (ov<10%)               n=    78 p50= 0.730 p95= 0.974 p99= 1.013 max= 1.103 >2s=0
+E0 M5 partly                       n=    69 p50= 0.928 p95= 1.302 p99= 1.391 max= 1.431 >2s=0
+E0 M5 full (ov>=90%)               n= 11949 p50= 0.863 p95= 1.705 p99= 2.049 max= 4.111 >2s=147
+E1 M5 alone (ov<10%)               n=  5458 p50= 0.621 p95= 0.749 p99= 0.831 max= 1.326 >2s=0
+E1 M5 partly                       n=  1398 p50= 0.646 p95= 0.910 p99= 1.068 max= 1.343 >2s=0
+E1 M5 full (ov>=90%)               n= 11288 p50= 0.858 p95= 1.387 p99= 1.652 max= 2.517 >2s=9
+
+--- same, one symbol each, to hold the symbol fixed
+BTCUSDT M5 full                    n=  1981 p50= 1.159 p95= 1.951 p99= 2.227 max= 4.111 >2s=79
+DOGEUSDT M5 alone                  n=   138 p50= 0.651 p95= 0.751 p99= 0.861 max= 0.983 >2s=0
+DOGEUSDT M5 full                   n=  1846 p50= 0.995 p95= 1.477 p99= 1.783 max= 2.445 >2s=3
+ZECUSDT M5 alone                   n=  1940 p50= 0.622 p95= 0.737 p99= 0.841 max= 1.088 >2s=0
+ZECUSDT M5 full                    n=    24 p50= 0.679 p95= 0.934 p99= 0.938 max= 0.938 >2s=0
+
+share of passes that were alone:  {'E0': 0.004, 'E1': 0.245}
+
+boundaries complete 2016 incomplete 0 (incomplete = cut by the window edges)
+boundary 15                        n=  1344 p50= 8.252 p95= 9.424 p99= 9.844 max=14.752 >2s=1344
+boundary 30                        n=   504 p50=14.914 p95=16.727 p99=17.243 max=18.620 >2s=504
+boundary 45                        n=   126 p50=21.640 p95=24.358 p99=25.491 max=25.656 >2s=126
+boundary 60                        n=    35 p50=29.524 p95=31.886 p99=32.966 max=32.966 >2s=35
+boundary 75                        n=     7 p50=34.216 p95=41.072 p99=41.072 max=41.072 >2s=7
+boundary all                       n=  2016 p50= 8.798 p95=21.742 p99=30.853 max=41.072 >2s=2016
