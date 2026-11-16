@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.19
-**Ratified:** 2026-07-12 · **Last amended:** 2026-11-13 (v1.0.19; see Amendment History)
+**Version:** 1.0.20
+**Ratified:** 2026-07-12 · **Last amended:** 2026-11-16 (v1.0.20; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -237,6 +237,12 @@ Every data type below specifies: source, computation, freshness contract, valida
 
 Freshness state is attached to every downstream output; a signal computed from any non-fresh feed is barred from publication (§15.3).
 
+**How the rows are read (v1.0.20).**
+
+1. **Which feed.** The feed that bars a signal is the signal's **own** feed: the candle stream of its symbol and timeframe. The ingest process keeps that feed's state where the engine can read it, and §15.3(2) reads it at the publish moment. A signal whose own feed is not `FRESH` is `SUPPRESSED` with reason `STALE_FEEDS`. If the engine cannot read the state at all, it treats the feed as not fresh (fail closed). *Implementation pending: ships with Bundle D.*
+2. **Row 1 between Fresh and Stale.** A lag above 2 s and at most 5 s leaves the feed's state unchanged. A feed that was `FRESH` stays `FRESH`, and a feed that was `STALE` stays `STALE` until a lag of at most 2 s. (The engine already behaves this way.)
+3. **Row 2 is measured, not yet enforced.** The ingest records, for every committed candle, the time from the candle's close to its commit. Row 2 bars nothing until a later amendment sets how it is enforced. *Implementation pending: ships with Bundle D.*
+
 ### 2.13 Data Validation
 
 Every incoming candle passes, in order: (1) `H ≥ max(O, Cl)`, `L ≤ min(O, Cl)`, `H ≥ L`, `V ≥ 0`; (2) timestamp = expected next open time (else gap protocol §2.15); (3) duplicate open-time ⇒ keep exchange-final version, log; (4) sanity: `|Cl − Cl_prev| / Cl_prev > 40%` in one candle on a T1/T2 symbol ⇒ quarantine candle, cross-verify against aggTrade prints before release to detectors; (5) 1m-aggregation cross-check on each higher-TF close (mismatch beyond rounding ⇒ rebuild from 1m, log discrepancy). Failed candles never reach detectors.
@@ -335,11 +341,12 @@ stateDiagram-v2
 **Detection Logic.**
 - Bullish BOS: trend ∈ {BULLISH, BULLISH_CAUTION} **and** a candle **closes** above the most recent confirmed external swing high: `Cl[i] > H[swing] + ε`. Mirror for bearish BOS below the external swing low.
 - The break candle is the first closing candle beyond the level. The broken swing is marked `consumed_by: BOS#id` (a swing is broken at most once).
+- **Surpassed levels.** When a BOS is recorded, every older unconsumed level of the same kind that the break candle's close has already passed is consumed with it, silently: no event is recorded for it. A level price has already closed beyond is bookkeeping, not a new break. (The engine's behaviour since 2026-08-23, #89; v1.0.20 writes it down because §3.6 now uses the same rule.)
 - A **wick-only** penetration (`H[i] > H[swing]` but `Cl[i] ≤ H[swing] + ε`) is **not** BOS — it is routed to the Liquidity Engine as a sweep candidate (§4.6). This single rule is the doctrine's principal false-breakout filter.
 
 *Compared alternatives.* Wick-break BOS (fastest, worst false-positive rate — rejected); single-close BOS (**chosen**: deterministic, timely, filters pure stop-hunts); two-consecutive-close BOS (available as strict mode `P.structure.bos_strict = false` by default — slower by one full candle, materially late on H4/D1).
 
-**Validation Rules.** Level must be a confirmed external swing not previously consumed; data continuity across break; trend-direction agreement. BOS quality grade recorded: `displaced` (the break candle or the candle before it is a §5.10 displacement candle **whose direction (§5.10(4)) is the break's direction**) vs `plain` — grade affects scoring (§8), not validity. The grade belongs to the break alone: it is measured on that break's own two candles and is never lent from one break to another (v1.0.16).
+**Validation Rules.** Level must be a confirmed external swing not previously consumed — **by a BOS or by a CHoCH** (v1.0.20). A swing that a CHoCH (§3.6) consumed on an earlier candle is not available to BOS: no BOS is ever recorded on that level, and the next BOS in that direction is a break of the next unconsumed level. Only the consumption of an **external** swing blocks a BOS; a CHoCH that consumed an internal swing does not consume the external swing at the same point. Consumption stands after an MSS follow-through fails (§3.6): the CHoCH happened and its swing stays consumed. *Implementation pending: ships with Bundle D.* Data continuity across break; trend-direction agreement. BOS quality grade recorded: `displaced` (the break candle or the candle before it is a §5.10 displacement candle **whose direction (§5.10(4)) is the break's direction**) vs `plain` — grade affects scoring (§8), not validity. The grade belongs to the break alone: it is measured on that break's own two candles and is never lent from one break to another (v1.0.16).
 
 **Invalidation Rules.** BOS is a fact once confirmed. A **failed break** is recorded (fact, not deletion) if within `P.structure.failed_break_candles = 3` closed candles price closes back beyond the broken level in the opposite direction; downstream consumers (confluence, lifecycle) treat `failed: true` as strong contrary evidence.
 
@@ -354,8 +361,15 @@ stateDiagram-v2
 **Inputs.** Trend state; last confirmed internal + external swings; displacement detector (§5.10); liquidity sweep records (§4.6).
 
 **Detection Logic — CHoCH.**
-- In BULLISH: first candle **close** below the most recent confirmed swing low that initiated the current up-leg (the latest confirmed HL; internal HL qualifies if no external HL exists in the current leg). `Cl[i] < L[swing] − ε`.
+- In BULLISH: first candle **close** below the most recent confirmed swing low that initiated the current up-leg (the latest confirmed HL; internal HL qualifies if no external HL exists in the current leg). `Cl[i] < L[swing] − ε`. The `− ε` applies exactly as in §3.5: a close within ε of the level is not a break. *Implementation pending: ships with Bundle D.*
 - Mirror in BEARISH. Effect: trend state → `*_CAUTION`. CHoCH consumes its swing (marked `consumed_by: CHOCH#id`).
+- **The current leg (v1.0.20).** In BULLISH, the leg is fixed on each closed candle from **external** structure only:
+  1. *Trend start:* the low of the move that turned the trend bullish, which is the lowest low from the swing that turning CHoCH broke up to the CHoCH's candle. When the trend has no recorded turning CHoCH, the start is the second most recent confirmed external HL.
+  2. *Running extreme:* the highest high from the trend start to the previous closed candle.
+  3. *Leg origin:* the lowest low between the last confirmed external swing high before the running extreme and the running extreme itself. If no external swing high lies after the trend start, the search begins at the trend start.
+
+  Only swings at or after the leg origin are eligible: external first, internal only if the leg holds no eligible external swing. If no swing is eligible, there is no CHoCH on that candle. The engine never reaches back to a swing from an earlier leg. Mirror in BEARISH (running extreme = lowest low; leg origin = highest high after the last confirmed external swing low before it). *Implementation pending: ships with Bundle D.*
+- **Surpassed levels (v1.0.20).** A swing low that some closed candle after the swing's confirmation, and before the current candle, has already closed below is **surpassed**. It is consumed silently, with no event, as §3.5 does for BOS, and it can no longer be broken by a CHoCH. Mirror in BEARISH. *Implementation pending: ships with Bundle D.*
 
 **Detection Logic — MSS.** MSS confirms when **all** of the following hold:
 1. A CHoCH exists (as above), and its break leg satisfies **displacement** (§5.10) on the break candle or either adjacent closed candle;
@@ -370,7 +384,7 @@ On MSS confirmation: trend flips; the MSS origin range becomes prime zone territ
 
 **Invalidation Rules.** Post-MSS, if price closes back beyond the pre-MSS extreme (the swept low/high) within `P.structure.mss_invalid_candles = 10`, the new trend is demoted to RANGING and the MSS marked `low_quality: true` (fact preserved; scoring consequences in §8/§9).
 
-**Edge Cases.** (1) CHoCH and BOS conditions on the same candle (violent V-reversal): CHoCH evaluates against the *pre-candle* trend state; state transitions apply in event order swing→BOS→CHoCH within one close, and the resulting state is deterministic. (2) Multiple candidate HLs (nested legs): CHoCH always references the **most recent confirmed** HL at evaluation time. (3) MSS across a data gap: prohibited — evidence chain may not span `DEGRADED` data.
+**Edge Cases.** (1) CHoCH and BOS conditions on the same candle (violent V-reversal): CHoCH evaluates against the *pre-candle* trend state; state transitions apply in event order swing→BOS→CHoCH within one close, and the resulting state is deterministic. (2) Multiple candidate HLs (nested legs): CHoCH always references the **most recent confirmed** HL **inside the current leg** at evaluation time. (3) MSS across a data gap: prohibited — evidence chain may not span `DEGRADED` data.
 
 **Performance.** All checks are O(1) per close against tracked state. **Future.** MSS quality percentile from historical outcome base rates per symbol class.
 
@@ -628,7 +642,7 @@ Volume is confirmation evidence, never a standalone signal — and in crypto it 
 
 **Purpose.** Normalize participation so "high volume" means the same thing on BTC and a mid-cap.
 **Inputs.** RVOL per §2.11.
-**Detection Logic.** Per closed candle: `NORMAL` (RVOL < 1.5) · `ELEVATED` (1.5–3.0) · `SPIKE` (3.0–5.0) · `ABNORMAL` (≥ 5.0). Class boundaries are `P.volume.rvol_bands`.
+**Detection Logic.** Per closed candle: `NORMAL` (RVOL < 1.5) · `ELEVATED` (1.5 ≤ RVOL < 3.0) · `SPIKE` (3.0 ≤ RVOL < 5.0) · `ABNORMAL` (≥ 5.0). Every class includes its lower edge: an RVOL of exactly 3.0 is `SPIKE` (v1.0.20; the engine already behaves this way). Class boundaries are `P.volume.rvol_bands`.
 **Validation.** Baseline requires full lookback (§1.9); baseline windows never span DEGRADED gaps.
 **Invalidation.** Classes are per-candle measurements — permanent facts.
 **Edge Cases.** Session-boundary candles on intraday TFs use time-of-day baselines (§2.11) precisely to avoid false spikes at session opens; candle with V = 0 (halt): routed to §1.5.4, not classified.
@@ -648,7 +662,16 @@ Volume is confirmation evidence, never a standalone signal — and in crypto it 
 
 ### 6.4 Abnormal Volume
 
-`ABNORMAL` class (≥ 5× baseline) triggers mandatory cross-validation before it may contribute positive score: (1) trade-count on candle ≥ 3× its 20-candle median (many participants, not one wash loop); (2) order-book depth (nearest snapshot) not anomalously thin (depth ≥ 50% of its 7-day median). Failing either ⇒ tag `suspect_volume`, volume factor contribution capped at neutral (50), symbol fake-volume counter incremented (§6.6).
+`ABNORMAL` class (≥ 5× baseline) triggers mandatory cross-validation before it may contribute positive score: (1) trade-count on candle ≥ 3× its 20-candle median (many participants, not one wash loop); (2) order-book depth not anomalously thin (depth ≥ 50% of its 7-day median). Failing either ⇒ tag `suspect_volume`, volume factor contribution capped at neutral (50), symbol fake-volume counter incremented (§6.6).
+
+**The depth input (v1.0.20).** The depth for test (2) is the latest daily ±2% depth snapshot taken **at or before** the candle's close. The 7-day median is taken over the seven daily snapshots ending at that one. A snapshot taken after the candle's close is never read (no look-ahead). *Implementation pending: ships with Bundle D.*
+
+**An incomplete check (v1.0.20).** The check is *validated* only when both tests could be evaluated. When an input is missing (no trade count, or no depth snapshot in reach), the check is not validated, and then:
+
+- the volume factor contribution is capped at neutral (50), as for `suspect_volume`, so the candle earns **no positive volume points**;
+- the candle is **not** tagged `suspect_volume`, and the fake-volume counter (§6.6) is **not** incremented. A missing input is not evidence of fake volume.
+
+*Implementation pending: ships with Bundle D.*
 
 ### 6.5 Detector: Institutional Volume Signature
 
@@ -682,6 +705,7 @@ Momentum answers *when*: is energy building, releasing, or fading. All measures 
 - **Close consistency (0–25):** count of last 10 closed candles closing in the dominant direction; 8+ → 25, linear from 5.
 - **Body dominance (0–25):** mean(body/range) of last 10 candles in dominant direction vs. counter candles; ratio ≥ 2 → 25.
 - **Participation (0–25):** mean RVOL of dominant-direction candles ÷ mean RVOL of counter candles over the window; ≥ 1.5 → 25.
+- **No counter candles (v1.0.20).** When the window holds no counter candle, body dominance and participation each score 25: an unopposed window is the strongest dominance there is. (The engine already behaves this way.)
 **Validation.** Requires 30-candle warm-up; undefined during DEGRADED. **Invalidation.** Per-candle measurement (fact). **Edge Cases.** Mixed window with no dominant direction (5/5 split, |roc| < 0.5): score forced ≤ 35 and direction `NEUTRAL` — the engine must not manufacture direction from noise. **Performance.** Rolling windows, O(1). **Future.** Component weights recalibration from outcome data (spec amendment path only).
 
 ### 7.2 Acceleration / Deceleration
@@ -1014,6 +1038,8 @@ Publication checklist (§15.3) evaluated exactly once, atomically: payload compl
 
 Per closed candle on the signal's TF: entry-zone touch check (→ ACTIVE); invalidation check — a candle **close** beyond the invalidation level (wick-through alone records `stress_test: true` but does not fail the signal; consistent with zone grammar §5.9); target check — **touch** of target zone suffices (targets are liquidity pools; a wick into the pool is the pool being consumed — asymmetry with invalidation is deliberate and doctrine-consistent); premise checks — sweep reclaimed, MSS demoted, zone violated ⇒ `INVALIDATED_EARLY` (pre-touch only). **The activating candle (v1.0.16).** The closed candle that first touches the entry zone only activates the signal; invalidation and target are read from the next closed candle on. This is the engine's behaviour since the lifecycle was built, and the 2026-10-10 soak's outcomes reproduce from candles under it 33 of 33.
 
+**Every closed candle, once (v1.0.20).** "Per closed candle" means every closed candle on the signal's TF, including a candle that arrived late through a §2.15 backfill. On each pass the monitor evaluates, in time order, every closed candle since the last one it evaluated for that signal, and never evaluates a candle twice, across a restart too. A backfilled candle is evaluated for live signals only: it never creates, publishes or closes into a new signal. *Implementation pending: ships with Bundle D.*
+
 **M5 (v1.0.15): risk stop, target ladder and trailing invalidation.** On M5 the entry is the zone's **proximal** edge, the invalidation is the §15.2 `risk_stop`, and the single target is replaced by a ladder `TPn = (n+1) × R` for n = 1, 2, 3, … with no upper bound. Monitoring differs from the rules above in three ways, and only on M5:
 
 1. **Touch, not close.** The invalidation is read on **touch** — a candle whose range reaches it ends the signal. The close rule above exists because a wick through a *zone* does not falsify the zone (§5.9); the M5 invalidation is no longer a zone edge but a risk boundary, and a risk boundary is a resting order, which a wick fills. Ladder rungs are likewise read on touch, as the pool targets they replace were.
@@ -1084,6 +1110,8 @@ Binding maxima (p95 unless noted), measured continuously, regressions block rele
 | Universe evaluation (daily tiering) | ≤ 5 min, off-peak |
 | Candidate→published funnel ratio | Monitored; alert on ±50% day-over-day shift (doctrine drift detector) |
 
+**Row 1 is read per boundary type (v1.0.20).** A boundary type is the set of timeframes that close together: M5 alone; M5+M15; M5+M15+H1; M5–H4; M5–D1. Each type must meet ≤ 30 s p95 and ≤ 60 s p99 on its own. A figure pooled over all boundaries is not the reading, because frequent small boundaries would hide the rare large ones.
+
 Capacity assumption for targets: ~400 symbols × 5 TFs, Tier-scoped. Expansion is a measured capacity decision (Constitution §25.8).
 
 ## 15. Quality Rules — The Publishable Signal
@@ -1115,6 +1143,7 @@ A signal is a claim backed by evidence (Constitution §28.1). Anything less than
 3. R-multiple to primary target ≥ `P.quality.min_rr = 1.5` (a structurally valid setup with no room to travel is not an opportunity). **On M5 this check is satisfied by construction** — TP1 is fixed at 2R — and so no longer discriminates; it is stated here so that nobody reads it as protection it does not provide (v1.0.15);
 4. Dedup key clear (§10.3); tier/priority caps applied;
 5. Immutability seal: payload hashed; the hash accompanies the signal for audit.
+6. **No zone-edge invalidation (v1.0.20).** A candidate whose invalidation rule is the zone's distal edge (`zone_distal_edge`, §15.2) is recorded with its full payload and **not published**: `SUPPRESSED` with reason `ZONE_EDGE_INVALIDATION`. It still counts in the §14 candidate funnel. Candidates whose invalidation is the swept extreme (`swept_extreme`) are not affected and still publish. On M5 the invalidation is always `risk_stop` (v1.0.15), so this check does not touch M5. *Implementation pending: ships with Bundle D.*
 
 ### 15.4 Honesty Rules
 
@@ -1185,6 +1214,42 @@ Every parameter change increments `param_set_version` and requires golden-datase
 ---
 
 ## Amendment History
+
+### v1.0.20 — 2026-11-16
+
+**The Bundle D rulings: structure (§3.5, §3.6), freshness (§2.12), volume
+(§6.1, §6.4), momentum (§7.1), monitoring (§12.3), the scan-cycle target (§14)
+and one new publication check (§15.3(6)).** The owner ruled each item between
+2026-11-08 and 2026-11-16. The measurements behind each ruling are the owner's
+record, kept outside this repository.
+
+**Implementation pending: ships with Bundle D.** This text is merged before the
+code, so the code is built against written doctrine. Until the Bundle D engine
+release is deployed, the running engine does **not** yet do the following, and
+each such paragraph above is marked *Implementation pending*:
+
+- §2.12(1): suppress a signal whose own feed is not fresh (`STALE_FEEDS`);
+- §2.12(3): record the close → commit time per candle;
+- §3.5: keep BOS off a swing a CHoCH consumed;
+- §3.6: the `− ε` on CHoCH, the surpassed-level rule for CHoCH, and the current
+  leg;
+- §6.4: the depth input, and the neutral cap without a suspect tag for an
+  incomplete check;
+- §12.3: evaluating every closed candle once, backfilled ones included;
+- §15.3(6): suppressing zone-edge invalidations (`ZONE_EDGE_INVALIDATION`).
+
+The release carries structure, shift, volume and confluence algo-version bumps.
+This gap between text and code is known and deliberate; it closes on the
+Bundle D deploy.
+
+**Already true in the code, now written down.** §2.12(2) (a 2-5 s lag keeps the
+previous state), the §3.5 surpassed-level rule for BOS, §6.1 band edges (the
+lower edge belongs to the band), §7.1 with no counter candles (25). §14 row 1
+read per boundary type is a reading of a target, not code.
+
+**Not changed.** The §2.12 thresholds, BOS strict mode, the MSS conditions, the
+§6.4 thresholds, the M5 risk stop and ladder, every other timeframe's target
+rule. Signals whose invalidation is the swept extreme keep publishing.
 
 ### v1.0.19 — 2026-11-13
 
