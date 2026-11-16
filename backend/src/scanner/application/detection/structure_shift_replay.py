@@ -218,15 +218,6 @@ class StructureShiftReplayService:
         # the break candle, from a Wilder series computed once over this window.
         atrs = wilder_atr_series(candles)
 
-        # The leg can reach back before this window, so its candles are the
-        # snapshot's (lows and highs only) followed by the window's.
-        before = [entry for entry in carried if entry[0] < candles[0].open_time]
-        offset = len(before)
-        history_times = [entry[0] for entry in before] + [c.open_time for c in candles]
-        lows = [entry[1] for entry in before] + [c.low for c in candles]
-        highs = [entry[2] for entry in before] + [c.high for c in candles]
-        position_of = {opened: index for index, opened in enumerate(history_times)}
-
         # §3.4's entry rule reads the last two pairs of whatever history it
         # is shown. After §3.6 demotes to RANGING, the pre-demotion pairs are
         # exactly the structure the market just proved fake -- shown again,
@@ -270,6 +261,15 @@ class StructureShiftReplayService:
             floor_index = resumed.floor_index
             trend_path = resumed.trend_path
             first_index = resumed.next_index
+
+        # The leg can reach back before this window, so its candles are the
+        # snapshot's (lows and highs only) followed by the window's.
+        before = [entry for entry in carried if entry[0] < candles[0].open_time]
+        offset = len(before)
+        history_times = [entry[0] for entry in before] + [c.open_time for c in candles]
+        lows = [entry[1] for entry in before] + [c.low for c in candles]
+        highs = [entry[2] for entry in before] + [c.high for c in candles]
+        position_of = {opened: index for index, opened in enumerate(history_times)}
 
         for candle_index in range(first_index, len(candles)):
             candle = candles[candle_index]

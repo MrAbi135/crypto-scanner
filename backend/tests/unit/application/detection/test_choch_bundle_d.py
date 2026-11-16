@@ -392,3 +392,124 @@ def test_a_choch_toward_the_other_trend_falls_back_to_the_labelled_swings() -> N
     )
 
     assert start == 3
+
+
+# ---------- the leg across passes: state only the snapshot holds ----------
+#
+# The window is candles 0..29; the pass resumes after candle 14. Before the
+# window (hours -20..-1) the snapshot holds the leg's candles, with a high of
+# 120 at hour -5. Inside the window candle 11 dips to 97 and candle 12 makes
+# 110, below that old high.
+#
+# Read with the snapshot's candles, the running extreme is the old 120, the
+# leg reaches back before the window, and the HL at 8 is inside it: candle
+# 20's close at 94 is a CHoCH. Read from the window alone, the extreme is
+# candle 12, the leg starts at candle 11's low, and the HL at 8 is outside it.
+
+
+def _leg_window() -> list[Candle]:
+    series = _walk_series("94")
+    series[11] = _candle(11, close="101", low="97", high="102")
+    series[12] = _candle(12, close="101", low="99", high="110")
+    return series
+
+
+def _before_window() -> list[tuple]:
+    rows = []
+    for hour in range(-20, 0):
+        high = Decimal("120") if hour == -5 else Decimal("102")
+        rows.append((_T0 + timedelta(hours=hour), Decimal("99"), high))
+    return rows
+
+
+async def _resumed_chochs(monkeypatch, *, leg, turning) -> list[str]:
+    from tests.unit.application.detection.test_structure_shift_replay import _service
+
+    import scanner.application.detection.structure_shift_replay as shift_module
+    from scanner.application.detection.state import StructureEngineState
+
+    series = _leg_window()
+    swings = _bullish_swings(series)
+    monkeypatch.setattr(shift_module, "detect_external_swings", lambda _: swings)
+    monkeypatch.setattr(shift_module, "detect_internal_swings", lambda _: ())
+    service, events = _service(series, ())
+    detail = shift_module._snapshot(
+        series[:15],
+        consumed_choch=set(),
+        surpassed=set(),
+        leg=leg,
+        turning=turning,
+        history=[*_before_window(), *((c.open_time, c.low, c.high) for c in series[:15])],
+        swings=swings,
+        candidate=None,
+        mss_watch=None,
+        floor_index=-1,
+        trend_path=[(series[0].open_time, TrendState.BULLISH)],
+    )
+    await service._state.save(
+        StructureEngineState(
+            symbol="BTCUSDT",
+            timeframe=Timeframe.H1.value,
+            algo_version=service._algo_version,
+            last_processed_open_time=series[14].open_time.isoformat(),
+            trend_state="BULLISH",
+            detail=detail,
+        )
+    )
+    await service.run("BTCUSDT", Timeframe.H1, series[0].open_time, series[-1].close_time)
+    return sorted(
+        e.event_at.isoformat() for e in events.events.values() if e.event_type.startswith("CHOCH")
+    )
+
+
+async def test_a_resumed_leg_reads_its_start_and_candles_from_before_the_window(
+    monkeypatch,
+) -> None:
+    from scanner.application.detection.structure_shift_replay import _LegTrend
+
+    leg = _LegTrend(TrendState.BULLISH, _T0 + timedelta(hours=-20))
+
+    found = await _resumed_chochs(monkeypatch, leg=leg, turning=None)
+
+    assert found == [(_T0 + timedelta(hours=20)).isoformat()]
+
+
+async def test_a_resumed_last_choch_sets_the_start_of_a_trend_seen_after_the_resume(
+    monkeypatch,
+) -> None:
+    """No leg in the snapshot: the first evaluation fixes the start from the last
+    CHoCH, which turned the trend bullish before the window."""
+    from scanner.application.detection.structure_shift_replay import _TurningChoch
+
+    turning = _TurningChoch(
+        TrendState.BULLISH, _T0 + timedelta(hours=-8), _T0 + timedelta(hours=-15)
+    )
+
+    found = await _resumed_chochs(monkeypatch, leg=None, turning=turning)
+
+    assert found == [(_T0 + timedelta(hours=20)).isoformat()]
+
+
+async def test_a_leg_from_the_other_trend_is_replaced_not_kept(monkeypatch) -> None:
+    """A BEARISH leg started at candle 12; the trend is BULLISH now, so the start
+    is fixed again (from the last CHoCH), not read from the old leg."""
+    from scanner.application.detection.structure_shift_replay import _LegTrend, _TurningChoch
+
+    leg = _LegTrend(TrendState.BEARISH, _T0 + timedelta(hours=12))
+    turning = _TurningChoch(
+        TrendState.BULLISH, _T0 + timedelta(hours=-8), _T0 + timedelta(hours=-15)
+    )
+
+    found = await _resumed_chochs(monkeypatch, leg=leg, turning=turning)
+
+    assert found == [(_T0 + timedelta(hours=20)).isoformat()]
+
+
+async def test_without_the_old_candles_the_leg_is_read_from_the_window(monkeypatch) -> None:
+    """The negative case: a leg starting inside the window never sees the old
+    high, and the HL at 8 lies before the leg."""
+    from scanner.application.detection.structure_shift_replay import _LegTrend
+
+    leg = _LegTrend(TrendState.BULLISH, _T0 + timedelta(hours=5))
+
+    assert await _resumed_chochs(monkeypatch, leg=leg, turning=None) == []

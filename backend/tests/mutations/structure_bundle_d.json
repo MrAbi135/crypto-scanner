@@ -4,7 +4,8 @@
     "tests/unit/application/detection/test_choch_bundle_d.py",
     "tests/unit/domain/structure/test_leg.py",
     "tests/unit/application/detection/test_structure_shift_replay.py",
-    "tests/property/test_structure_shift_resumes.py"
+    "tests/property/test_structure_shift_resumes.py",
+    "tests/property/test_structure_shift_resumes_trending.py"
   ],
   "mutations": [
     {
@@ -149,7 +150,7 @@
       "old": "        before = [entry for entry in carried if entry[0] < candles[0].open_time]",
       "new": "        before = []",
       "expect_failing": [
-        "test_a_sliding_window_that_resumes_leaves_one_pass_history"
+        "test_a_resumed_leg_reads_its_start_and_candles_from_before_the_window"
       ]
     },
     {
@@ -158,7 +159,7 @@
       "old": "            leg = resumed.leg\n",
       "new": "",
       "expect_failing": [
-        "test_a_sliding_window_that_resumes_leaves_one_pass_history"
+        "test_a_resumed_leg_reads_its_start_and_candles_from_before_the_window"
       ]
     },
     {
@@ -167,7 +168,7 @@
       "old": "            turning = resumed.turning\n",
       "new": "",
       "expect_failing": [
-        "test_a_sliding_window_that_resumes_leaves_one_pass_history"
+        "test_a_resumed_last_choch_sets_the_start_of_a_trend_seen_after_the_resume"
       ]
     },
     {
@@ -176,7 +177,7 @@
       "old": "            if leg is None or leg.trend is not machine.state:",
       "new": "            if leg is None:",
       "expect_failing": [
-        "test_a_sliding_window_that_resumes_leaves_one_pass_history"
+        "test_a_leg_from_the_other_trend_is_replaced_not_kept"
       ]
     }
   ]
