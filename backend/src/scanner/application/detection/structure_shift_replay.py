@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Container, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal
@@ -187,6 +187,11 @@ class StructureShiftReplayService:
             ]
         ] = set()
 
+        # §3.6's surpassed levels (v1.0.20): every confirmed swing some later
+        # close has already passed, kept as candles are walked so that a
+        # resumed pass and a whole-window pass agree.
+        surpassed: set[tuple[datetime, SwingKind, SwingStrength]] = set()
+
         candidate: _MssCandidate | None = None
 
         choch_created = 0
@@ -199,7 +204,7 @@ class StructureShiftReplayService:
 
         mss_watch: _MssWatch | None = None
 
-        # §3.6's `− ε` (v1.0.20), derived exactly as §3.5's BOS derives it: at
+        # §3.6's `- ε` (v1.0.20), derived exactly as §3.5's BOS derives it: at
         # the break candle, from a Wilder series computed once over this window.
         atrs = wilder_atr_series(candles)
 
@@ -237,6 +242,7 @@ class StructureShiftReplayService:
             )
             machine = TrendStateMachine(state=resumed.trend)
             consumed_choch = resumed.consumed_choch
+            surpassed = resumed.surpassed
             candidate = resumed.candidate
             mss_watch = resumed.mss_watch
             floor_index = resumed.floor_index
@@ -248,6 +254,11 @@ class StructureShiftReplayService:
 
             if candle_index > 0:
                 _mark(trend_path, candles[candle_index - 1].open_time, machine.state)
+
+            if candle_index > first_index:
+                _mark_surpassed(
+                    surpassed, candles, candle_index - 1, (*internal_swings, *external_swings)
+                )
 
             confirmed_external = tuple(
                 swing for swing in external_swings if swing.index + external_window <= candle_index
@@ -414,6 +425,7 @@ class StructureShiftReplayService:
                 internal_classified=internal_classified,
                 consumed=consumed_choch,
                 epsilon=TOLERANCE_ATR * atr if atr is not None else _ZERO,
+                surpassed=surpassed,
             )
 
             if choch is None:
@@ -483,6 +495,13 @@ class StructureShiftReplayService:
 
         _mark(trend_path, candles[-1].open_time, machine.state)
 
+        # The last candle's close is applied here, so the next pass, which
+        # starts after it, finds it already counted.
+        if first_index < len(candles):
+            _mark_surpassed(
+                surpassed, candles, len(candles) - 1, (*internal_swings, *external_swings)
+            )
+
         # §3.7's state is what §8.2's G2 and §8.3's F6 both ask for, and F6
         # asks for it on the *timeframe above*. A value that exists only in a
         # return object cannot be read across contexts, so the ladder had no
@@ -495,6 +514,7 @@ class StructureShiftReplayService:
             _snapshot(
                 candles,
                 consumed_choch=consumed_choch,
+                surpassed=surpassed,
                 swings=(*internal_swings, *external_swings),
                 candidate=candidate,
                 mss_watch=mss_watch,
@@ -691,6 +711,7 @@ class _Resumed:
     trend: TrendState
     next_index: int
     consumed_choch: set[tuple[datetime, SwingStrength]] = field(default_factory=set)
+    surpassed: set[tuple[datetime, SwingKind, SwingStrength]] = field(default_factory=set)
     swings: tuple[SwingPoint, ...] = ()
     candidate: _MssCandidate | None = None
     mss_watch: _MssWatch | None = None
@@ -770,6 +791,7 @@ def _snapshot(
     candles: Sequence[Candle],
     *,
     consumed_choch: set[tuple[datetime, SwingStrength]],
+    surpassed: set[tuple[datetime, SwingKind, SwingStrength]],
     swings: Sequence[SwingPoint],
     candidate: _MssCandidate | None,
     mss_watch: _MssWatch | None,
@@ -791,6 +813,11 @@ def _snapshot(
             "consumed_choch": sorted(
                 [opened.isoformat(), strength.value]
                 for opened, strength in consumed_choch
+                if opened >= carry_from
+            ),
+            "surpassed": sorted(
+                [opened.isoformat(), kind.value, strength.value]
+                for opened, kind, strength in surpassed
                 if opened >= carry_from
             ),
             # Confirmed swings back to one window before this one: enough for
@@ -867,6 +894,11 @@ def _resume(state: StructureEngineState | None, candles: Sequence[Candle]) -> _R
                 (datetime.fromisoformat(str(opened)), SwingStrength(strength))
             )
 
+        for opened, kind, strength in detail["surpassed"]:
+            resumed.surpassed.add(
+                (datetime.fromisoformat(str(opened)), SwingKind(kind), SwingStrength(strength))
+            )
+
         resumed.swings = tuple(
             SwingPoint(
                 index=0,
@@ -918,6 +950,33 @@ def _resume(state: StructureEngineState | None, candles: Sequence[Candle]) -> _R
     return resumed
 
 
+def _mark_surpassed(
+    surpassed: set[tuple[datetime, SwingKind, SwingStrength]],
+    candles: Sequence[Candle],
+    index: int,
+    swings: Sequence[SwingPoint],
+) -> None:
+    """Apply the close of candle `index` to §3.6's surpassed set (v1.0.20).
+
+    A swing counts only from the candle after its confirmation candle
+    (`swing.index + k`): a low is surpassed by a close below it, a high by a
+    close above it. Being surpassed is permanent, so the set only grows.
+    """
+    close = candles[index].close
+
+    for swing in swings:
+        if swing.index + swing_window(swing.strength) >= index:
+            continue
+
+        key = (swing.open_time, swing.kind, swing.strength)
+
+        if key in surpassed:
+            continue
+
+        if (close < swing.price) if swing.kind is SwingKind.LOW else (close > swing.price):
+            surpassed.add(key)
+
+
 def _find_choch(
     *,
     candle: Candle,
@@ -926,6 +985,7 @@ def _find_choch(
     internal_classified: tuple[ClassifiedSwing, ...],
     consumed: set[tuple[datetime, SwingStrength]],
     epsilon: Decimal,
+    surpassed: Container[tuple[datetime, SwingKind, SwingStrength]],
 ) -> (
     tuple[
         SwingPoint,
@@ -936,9 +996,12 @@ def _find_choch(
     """§3.6's CHoCH on this candle, or None.
 
     The level is the most recent eligible swing; the close must pass it by more
-    than `epsilon` (§3.6 `Cl[i] < L[swing] − ε`, v1.0.20), the same absolute
+    than `epsilon` (§3.6 `Cl[i] < L[swing] - ε`, v1.0.20), the same absolute
     tolerance §3.5 gives a BOS. A close within ε of the level is not a break,
     and the walk does not fall back to an older swing for it.
+
+    A surpassed swing (v1.0.20) -- one an earlier close already passed -- is
+    never the level: it was consumed silently, as §3.5 consumes BOS levels.
     """
     if trend is TrendState.BULLISH:
         target_label = StructureLabel.HL
@@ -953,33 +1016,17 @@ def _find_choch(
     else:
         return None
 
-    external = [
-        item.swing
-        for item in external_classified
-        if (
+    def eligible(item: ClassifiedSwing) -> bool:
+        swing = item.swing
+        return (
             item.label is target_label
-            and item.swing.kind is target_kind
-            and (
-                item.swing.open_time,
-                item.swing.strength,
-            )
-            not in consumed
+            and swing.kind is target_kind
+            and (swing.open_time, swing.strength) not in consumed
+            and (swing.open_time, swing.kind, swing.strength) not in surpassed
         )
-    ]
 
-    internal = [
-        item.swing
-        for item in internal_classified
-        if (
-            item.label is target_label
-            and item.swing.kind is target_kind
-            and (
-                item.swing.open_time,
-                item.swing.strength,
-            )
-            not in consumed
-        )
-    ]
+    external = [item.swing for item in external_classified if eligible(item)]
+    internal = [item.swing for item in internal_classified if eligible(item)]
 
     candidates = external or internal
 

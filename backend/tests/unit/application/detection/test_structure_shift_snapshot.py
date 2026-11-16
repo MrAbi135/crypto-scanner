@@ -72,6 +72,7 @@ def test_the_snapshot_survives_the_window_sliding() -> None:
     detail = _snapshot(
         first,
         consumed_choch={(first[40].open_time, SwingStrength.EXTERNAL)},
+        surpassed=set(),
         swings=[low(first, 3, "95"), low(first, 30, "96"), low(first, 47, "97")],
         candidate=_MssCandidate(
             direction=BreakDirection.DOWN,
@@ -165,6 +166,7 @@ def test_a_snapshot_whose_last_candle_left_the_window_is_not_resumed() -> None:
         detail=_snapshot(
             first,
             consumed_choch=set(),
+            surpassed=set(),
             swings=[],
             candidate=None,
             mss_watch=None,
@@ -181,6 +183,7 @@ def test_the_trend_path_answers_for_any_processed_candle() -> None:
     detail = _snapshot(
         candles,
         consumed_choch=set(),
+        surpassed=set(),
         swings=[],
         candidate=None,
         mss_watch=None,

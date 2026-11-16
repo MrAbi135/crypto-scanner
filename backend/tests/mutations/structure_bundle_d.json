@@ -9,28 +9,82 @@
       "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
       "old": "        if candle.close >= swing.price - epsilon:",
       "new": "        if candle.close >= swing.price:",
-      "expect_failing": ["test_a_close_inside_epsilon_is_not_a_choch"]
+      "expect_failing": [
+        "test_a_close_inside_epsilon_is_not_a_choch"
+      ]
     },
     {
       "name": "CHoCH ignores epsilon upward",
       "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
       "old": "        if candle.close <= swing.price + epsilon:",
       "new": "        if candle.close <= swing.price:",
-      "expect_failing": ["test_epsilon_applies_upward_in_a_bearish_trend"]
+      "expect_failing": [
+        "test_epsilon_applies_upward_in_a_bearish_trend"
+      ]
     },
     {
       "name": "epsilon becomes inclusive",
       "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
       "old": "        if candle.close >= swing.price - epsilon:",
       "new": "        if candle.close > swing.price - epsilon:",
-      "expect_failing": ["test_a_close_exactly_epsilon_away_is_not_a_choch"]
+      "expect_failing": [
+        "test_a_close_exactly_epsilon_away_is_not_a_choch"
+      ]
     },
     {
       "name": "the walk passes no epsilon",
       "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
       "old": "                epsilon=TOLERANCE_ATR * atr if atr is not None else _ZERO,",
       "new": "                epsilon=_ZERO,",
-      "expect_failing": ["test_the_walk_applies_epsilon_from_the_window_atr"]
+      "expect_failing": [
+        "test_the_walk_applies_epsilon_from_the_window_atr"
+      ]
+    },
+    {
+      "name": "CHoCH ignores surpassed levels",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            and (swing.open_time, swing.kind, swing.strength) not in surpassed\n",
+      "new": "",
+      "expect_failing": [
+        "test_a_surpassed_swing_is_never_the_level",
+        "test_the_walk_skips_a_level_an_earlier_close_already_passed"
+      ]
+    },
+    {
+      "name": "a close on the confirmation candle surpasses",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "        if swing.index + swing_window(swing.strength) >= index:",
+      "new": "        if swing.index + swing_window(swing.strength) > index:",
+      "expect_failing": [
+        "test_a_close_on_the_confirmation_candle_does_not_surpass"
+      ]
+    },
+    {
+      "name": "a high is surpassed from either side",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "        if (close < swing.price) if swing.kind is SwingKind.LOW else (close > swing.price):",
+      "new": "        if close < swing.price:",
+      "expect_failing": [
+        "test_a_high_is_surpassed_only_by_a_close_above_it"
+      ]
+    },
+    {
+      "name": "a resumed pass forgets the surpassed levels",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            surpassed = resumed.surpassed\n",
+      "new": "",
+      "expect_failing": [
+        "test_a_resumed_pass_keeps_the_levels_surpassed_before_it"
+      ]
+    },
+    {
+      "name": "the last close of a pass is never counted",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "        if first_index < len(candles):\n            _mark_surpassed(",
+      "new": "        if False:\n            _mark_surpassed(",
+      "expect_failing": [
+        "test_the_last_close_of_a_pass_is_counted_for_the_next_one"
+      ]
     }
   ]
 }
