@@ -23,7 +23,7 @@ from scanner.application.ports.ict_evidence import (
     IctEvidenceRepository,
     LiquidityEvidenceRecord,
 )
-from scanner.domain.common import Candle, wilder_atr
+from scanner.domain.common import TOLERANCE_ATR, Candle, wilder_atr, wilder_atr_series
 from scanner.domain.ict import (
     DisplacementDirection,
     detect_displacement,
@@ -198,6 +198,10 @@ class StructureShiftReplayService:
         internal_window = swing_window(SwingStrength.INTERNAL)
 
         mss_watch: _MssWatch | None = None
+
+        # §3.6's `− ε` (v1.0.20), derived exactly as §3.5's BOS derives it: at
+        # the break candle, from a Wilder series computed once over this window.
+        atrs = wilder_atr_series(candles)
 
         # §3.4's entry rule reads the last two pairs of whatever history it
         # is shown. After §3.6 demotes to RANGING, the pre-demotion pairs are
@@ -401,12 +405,15 @@ class StructureShiftReplayService:
             }:
                 continue
 
+            atr = atrs[candle_index] if candle_index < len(atrs) else None
+
             choch = _find_choch(
                 candle=candle,
                 trend=machine.state,
                 external_classified=external_classified,
                 internal_classified=internal_classified,
                 consumed=consumed_choch,
+                epsilon=TOLERANCE_ATR * atr if atr is not None else _ZERO,
             )
 
             if choch is None:
@@ -918,6 +925,7 @@ def _find_choch(
     external_classified: tuple[ClassifiedSwing, ...],
     internal_classified: tuple[ClassifiedSwing, ...],
     consumed: set[tuple[datetime, SwingStrength]],
+    epsilon: Decimal,
 ) -> (
     tuple[
         SwingPoint,
@@ -925,6 +933,13 @@ def _find_choch(
     ]
     | None
 ):
+    """§3.6's CHoCH on this candle, or None.
+
+    The level is the most recent eligible swing; the close must pass it by more
+    than `epsilon` (§3.6 `Cl[i] < L[swing] − ε`, v1.0.20), the same absolute
+    tolerance §3.5 gives a BOS. A close within ε of the level is not a break,
+    and the walk does not fall back to an older swing for it.
+    """
     if trend is TrendState.BULLISH:
         target_label = StructureLabel.HL
         target_kind = SwingKind.LOW
@@ -977,10 +992,10 @@ def _find_choch(
     )
 
     if direction is BreakDirection.DOWN:
-        if candle.close >= swing.price:
+        if candle.close >= swing.price - epsilon:
             return None
     else:
-        if candle.close <= swing.price:
+        if candle.close <= swing.price + epsilon:
             return None
 
     return swing, direction
