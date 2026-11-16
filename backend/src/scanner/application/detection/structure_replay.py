@@ -67,7 +67,10 @@ from scanner.shared import Timeframe
 # once the k=5 promotion is decided, so §3.1's "stored once" holds close by
 # close too (owner ruling 2026-09-14): offline, 33 internal twins of promoted
 # pivots in 250 passes.
-STRUCTURE_ALGO_VERSION = "s4-v10"
+# v11: SLS v1.0.20 §3.5 (Bundle D, option 1) -- a BOS never breaks an external
+# swing a CHoCH consumed on an earlier candle; the consumption is read from the
+# shift engine's snapshot of the previous close.
+STRUCTURE_ALGO_VERSION = "s4-v11"
 
 
 @dataclass(frozen=True, slots=True)

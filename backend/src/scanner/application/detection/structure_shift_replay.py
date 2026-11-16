@@ -71,7 +71,12 @@ from scanner.shared.errors import DomainInvariantError
 # anchored at the first candle disagreed on the trend in 59 of 300 passes. The
 # snapshot is keyed by candle time, and it records the trend after each candle
 # so structure's break gate can read the trend in force at a candle.
-STRUCTURE_SHIFT_ALGO_VERSION = "s6-structure-shift-v5"
+# v6: SLS v1.0.20 §3.6 (Bundle D) -- CHoCH takes §3.5's epsilon, never breaks a
+# surpassed level, and breaks only inside the current leg (P1b); the snapshot
+# adds the surpassed set, the leg, the last CHoCH, the leg's candles, and the
+# external swings a CHoCH consumed for the structure engine's BOS. A v5
+# snapshot is never read under v6 (the state key carries the version).
+STRUCTURE_SHIFT_ALGO_VERSION = "s6-structure-shift-v6"
 
 _ATR_PERIOD = 14
 

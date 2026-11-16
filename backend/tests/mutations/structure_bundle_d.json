@@ -6,7 +6,8 @@
     "tests/unit/domain/structure/test_leg.py",
     "tests/unit/application/detection/test_structure_shift_replay.py",
     "tests/property/test_structure_shift_resumes.py",
-    "tests/property/test_structure_shift_resumes_trending.py"
+    "tests/property/test_structure_shift_resumes_trending.py",
+    "tests/unit/application/detection/test_structure_bundle_d_snapshots.py"
   ],
   "mutations": [
     {
@@ -224,6 +225,24 @@
       "new": "                for (opened, kind), taken in {}.items()",
       "expect_failing": [
         "test_the_shift_engine_records_an_external_choch_with_its_candle"
+      ]
+    },
+    {
+      "name": "a snapshot missing the new fields crashes the walk",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "    except (KeyError, ValueError, TypeError, ArithmeticError):\n        return None\n\n    return resumed",
+      "new": "    except (ValueError, TypeError, ArithmeticError):\n        return None\n\n    return resumed",
+      "expect_failing": [
+        "test_a_new_version_snapshot_without_the_new_fields_walks_fresh"
+      ]
+    },
+    {
+      "name": "an old shift snapshot breaks the structure engine's read",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "    except (KeyError, ValueError, TypeError):\n        return {}",
+      "new": "    except (ValueError, TypeError):\n        return {}",
+      "expect_failing": [
+        "test_structure_reads_an_old_shift_snapshot_as_no_choch_consumed"
       ]
     }
   ]
