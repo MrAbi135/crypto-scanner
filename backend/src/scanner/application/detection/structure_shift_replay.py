@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Container, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
@@ -44,6 +44,11 @@ from scanner.domain.structure import (
     evaluate_mss,
     mss_is_low_quality,
     swing_window,
+)
+from scanner.domain.structure.leg import (
+    leg_origin,
+    trend_start_fallback,
+    trend_start_from_choch,
 )
 from scanner.shared import Timeframe
 from scanner.shared.errors import DomainInvariantError
@@ -192,6 +197,11 @@ class StructureShiftReplayService:
         # resumed pass and a whole-window pass agree.
         surpassed: set[tuple[datetime, SwingKind, SwingStrength]] = set()
 
+        # §3.6's current leg (v1.0.20).
+        leg: _LegTrend | None = None
+        turning: _TurningChoch | None = None
+        carried: tuple[tuple[datetime, Decimal, Decimal], ...] = ()
+
         candidate: _MssCandidate | None = None
 
         choch_created = 0
@@ -207,6 +217,15 @@ class StructureShiftReplayService:
         # §3.6's `- ε` (v1.0.20), derived exactly as §3.5's BOS derives it: at
         # the break candle, from a Wilder series computed once over this window.
         atrs = wilder_atr_series(candles)
+
+        # The leg can reach back before this window, so its candles are the
+        # snapshot's (lows and highs only) followed by the window's.
+        before = [entry for entry in carried if entry[0] < candles[0].open_time]
+        offset = len(before)
+        history_times = [entry[0] for entry in before] + [c.open_time for c in candles]
+        lows = [entry[1] for entry in before] + [c.low for c in candles]
+        highs = [entry[2] for entry in before] + [c.high for c in candles]
+        position_of = {opened: index for index, opened in enumerate(history_times)}
 
         # §3.4's entry rule reads the last two pairs of whatever history it
         # is shown. After §3.6 demotes to RANGING, the pre-demotion pairs are
@@ -243,6 +262,9 @@ class StructureShiftReplayService:
             machine = TrendStateMachine(state=resumed.trend)
             consumed_choch = resumed.consumed_choch
             surpassed = resumed.surpassed
+            leg = resumed.leg
+            turning = resumed.turning
+            carried = resumed.history
             candidate = resumed.candidate
             mss_watch = resumed.mss_watch
             floor_index = resumed.floor_index
@@ -418,6 +440,41 @@ class StructureShiftReplayService:
 
             atr = atrs[candle_index] if candle_index < len(atrs) else None
 
+            bullish = machine.state is TrendState.BULLISH
+            current = candle_index + offset
+
+            if leg is None or leg.trend is not machine.state:
+                leg = _LegTrend(
+                    trend=machine.state,
+                    start_at=history_times[
+                        _trend_start(
+                            lows,
+                            highs,
+                            position_of,
+                            turning=turning,
+                            trend=machine.state,
+                            candle=candle,
+                            current=current,
+                            external_classified=external_classified,
+                        )
+                    ],
+                )
+
+            opposite = SwingKind.HIGH if bullish else SwingKind.LOW
+            origin = leg_origin(
+                lows,
+                highs,
+                # A start older than the candles held reads from the oldest one.
+                start=position_of.get(leg.start_at, 0),
+                current=current,
+                bullish=bullish,
+                opposite=[
+                    position_of[item.swing.open_time]
+                    for item in external_classified
+                    if item.swing.kind is opposite and item.swing.open_time in position_of
+                ],
+            )
+
             choch = _find_choch(
                 candle=candle,
                 trend=machine.state,
@@ -426,12 +483,19 @@ class StructureShiftReplayService:
                 consumed=consumed_choch,
                 epsilon=TOLERANCE_ATR * atr if atr is not None else _ZERO,
                 surpassed=surpassed,
+                leg_from=history_times[origin],
             )
 
             if choch is None:
                 continue
 
             swing, direction = choch
+
+            turning = _TurningChoch(
+                trend=TrendState.BEARISH if bullish else TrendState.BULLISH,
+                choch_at=candle.open_time,
+                swing_at=swing.open_time,
+            )
 
             consumed_choch.add(
                 (
@@ -515,6 +579,9 @@ class StructureShiftReplayService:
                 candles,
                 consumed_choch=consumed_choch,
                 surpassed=surpassed,
+                leg=leg,
+                turning=turning,
+                history=tuple(zip(history_times, lows, highs, strict=True)),
                 swings=(*internal_swings, *external_swings),
                 candidate=candidate,
                 mss_watch=mss_watch,
@@ -703,6 +770,24 @@ class StructureShiftReplayService:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class _LegTrend:
+    """§3.6's trend start (v1.0.20): fixed on the first CHoCH evaluation in a
+    trend direction, kept until a CHoCH is evaluated in the other one."""
+
+    trend: TrendState
+    start_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class _TurningChoch:
+    """The last CHoCH recorded: the trend it points to, its candle, its swing."""
+
+    trend: TrendState
+    choch_at: datetime
+    swing_at: datetime
+
+
 @dataclass(slots=True)
 class _Resumed:
     """The walk's state after the last candle a previous pass processed,
@@ -712,6 +797,9 @@ class _Resumed:
     next_index: int
     consumed_choch: set[tuple[datetime, SwingStrength]] = field(default_factory=set)
     surpassed: set[tuple[datetime, SwingKind, SwingStrength]] = field(default_factory=set)
+    leg: _LegTrend | None = None
+    turning: _TurningChoch | None = None
+    history: tuple[tuple[datetime, Decimal, Decimal], ...] = ()
     swings: tuple[SwingPoint, ...] = ()
     candidate: _MssCandidate | None = None
     mss_watch: _MssWatch | None = None
@@ -792,6 +880,9 @@ def _snapshot(
     *,
     consumed_choch: set[tuple[datetime, SwingStrength]],
     surpassed: set[tuple[datetime, SwingKind, SwingStrength]],
+    leg: _LegTrend | None = None,
+    turning: _TurningChoch | None = None,
+    history: Sequence[tuple[datetime, Decimal, Decimal]] = (),
     swings: Sequence[SwingPoint],
     candidate: _MssCandidate | None,
     mss_watch: _MssWatch | None,
@@ -815,6 +906,19 @@ def _snapshot(
                 for opened, strength in consumed_choch
                 if opened >= carry_from
             ),
+            "leg": None if leg is None else [leg.trend.value, leg.start_at.isoformat()],
+            "turning": (
+                None
+                if turning is None
+                else [
+                    turning.trend.value,
+                    turning.choch_at.isoformat(),
+                    turning.swing_at.isoformat(),
+                ]
+            ),
+            # Lows and highs from the leg's start (or the last CHoCH's swing,
+            # whichever is older), never further back than the swings carry.
+            "leg_history": _history_rows(history, _history_needed(leg, turning), carry_from),
             "surpassed": sorted(
                 [opened.isoformat(), kind.value, strength.value]
                 for opened, kind, strength in surpassed
@@ -894,6 +998,27 @@ def _resume(state: StructureEngineState | None, candles: Sequence[Candle]) -> _R
                 (datetime.fromisoformat(str(opened)), SwingStrength(strength))
             )
 
+        raw_leg = detail["leg"]
+        resumed.leg = (
+            None
+            if raw_leg is None
+            else _LegTrend(TrendState(raw_leg[0]), datetime.fromisoformat(str(raw_leg[1])))
+        )
+        raw_turning = detail["turning"]
+        resumed.turning = (
+            None
+            if raw_turning is None
+            else _TurningChoch(
+                TrendState(raw_turning[0]),
+                datetime.fromisoformat(str(raw_turning[1])),
+                datetime.fromisoformat(str(raw_turning[2])),
+            )
+        )
+        resumed.history = tuple(
+            (datetime.fromtimestamp(int(opened), tz=UTC), Decimal(low), Decimal(high))
+            for opened, low, high in detail["leg_history"]
+        )
+
         for opened, kind, strength in detail["surpassed"]:
             resumed.surpassed.add(
                 (datetime.fromisoformat(str(opened)), SwingKind(kind), SwingStrength(strength))
@@ -950,6 +1075,72 @@ def _resume(state: StructureEngineState | None, candles: Sequence[Candle]) -> _R
     return resumed
 
 
+def _trend_start(
+    lows: Sequence[Decimal],
+    highs: Sequence[Decimal],
+    position_of: dict[datetime, int],
+    *,
+    turning: _TurningChoch | None,
+    trend: TrendState,
+    candle: Candle,
+    current: int,
+    external_classified: tuple[ClassifiedSwing, ...],
+) -> int:
+    """§3.6's trend start (v1.0.20), as a position in the candle history."""
+    bullish = trend is TrendState.BULLISH
+
+    if turning is not None and turning.trend is trend and turning.choch_at < candle.open_time:
+        choch = position_of.get(turning.choch_at)
+
+        if choch is not None:
+            return trend_start_from_choch(
+                lows,
+                highs,
+                # A swing older than the candles held reads from the oldest one.
+                swing=position_of.get(turning.swing_at, 0),
+                choch=choch,
+                bullish=bullish,
+            )
+
+    label = StructureLabel.HL if bullish else StructureLabel.LH
+
+    return trend_start_fallback(
+        [
+            position_of[item.swing.open_time]
+            for item in external_classified
+            if item.label is label and item.swing.open_time in position_of
+        ],
+        current,
+    )
+
+
+def _history_needed(leg: _LegTrend | None, turning: _TurningChoch | None) -> datetime | None:
+    """The oldest candle the next pass's leg can read, or None for none."""
+    times = [
+        *([] if leg is None else [leg.start_at]),
+        *([] if turning is None else [turning.swing_at]),
+    ]
+    return min(times) if times else None
+
+
+def _history_rows(
+    history: Sequence[tuple[datetime, Decimal, Decimal]],
+    needed: datetime | None,
+    carry_from: datetime,
+) -> list[list[object]]:
+    """The leg's candles for the snapshot: epoch seconds, low, high."""
+    if needed is None:
+        return []
+
+    first = max(needed, carry_from)
+
+    return [
+        [int(opened.timestamp()), str(low), str(high)]
+        for opened, low, high in history
+        if opened >= first
+    ]
+
+
 def _mark_surpassed(
     surpassed: set[tuple[datetime, SwingKind, SwingStrength]],
     candles: Sequence[Candle],
@@ -986,6 +1177,7 @@ def _find_choch(
     consumed: set[tuple[datetime, SwingStrength]],
     epsilon: Decimal,
     surpassed: Container[tuple[datetime, SwingKind, SwingStrength]],
+    leg_from: datetime,
 ) -> (
     tuple[
         SwingPoint,
@@ -1002,6 +1194,11 @@ def _find_choch(
 
     A surpassed swing (v1.0.20) -- one an earlier close already passed -- is
     never the level: it was consumed silently, as §3.5 consumes BOS levels.
+
+    Only swings at or after `leg_from`, the current leg's origin (v1.0.20), are
+    eligible. External first, internal only if the leg holds no eligible
+    external swing; with none at all there is no CHoCH, and the walk never
+    reaches back to a swing from an earlier leg.
     """
     if trend is TrendState.BULLISH:
         target_label = StructureLabel.HL
@@ -1023,6 +1220,7 @@ def _find_choch(
             and swing.kind is target_kind
             and (swing.open_time, swing.strength) not in consumed
             and (swing.open_time, swing.kind, swing.strength) not in surpassed
+            and swing.open_time >= leg_from
         )
 
     external = [item.swing for item in external_classified if eligible(item)]

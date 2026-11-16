@@ -72,6 +72,7 @@ def test_a_close_inside_epsilon_is_not_a_choch() -> None:
         consumed=set(),
         epsilon=Decimal("0.5"),
         surpassed=set(),
+        leg_from=_T0,
     )
 
     assert found is None
@@ -86,6 +87,7 @@ def test_a_close_beyond_epsilon_is_a_choch() -> None:
         consumed=set(),
         epsilon=Decimal("0.5"),
         surpassed=set(),
+        leg_from=_T0,
     )
 
     assert found == (_HL.swing, BreakDirection.DOWN)
@@ -101,6 +103,7 @@ def test_a_close_exactly_epsilon_away_is_not_a_choch() -> None:
         consumed=set(),
         epsilon=Decimal("0.5"),
         surpassed=set(),
+        leg_from=_T0,
     )
 
     assert found is None
@@ -115,6 +118,7 @@ def test_epsilon_applies_upward_in_a_bearish_trend() -> None:
         consumed=set(),
         epsilon=Decimal("0.5"),
         surpassed=set(),
+        leg_from=_T0,
     )
     beyond = _find_choch(
         candle=_candle(30, close="100.6"),
@@ -124,6 +128,7 @@ def test_epsilon_applies_upward_in_a_bearish_trend() -> None:
         consumed=set(),
         epsilon=Decimal("0.5"),
         surpassed=set(),
+        leg_from=_T0,
     )
 
     assert inside is None
@@ -143,6 +148,7 @@ def test_a_close_inside_epsilon_does_not_fall_back_to_an_older_swing() -> None:
         consumed=set(),
         epsilon=Decimal("0.5"),
         surpassed=set(),
+        leg_from=_T0,
     )
 
     assert found is None
@@ -225,6 +231,7 @@ def test_a_surpassed_swing_is_never_the_level() -> None:
         consumed=set(),
         epsilon=Decimal("0"),
         surpassed={_key(_HL)},
+        leg_from=_T0,
     )
 
     assert found is None
@@ -241,6 +248,7 @@ def test_a_surpassed_swing_leaves_the_next_unsurpassed_one_as_the_level() -> Non
         consumed=set(),
         epsilon=Decimal("0"),
         surpassed={_key(_HL)},
+        leg_from=_T0,
     )
 
     assert found == (older.swing, BreakDirection.DOWN)
@@ -306,3 +314,81 @@ async def test_two_passes_still_record_a_break_of_an_unsurpassed_level(monkeypat
     series = _walk_series("94")
     expected = [series[20].open_time.isoformat()]
     assert await _chochs_in_two_passes(monkeypatch, series, 16) == expected
+
+
+# ---------- the current leg (§3.6 v1.0.20, P1b) ----------
+
+
+async def test_the_walk_ignores_a_swing_from_an_earlier_leg(monkeypatch) -> None:
+    """Candle 12 dips to 97 (closing back at 101) and candle 15 makes a new high
+    at 110: the running extreme is 15, the last swing high before it is 7, so
+    the leg starts at candle 12's low. The HL at 8 lies before that, and candle
+    20's close at 94 breaks nothing."""
+    series = _walk_series("94")
+    series[12] = _candle(12, close="101", low="97", high="102")
+    series[15] = _candle(15, close="101", low="99", high="110")
+
+    assert await _chochs(monkeypatch, series) == []
+
+
+async def test_a_dip_without_a_new_extreme_leaves_the_leg_where_it_was(monkeypatch) -> None:
+    series = _walk_series("94")
+    series[12] = _candle(12, close="101", low="97", high="102")
+
+    assert await _chochs(monkeypatch, series) == [series[20].open_time.isoformat()]
+
+
+def test_the_trend_start_comes_from_the_turning_choch() -> None:
+    """A recorded CHoCH that turned the trend bullish fixes the start at the
+    lowest low from its swing to its candle."""
+    from scanner.application.detection.structure_shift_replay import _trend_start, _TurningChoch
+
+    series = [
+        _candle(i, close="100", low=low, high="101")
+        for i, low in enumerate(["99", "97", "95", "96", "98", "99", "99", "99"])
+    ]
+    position_of = {c.open_time: i for i, c in enumerate(series)}
+    turning = _TurningChoch(TrendState.BULLISH, series[4].open_time, series[1].open_time)
+
+    start = _trend_start(
+        [c.low for c in series],
+        [c.high for c in series],
+        position_of,
+        turning=turning,
+        trend=TrendState.BULLISH,
+        candle=series[7],
+        current=7,
+        external_classified=(),
+    )
+
+    assert start == 2
+
+
+def test_a_choch_toward_the_other_trend_falls_back_to_the_labelled_swings() -> None:
+    from scanner.application.detection.structure_shift_replay import _trend_start, _TurningChoch
+
+    series = [_candle(i, close="100", low="99", high="101") for i in range(8)]
+    position_of = {c.open_time: i for i, c in enumerate(series)}
+    turning = _TurningChoch(TrendState.BEARISH, series[4].open_time, series[1].open_time)
+    hls = tuple(
+        ClassifiedSwing(
+            swing=SwingPoint(
+                i, series[i].open_time, Decimal("99"), SwingKind.LOW, SwingStrength.EXTERNAL
+            ),
+            label=StructureLabel.HL,
+        )
+        for i in (3, 5)
+    )
+
+    start = _trend_start(
+        [c.low for c in series],
+        [c.high for c in series],
+        position_of,
+        turning=turning,
+        trend=TrendState.BULLISH,
+        candle=series[7],
+        current=7,
+        external_classified=hls,
+    )
+
+    assert start == 3

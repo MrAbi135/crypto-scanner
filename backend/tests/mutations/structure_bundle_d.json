@@ -1,7 +1,10 @@
 {
   "description": "SLS v1.0.20 §3.5/§3.6, the Bundle D structure rules (M1). Each mutation removes or widens one rule; the named tests must notice. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/structure_bundle_d.json",
   "pytest": [
-    "tests/unit/application/detection/test_choch_bundle_d.py"
+    "tests/unit/application/detection/test_choch_bundle_d.py",
+    "tests/unit/domain/structure/test_leg.py",
+    "tests/unit/application/detection/test_structure_shift_replay.py",
+    "tests/property/test_structure_shift_resumes.py"
   ],
   "mutations": [
     {
@@ -84,6 +87,96 @@
       "new": "        if False:\n            _mark_surpassed(",
       "expect_failing": [
         "test_the_last_close_of_a_pass_is_counted_for_the_next_one"
+      ]
+    },
+    {
+      "name": "CHoCH ignores the current leg",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            and swing.open_time >= leg_from\n",
+      "new": "",
+      "expect_failing": [
+        "test_the_walk_ignores_a_swing_from_an_earlier_leg"
+      ]
+    },
+    {
+      "name": "an opposite swing on the extreme counts as before it",
+      "file": "backend/src/scanner/domain/structure/leg.py",
+      "old": "    before = [position for position in opposite if position < extreme]",
+      "new": "    before = [position for position in opposite if position <= extreme]",
+      "expect_failing": [
+        "test_an_opposite_swing_on_the_extreme_candle_itself_is_not_before_it"
+      ]
+    },
+    {
+      "name": "the fallback start is the most recent labelled swing",
+      "file": "backend/src/scanner/domain/structure/leg.py",
+      "old": "    return before[-2] if len(before) >= 2 else current",
+      "new": "    return before[-1] if len(before) >= 2 else current",
+      "expect_failing": [
+        "test_the_fallback_start_is_the_second_most_recent_labelled_swing"
+      ]
+    },
+    {
+      "name": "the extreme includes the current candle",
+      "file": "backend/src/scanner/domain/structure/leg.py",
+      "old": "    extreme = _highest(highs, start, current - 1) if bullish else _lowest(lows, start, current - 1)",
+      "new": "    extreme = _highest(highs, start, current) if bullish else _lowest(lows, start, current)",
+      "expect_failing": [
+        "test_the_extreme_is_read_from_candles_before_the_current_one"
+      ]
+    },
+    {
+      "name": "the turning CHoCH is ignored",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "    if turning is not None and turning.trend is trend and turning.choch_at < candle.open_time:",
+      "new": "    if False:",
+      "expect_failing": [
+        "test_the_trend_start_comes_from_the_turning_choch"
+      ]
+    },
+    {
+      "name": "a turning CHoCH toward the other trend is used",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "    if turning is not None and turning.trend is trend and turning.choch_at < candle.open_time:",
+      "new": "    if turning is not None and turning.choch_at < candle.open_time:",
+      "expect_failing": [
+        "test_a_choch_toward_the_other_trend_falls_back_to_the_labelled_swings"
+      ]
+    },
+    {
+      "name": "the leg's carried candles are dropped on resume",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "        before = [entry for entry in carried if entry[0] < candles[0].open_time]",
+      "new": "        before = []",
+      "expect_failing": [
+        "test_a_sliding_window_that_resumes_leaves_one_pass_history"
+      ]
+    },
+    {
+      "name": "the leg's start is not resumed",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            leg = resumed.leg\n",
+      "new": "",
+      "expect_failing": [
+        "test_a_sliding_window_that_resumes_leaves_one_pass_history"
+      ]
+    },
+    {
+      "name": "the last CHoCH is not resumed",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            turning = resumed.turning\n",
+      "new": "",
+      "expect_failing": [
+        "test_a_sliding_window_that_resumes_leaves_one_pass_history"
+      ]
+    },
+    {
+      "name": "the leg survives a change of trend",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            if leg is None or leg.trend is not machine.state:",
+      "new": "            if leg is None:",
+      "expect_failing": [
+        "test_a_sliding_window_that_resumes_leaves_one_pass_history"
       ]
     }
   ]
