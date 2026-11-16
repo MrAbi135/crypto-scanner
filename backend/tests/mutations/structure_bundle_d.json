@@ -2,6 +2,7 @@
   "description": "SLS v1.0.20 §3.5/§3.6, the Bundle D structure rules (M1). Each mutation removes or widens one rule; the named tests must notice. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/structure_bundle_d.json",
   "pytest": [
     "tests/unit/application/detection/test_choch_bundle_d.py",
+    "tests/unit/application/detection/test_bos_bundle_d.py",
     "tests/unit/domain/structure/test_leg.py",
     "tests/unit/application/detection/test_structure_shift_replay.py",
     "tests/property/test_structure_shift_resumes.py",
@@ -178,6 +179,51 @@
       "new": "            if leg is None:",
       "expect_failing": [
         "test_a_leg_from_the_other_trend_is_replaced_not_kept"
+      ]
+    },
+    {
+      "name": "BOS ignores CHoCH consumption",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "                if swing.kind is required_kind and (swing.open_time, swing.kind) not in taken",
+      "new": "                if swing.kind is required_kind and (swing.open_time, swing.kind) not in consumed",
+      "expect_failing": [
+        "test_a_bos_skips_a_swing_a_choch_consumed_on_an_earlier_candle"
+      ]
+    },
+    {
+      "name": "a CHoCH on the break candle itself blocks the BOS",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "        return taken_at is not None and taken_at < self._at",
+      "new": "        return taken_at is not None and taken_at <= self._at",
+      "expect_failing": [
+        "test_a_choch_on_the_break_candle_itself_does_not_block_the_bos"
+      ]
+    },
+    {
+      "name": "the structure engine is handed no CHoCH consumption",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "            choch_consumed=choch_consumption(None if shift is None else shift.detail),",
+      "new": "            choch_consumed={},",
+      "expect_failing": [
+        "test_a_bos_skips_a_swing_a_choch_consumed_on_an_earlier_candle"
+      ]
+    },
+    {
+      "name": "internal CHoCH consumption is handed to BOS",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            if swing.strength is SwingStrength.EXTERNAL:\n                choch_consumed.setdefault(",
+      "new": "            if True:\n                choch_consumed.setdefault(",
+      "expect_failing": [
+        "test_an_internal_choch_is_not_recorded_for_bos"
+      ]
+    },
+    {
+      "name": "the shift snapshot drops the CHoCH consumption",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "                for (opened, kind), taken in (choch_consumed or {}).items()",
+      "new": "                for (opened, kind), taken in {}.items()",
+      "expect_failing": [
+        "test_the_shift_engine_records_an_external_choch_with_its_candle"
       ]
     }
   ]

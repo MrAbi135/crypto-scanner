@@ -197,6 +197,10 @@ class StructureShiftReplayService:
         # resumed pass and a whole-window pass agree.
         surpassed: set[tuple[datetime, SwingKind, SwingStrength]] = set()
 
+        # §3.5 (v1.0.20): the external swings a CHoCH consumed and the candle
+        # it consumed each on, which the structure engine's BOS reads.
+        choch_consumed: dict[tuple[datetime, SwingKind], datetime] = {}
+
         # §3.6's current leg (v1.0.20).
         leg: _LegTrend | None = None
         turning: _TurningChoch | None = None
@@ -253,6 +257,7 @@ class StructureShiftReplayService:
             machine = TrendStateMachine(state=resumed.trend)
             consumed_choch = resumed.consumed_choch
             surpassed = resumed.surpassed
+            choch_consumed = resumed.choch_consumed
             leg = resumed.leg
             turning = resumed.turning
             carried = resumed.history
@@ -497,6 +502,9 @@ class StructureShiftReplayService:
                 swing_at=swing.open_time,
             )
 
+            if swing.strength is SwingStrength.EXTERNAL:
+                choch_consumed.setdefault((swing.open_time, swing.kind), candle.open_time)
+
             consumed_choch.add(
                 (
                     swing.open_time,
@@ -579,6 +587,7 @@ class StructureShiftReplayService:
                 candles,
                 consumed_choch=consumed_choch,
                 surpassed=surpassed,
+                choch_consumed=choch_consumed,
                 leg=leg,
                 turning=turning,
                 history=tuple(zip(history_times, lows, highs, strict=True)),
@@ -797,6 +806,7 @@ class _Resumed:
     next_index: int
     consumed_choch: set[tuple[datetime, SwingStrength]] = field(default_factory=set)
     surpassed: set[tuple[datetime, SwingKind, SwingStrength]] = field(default_factory=set)
+    choch_consumed: dict[tuple[datetime, SwingKind], datetime] = field(default_factory=dict)
     leg: _LegTrend | None = None
     turning: _TurningChoch | None = None
     history: tuple[tuple[datetime, Decimal, Decimal], ...] = ()
@@ -813,6 +823,24 @@ def _mark(path: list[tuple[datetime, TrendState]], open_time: datetime, state: T
         return
 
     path.append((open_time, state))
+
+
+def choch_consumption(detail: str | None) -> dict[tuple[datetime, SwingKind], datetime]:
+    """The external swings a CHoCH consumed, each with the candle it was
+    consumed on, from a saved snapshot (§3.5 v1.0.20). A snapshot without the
+    field, or none at all, reads as nothing consumed."""
+    if detail is None:
+        return {}
+
+    try:
+        return {
+            (datetime.fromisoformat(str(opened)), SwingKind(kind)): datetime.fromisoformat(
+                str(taken)
+            )
+            for opened, kind, taken in json.loads(detail)["choch_consumed"]
+        }
+    except (KeyError, ValueError, TypeError):
+        return {}
 
 
 def trend_after(detail: str | None, open_time: datetime) -> TrendState | None:
@@ -880,6 +908,7 @@ def _snapshot(
     *,
     consumed_choch: set[tuple[datetime, SwingStrength]],
     surpassed: set[tuple[datetime, SwingKind, SwingStrength]],
+    choch_consumed: dict[tuple[datetime, SwingKind], datetime] | None = None,
     leg: _LegTrend | None = None,
     turning: _TurningChoch | None = None,
     history: Sequence[tuple[datetime, Decimal, Decimal]] = (),
@@ -904,6 +933,11 @@ def _snapshot(
             "consumed_choch": sorted(
                 [opened.isoformat(), strength.value]
                 for opened, strength in consumed_choch
+                if opened >= carry_from
+            ),
+            "choch_consumed": sorted(
+                [opened.isoformat(), kind.value, taken.isoformat()]
+                for (opened, kind), taken in (choch_consumed or {}).items()
                 if opened >= carry_from
             ),
             "leg": None if leg is None else [leg.trend.value, leg.start_at.isoformat()],
@@ -996,6 +1030,11 @@ def _resume(state: StructureEngineState | None, candles: Sequence[Candle]) -> _R
         for opened, strength in detail["consumed_choch"]:
             resumed.consumed_choch.add(
                 (datetime.fromisoformat(str(opened)), SwingStrength(strength))
+            )
+
+        for opened, kind, taken in detail["choch_consumed"]:
+            resumed.choch_consumed[(datetime.fromisoformat(str(opened)), SwingKind(kind))] = (
+                datetime.fromisoformat(str(taken))
             )
 
         raw_leg = detail["leg"]

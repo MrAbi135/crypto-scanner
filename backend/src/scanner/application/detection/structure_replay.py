@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Container, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -14,7 +14,11 @@ from scanner.application.detection.state import (
     StructureEngineState,
 )
 from scanner.application.detection.structure_events import classification_event_type
-from scanner.application.detection.structure_shift_replay import _stitch, trend_after
+from scanner.application.detection.structure_shift_replay import (
+    _stitch,
+    choch_consumption,
+    trend_after,
+)
 from scanner.application.ports import CandleRepository, Clock
 from scanner.application.ports.detection import (
     EngineEventRecord,
@@ -348,6 +352,9 @@ class StructureReplayService:
             external_swings=external_swings,
             trend=TrendStateMachine(),
             trend_at=trend_at,
+            # §3.5 (v1.0.20): the external swings a CHoCH consumed, with the
+            # candle it consumed them on, as the shift engine last left them.
+            choch_consumed=choch_consumption(None if shift is None else shift.detail),
             first_index=first_index,
             # A resumed pass stops at the first candle whose trend the shift
             # engine has not recorded yet; the next pass decides it.
@@ -515,6 +522,7 @@ class StructureReplayService:
         first_index: int = 0,
         stop_on_unknown: bool = False,
         consumed: set[tuple[datetime, SwingKind]] | None = None,
+        choch_consumed: Mapping[tuple[datetime, SwingKind], datetime] | None = None,
     ) -> _BreakWalk:
         """§3.5 break by break, from `first_index`, each gated by the trend in
         force at its candle: `trend_at` where it knows, else the §3.4 entry
@@ -524,6 +532,7 @@ class StructureReplayService:
         break_times: list[datetime] = []
         watches: list[_Watch] = []
         consumed = set() if consumed is None else consumed
+        choch_consumed = {} if choch_consumed is None else choch_consumed
         confirmation_window = swing_window(SwingStrength.EXTERNAL)
         decided_until = first_index - 1
 
@@ -582,10 +591,15 @@ class StructureReplayService:
             else:
                 continue
 
+            # §3.5 (v1.0.20): "not previously consumed -- by a BOS or by a
+            # CHoCH". A CHoCH on an earlier candle took the swing; one on this
+            # very candle did not yet.
+            taken = _Consumed(consumed, choch_consumed, candle.open_time)
+
             candidates = [
                 swing
                 for swing in confirmed_swings
-                if swing.kind is required_kind and (swing.open_time, swing.kind) not in consumed
+                if swing.kind is required_kind and (swing.open_time, swing.kind) not in taken
             ]
 
             if not candidates:
@@ -599,7 +613,7 @@ class StructureReplayService:
             if _is_outside_bar(
                 candle,
                 confirmed_swings,
-                consumed,
+                taken,
             ) and not _close_agrees(candle, direction):
                 # §3.5 edge case (1). See `_close_agrees` for why this only
                 # withholds the break and does not record the opposite one.
@@ -1027,10 +1041,35 @@ def _resume_structure(
         return None
 
 
+class _Consumed:
+    """A swing taken before `at`: by a BOS (`own`), or by a CHoCH whose
+    candle opened before `at` (`choch`, §3.5 v1.0.20)."""
+
+    __slots__ = ("_at", "_choch", "_own")
+
+    def __init__(
+        self,
+        own: Container[tuple[datetime, SwingKind]],
+        choch: Mapping[tuple[datetime, SwingKind], datetime],
+        at: datetime,
+    ) -> None:
+        self._own = own
+        self._choch = choch
+        self._at = at
+
+    def __contains__(self, key: object) -> bool:
+        if key in self._own:
+            return True
+
+        taken_at = self._choch.get(key)  # type: ignore[call-overload]
+
+        return taken_at is not None and taken_at < self._at
+
+
 def _is_outside_bar(
     candle: Candle,
     confirmed_swings: tuple[SwingPoint, ...],
-    consumed: set[tuple[datetime, SwingKind]],
+    consumed: Container[tuple[datetime, SwingKind]],
 ) -> bool:
     """§3.5 edge case (1)'s precondition: one candle takes out both extremes.
 
