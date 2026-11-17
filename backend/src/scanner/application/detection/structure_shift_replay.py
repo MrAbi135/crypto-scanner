@@ -7,6 +7,7 @@ from collections.abc import Container, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal
+from functools import partial
 
 from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
 from scanner.application.detection.orchestrator import build_event_key
@@ -224,8 +225,19 @@ class StructureShiftReplayService:
         mss_watch: _MssWatch | None = None
 
         # §3.6's `- ε` (v1.0.20), derived exactly as §3.5's BOS derives it: at
-        # the break candle, from a Wilder series computed once over this window.
-        atrs = wilder_atr_series(candles)
+        # the break candle, from a Wilder series computed once over this window
+        # -- and only on a pass whose candle breaks a level at all (below).
+        atrs: list[Decimal | None] | None = None
+
+        def epsilon_at(index: int) -> Decimal:
+            nonlocal atrs
+
+            if atrs is None:
+                atrs = list(wilder_atr_series(candles))
+
+            atr = atrs[index] if index < len(atrs) else None
+
+            return TOLERANCE_ATR * atr if atr is not None else _ZERO
 
         # §3.4's entry rule reads the last two pairs of whatever history it
         # is shown. After §3.6 demotes to RANGING, the pre-demotion pairs are
@@ -448,8 +460,6 @@ class StructureShiftReplayService:
             }:
                 continue
 
-            atr = atrs[candle_index] if candle_index < len(atrs) else None
-
             bullish = machine.state is TrendState.BULLISH
             current = candle_index + offset
 
@@ -485,16 +495,24 @@ class StructureShiftReplayService:
                 ],
             )
 
-            choch = _find_choch(
+            find_choch = partial(
+                _find_choch,
                 candle=candle,
                 trend=machine.state,
                 external_classified=external_classified,
                 internal_classified=internal_classified,
                 consumed=consumed_choch,
-                epsilon=TOLERANCE_ATR * atr if atr is not None else _ZERO,
                 surpassed=surpassed,
                 leg_from=history_times[origin],
             )
+
+            # The level is chosen before ε is applied, and ε >= 0 only ever
+            # takes a break away. A candle that breaks nothing at zero breaks
+            # nothing at ε, so it needs no ATR -- most candles stop here.
+            choch = find_choch(epsilon=_ZERO)
+
+            if choch is not None:
+                choch = find_choch(epsilon=epsilon_at(candle_index))
 
             if choch is None:
                 continue
