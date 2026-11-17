@@ -68,8 +68,8 @@
     {
       "name": "a close on the confirmation candle surpasses",
       "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
-      "old": "        if swing.index + swing_window(swing.strength) >= index:",
-      "new": "        if swing.index + swing_window(swing.strength) > index:",
+      "old": "        if swing.index + windows[swing.strength] >= index:",
+      "new": "        if swing.index + windows[swing.strength] > index:",
       "expect_failing": [
         "test_a_close_on_the_confirmation_candle_does_not_surpass"
       ]
@@ -77,8 +77,8 @@
     {
       "name": "a high is surpassed from either side",
       "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
-      "old": "        if (close < swing.price) if swing.kind is SwingKind.LOW else (close > swing.price):",
-      "new": "        if close < swing.price:",
+      "old": "        if not ((close < swing.price) if swing.kind is SwingKind.LOW else (close > swing.price)):",
+      "new": "        if not (close < swing.price):",
       "expect_failing": [
         "test_a_high_is_surpassed_only_by_a_close_above_it"
       ]

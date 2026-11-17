@@ -1216,18 +1216,18 @@ def _mark_surpassed(
     close above it. Being surpassed is permanent, so the set only grows.
     """
     close = candles[index].close
+    windows = {strength: swing_window(strength) for strength in SwingStrength}
 
     for swing in swings:
-        if swing.index + swing_window(swing.strength) >= index:
+        # The price test first: most swings are not passed by this close, and
+        # for them no key needs building.
+        if not ((close < swing.price) if swing.kind is SwingKind.LOW else (close > swing.price)):
             continue
 
-        key = (swing.open_time, swing.kind, swing.strength)
-
-        if key in surpassed:
+        if swing.index + windows[swing.strength] >= index:
             continue
 
-        if (close < swing.price) if swing.kind is SwingKind.LOW else (close > swing.price):
-            surpassed.add(key)
+        surpassed.add((swing.open_time, swing.kind, swing.strength))
 
 
 def _find_choch(
