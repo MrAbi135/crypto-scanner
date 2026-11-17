@@ -949,6 +949,17 @@ def _snapshot(
     start = candles[0].open_time
     carry_from = start - candles[0].timeframe.duration * len(candles)
     before = [entry for entry in trend_path if entry[0] < start]
+
+    # Confirmed swings back to one window before this one: enough for the next
+    # window's labels and entry rule, bounded in size. Each row carries its own
+    # surpassed flag, so the set is not written (and parsed) a second time.
+    carried = [
+        swing
+        for swing in swings
+        if swing.index + swing_window(swing.strength) <= len(candles) - 1
+        and swing.open_time >= carry_from
+    ]
+    carried_keys = {(swing.open_time, swing.kind, swing.strength) for swing in carried}
     path = [*before[-1:], *(entry for entry in trend_path if entry[0] >= start)]
 
     return json.dumps(
@@ -976,23 +987,21 @@ def _snapshot(
             # Lows and highs from the leg's start (or the last CHoCH's swing,
             # whichever is older), never further back than the swings carry.
             "leg_history": _history_rows(history, _history_needed(leg, turning), carry_from),
+            # Only surpassed swings no carried row stands for (normally none).
             "surpassed": sorted(
                 [opened.isoformat(), kind.value, strength.value]
                 for opened, kind, strength in surpassed
-                if opened >= carry_from
+                if opened >= carry_from and (opened, kind, strength) not in carried_keys
             ),
-            # Confirmed swings back to one window before this one: enough for
-            # the next window's labels and entry rule, bounded in size.
             "swings": sorted(
                 [
                     swing.open_time.isoformat(),
                     str(swing.price),
                     swing.kind.value,
                     swing.strength.value,
+                    int((swing.open_time, swing.kind, swing.strength) in surpassed),
                 ]
-                for swing in swings
-                if swing.index + swing_window(swing.strength) <= len(candles) - 1
-                and swing.open_time >= carry_from
+                for swing in carried
             ),
             "candidate": (
                 None
@@ -1086,16 +1095,22 @@ def _resume(state: StructureEngineState | None, candles: Sequence[Candle]) -> _R
                 (datetime.fromisoformat(str(opened)), SwingKind(kind), SwingStrength(strength))
             )
 
-        resumed.swings = tuple(
-            SwingPoint(
+        swings: list[SwingPoint] = []
+
+        for opened, price, kind, strength, passed in detail["swings"]:
+            point = SwingPoint(
                 index=0,
                 open_time=datetime.fromisoformat(str(opened)),
                 price=Decimal(str(price)),
                 kind=SwingKind(kind),
                 strength=SwingStrength(strength),
             )
-            for opened, price, kind, strength in detail["swings"]
-        )
+            swings.append(point)
+
+            if passed:
+                resumed.surpassed.add((point.open_time, point.kind, point.strength))
+
+        resumed.swings = tuple(swings)
 
         raw = detail["candidate"]
 
