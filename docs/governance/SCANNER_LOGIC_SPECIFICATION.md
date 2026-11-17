@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.20
-**Ratified:** 2026-07-12 · **Last amended:** 2026-11-16 (v1.0.20; see Amendment History)
+**Version:** 1.0.21
+**Ratified:** 2026-07-12 · **Last amended:** 2026-11-17 (v1.0.21; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -369,6 +369,8 @@ stateDiagram-v2
   3. *Leg origin:* the lowest low between the last confirmed external swing high before the running extreme and the running extreme itself. If no external swing high lies after the trend start, the search begins at the trend start.
 
   Only swings at or after the leg origin are eligible: external first, internal only if the leg holds no eligible external swing. If no swing is eligible, there is no CHoCH on that candle. The engine never reaches back to a swing from an earlier leg. Mirror in BEARISH (running extreme = lowest low; leg origin = highest high after the last confirmed external swing low before it). *Implementation pending: ships with Bundle D.*
+
+  *How far back the leg reads (v1.0.21).* The leg reads no further back than the hot window (`P.data.hot_window`, §2.1) from the current candle, the same reach §3.1 gives every swing. A trend start, running extreme, leg origin or swing older than that is not seen. When the trend start lies further back, the running extreme and the leg origin are found from the hot window's oldest candle, and only swings inside the hot window can be eligible. *Implementation pending: ships with Bundle D.*
 - **Surpassed levels (v1.0.20).** A swing low that some closed candle after the swing's confirmation, and before the current candle, has already closed below is **surpassed**. It is consumed silently, with no event, as §3.5 does for BOS, and it can no longer be broken by a CHoCH. Mirror in BEARISH. *Implementation pending: ships with Bundle D.*
 
 **Detection Logic — MSS.** MSS confirms when **all** of the following hold:
@@ -1214,6 +1216,20 @@ Every parameter change increments `param_set_version` and requires golden-datase
 ---
 
 ## Amendment History
+
+### v1.0.21 — 2026-11-17
+
+**§3.6: how far back the current leg reads.** v1.0.20 defined the current leg
+without saying how far back it may reach. §3.1 already ends a swing's structural
+relevance when it ages out of the hot window (`P.data.hot_window`, §2.1), and
+the Bundle D implementation carries the leg's swings and candles over the same
+reach. A trend that began earlier is read from the hot window's oldest candle.
+The owner chose to write this bound down rather than carry more history: more
+history means a larger engine snapshot and a slower pass. Found while comparing
+the engine's close-by-close run with a one-pass replay of long series.
+
+**Implementation pending: ships with Bundle D**, with the rest of §3.6
+(v1.0.20). No parameter changes, and nothing else in the text changes.
 
 ### v1.0.20 — 2026-11-16
 
