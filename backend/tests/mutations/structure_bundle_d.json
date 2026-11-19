@@ -1,0 +1,276 @@
+{
+  "description": "SLS v1.0.20 §3.5/§3.6, the Bundle D structure rules (M1). Each mutation removes or widens one rule; the named tests must notice. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/structure_bundle_d.json",
+  "pytest": [
+    "tests/unit/application/detection/test_choch_bundle_d.py",
+    "tests/unit/application/detection/test_bos_bundle_d.py",
+    "tests/unit/domain/structure/test_leg.py",
+    "tests/unit/application/detection/test_structure_shift_replay.py",
+    "tests/property/test_structure_shift_resumes.py",
+    "tests/property/test_structure_shift_resumes_trending.py",
+    "tests/unit/application/detection/test_structure_bundle_d_snapshots.py"
+  ],
+  "mutations": [
+    {
+      "name": "CHoCH ignores epsilon downward",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "        if candle.close >= swing.price - epsilon:",
+      "new": "        if candle.close >= swing.price:",
+      "expect_failing": [
+        "test_a_close_inside_epsilon_is_not_a_choch"
+      ]
+    },
+    {
+      "name": "CHoCH ignores epsilon upward",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "        if candle.close <= swing.price + epsilon:",
+      "new": "        if candle.close <= swing.price:",
+      "expect_failing": [
+        "test_epsilon_applies_upward_in_a_bearish_trend"
+      ]
+    },
+    {
+      "name": "epsilon becomes inclusive",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "        if candle.close >= swing.price - epsilon:",
+      "new": "        if candle.close > swing.price - epsilon:",
+      "expect_failing": [
+        "test_a_close_exactly_epsilon_away_is_not_a_choch"
+      ]
+    },
+    {
+      "name": "the walk passes no epsilon",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            return TOLERANCE_ATR * atr if atr is not None else _ZERO",
+      "new": "            return _ZERO",
+      "expect_failing": [
+        "test_the_walk_applies_epsilon_from_the_window_atr"
+      ]
+    },
+    {
+      "name": "a break at zero epsilon is kept without the epsilon pass",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "                choch = find_choch(epsilon=epsilon_at(candle_index))",
+      "new": "                pass",
+      "expect_failing": [
+        "test_the_walk_applies_epsilon_from_the_window_atr"
+      ]
+    },
+    {
+      "name": "CHoCH ignores surpassed levels",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            and (swing.open_time, swing.kind, swing.strength) not in surpassed\n",
+      "new": "",
+      "expect_failing": [
+        "test_a_surpassed_swing_is_never_the_level",
+        "test_the_walk_skips_a_level_an_earlier_close_already_passed"
+      ]
+    },
+    {
+      "name": "a close on the confirmation candle surpasses",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "        if swing.index + windows[swing.strength] >= index:",
+      "new": "        if swing.index + windows[swing.strength] > index:",
+      "expect_failing": [
+        "test_a_close_on_the_confirmation_candle_does_not_surpass"
+      ]
+    },
+    {
+      "name": "a high is surpassed from either side",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "        if not ((close < swing.price) if swing.kind is SwingKind.LOW else (close > swing.price)):",
+      "new": "        if not (close < swing.price):",
+      "expect_failing": [
+        "test_a_high_is_surpassed_only_by_a_close_above_it"
+      ]
+    },
+    {
+      "name": "a resumed pass ignores the surpassed flag on carried swings",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            if passed:\n                resumed.surpassed.add(",
+      "new": "            if False:\n                resumed.surpassed.add(",
+      "expect_failing": [
+        "test_a_resumed_pass_keeps_the_levels_surpassed_before_it"
+      ]
+    },
+    {
+      "name": "the snapshot writes no surpassed flag",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "                    int((swing.open_time, swing.kind, swing.strength) in surpassed),",
+      "new": "                    0,",
+      "expect_failing": [
+        "test_a_resumed_pass_keeps_the_levels_surpassed_before_it"
+      ]
+    },
+    {
+      "name": "a resumed pass forgets the surpassed levels",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            surpassed = resumed.surpassed\n",
+      "new": "",
+      "expect_failing": [
+        "test_a_resumed_pass_keeps_the_levels_surpassed_before_it"
+      ]
+    },
+    {
+      "name": "the last close of a pass is never counted",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "        if first_index < len(candles):\n            _mark_surpassed(",
+      "new": "        if False:\n            _mark_surpassed(",
+      "expect_failing": [
+        "test_the_last_close_of_a_pass_is_counted_for_the_next_one"
+      ]
+    },
+    {
+      "name": "CHoCH ignores the current leg",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            and swing.open_time >= leg_from\n",
+      "new": "",
+      "expect_failing": [
+        "test_the_walk_ignores_a_swing_from_an_earlier_leg"
+      ]
+    },
+    {
+      "name": "an opposite swing on the extreme counts as before it",
+      "file": "backend/src/scanner/domain/structure/leg.py",
+      "old": "    before = [position for position in opposite if position < extreme]",
+      "new": "    before = [position for position in opposite if position <= extreme]",
+      "expect_failing": [
+        "test_an_opposite_swing_on_the_extreme_candle_itself_is_not_before_it"
+      ]
+    },
+    {
+      "name": "the fallback start is the most recent labelled swing",
+      "file": "backend/src/scanner/domain/structure/leg.py",
+      "old": "    return before[-2] if len(before) >= 2 else current",
+      "new": "    return before[-1] if len(before) >= 2 else current",
+      "expect_failing": [
+        "test_the_fallback_start_is_the_second_most_recent_labelled_swing"
+      ]
+    },
+    {
+      "name": "the extreme includes the current candle",
+      "file": "backend/src/scanner/domain/structure/leg.py",
+      "old": "    extreme = _highest(highs, start, current - 1) if bullish else _lowest(lows, start, current - 1)",
+      "new": "    extreme = _highest(highs, start, current) if bullish else _lowest(lows, start, current)",
+      "expect_failing": [
+        "test_the_extreme_is_read_from_candles_before_the_current_one"
+      ]
+    },
+    {
+      "name": "the turning CHoCH is ignored",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "    if turning is not None and turning.trend is trend and turning.choch_at < candle.open_time:",
+      "new": "    if False:",
+      "expect_failing": [
+        "test_the_trend_start_comes_from_the_turning_choch"
+      ]
+    },
+    {
+      "name": "a turning CHoCH toward the other trend is used",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "    if turning is not None and turning.trend is trend and turning.choch_at < candle.open_time:",
+      "new": "    if turning is not None and turning.choch_at < candle.open_time:",
+      "expect_failing": [
+        "test_a_choch_toward_the_other_trend_falls_back_to_the_labelled_swings"
+      ]
+    },
+    {
+      "name": "the leg's carried candles are dropped on resume",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "        before = [entry for entry in carried if entry[0] < candles[0].open_time]",
+      "new": "        before = []",
+      "expect_failing": [
+        "test_a_resumed_leg_reads_its_start_and_candles_from_before_the_window"
+      ]
+    },
+    {
+      "name": "the leg's start is not resumed",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            leg = resumed.leg\n",
+      "new": "",
+      "expect_failing": [
+        "test_a_resumed_leg_reads_its_start_and_candles_from_before_the_window"
+      ]
+    },
+    {
+      "name": "the last CHoCH is not resumed",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            turning = resumed.turning\n",
+      "new": "",
+      "expect_failing": [
+        "test_a_resumed_last_choch_sets_the_start_of_a_trend_seen_after_the_resume"
+      ]
+    },
+    {
+      "name": "the leg survives a change of trend",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            if leg is None or leg.trend is not machine.state:",
+      "new": "            if leg is None:",
+      "expect_failing": [
+        "test_a_leg_from_the_other_trend_is_replaced_not_kept"
+      ]
+    },
+    {
+      "name": "BOS ignores CHoCH consumption",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "                if swing.kind is required_kind and (swing.open_time, swing.kind) not in taken",
+      "new": "                if swing.kind is required_kind and (swing.open_time, swing.kind) not in consumed",
+      "expect_failing": [
+        "test_a_bos_skips_a_swing_a_choch_consumed_on_an_earlier_candle"
+      ]
+    },
+    {
+      "name": "a CHoCH on the break candle itself blocks the BOS",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "        return taken_at is not None and taken_at < self._at",
+      "new": "        return taken_at is not None and taken_at <= self._at",
+      "expect_failing": [
+        "test_a_choch_on_the_break_candle_itself_does_not_block_the_bos"
+      ]
+    },
+    {
+      "name": "the structure engine is handed no CHoCH consumption",
+      "file": "backend/src/scanner/application/detection/structure_replay.py",
+      "old": "            choch_consumed=choch_consumption(None if shift is None else shift.detail),",
+      "new": "            choch_consumed={},",
+      "expect_failing": [
+        "test_a_bos_skips_a_swing_a_choch_consumed_on_an_earlier_candle"
+      ]
+    },
+    {
+      "name": "internal CHoCH consumption is handed to BOS",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "            if swing.strength is SwingStrength.EXTERNAL:\n                choch_consumed.setdefault(",
+      "new": "            if True:\n                choch_consumed.setdefault(",
+      "expect_failing": [
+        "test_an_internal_choch_is_not_recorded_for_bos"
+      ]
+    },
+    {
+      "name": "the shift snapshot drops the CHoCH consumption",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "                for (opened, kind), taken in (choch_consumed or {}).items()",
+      "new": "                for (opened, kind), taken in {}.items()",
+      "expect_failing": [
+        "test_the_shift_engine_records_an_external_choch_with_its_candle"
+      ]
+    },
+    {
+      "name": "a snapshot missing the new fields crashes the walk",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "    except (KeyError, ValueError, TypeError, ArithmeticError):\n        return None\n\n    return resumed",
+      "new": "    except (ValueError, TypeError, ArithmeticError):\n        return None\n\n    return resumed",
+      "expect_failing": [
+        "test_a_new_version_snapshot_without_the_new_fields_walks_fresh"
+      ]
+    },
+    {
+      "name": "an old shift snapshot breaks the structure engine's read",
+      "file": "backend/src/scanner/application/detection/structure_shift_replay.py",
+      "old": "    except (KeyError, ValueError, TypeError):\n        return {}",
+      "new": "    except (ValueError, TypeError):\n        return {}",
+      "expect_failing": [
+        "test_structure_reads_an_old_shift_snapshot_as_no_choch_consumed"
+      ]
+    }
+  ]
+}

@@ -392,10 +392,12 @@ async def test_an_internal_swing_inside_its_window_does_not_move_the_protected_l
     internal ones -- which confirm after two candles, not five.
 
     The external structure is the fixture's. Candle 20's close at 90 breaks
-    the 95 and candle 28's close at 84 breaks the 85, so both external higher
-    lows are consumed; neither shift gathers an origin, and the trend returns
-    to BULLISH each time. From then on the internal lows decide: 90 at 33,
-    100 at 38, 104 at 44. Candle 45 closes at 99.
+    the 95; the shift gathers no origin and the trend returns to BULLISH.
+    Candle 20's high is the leg's running extreme from then on, and its low
+    the leg's origin (SLS v1.0.20 §3.6), so the external 85 belongs to an
+    earlier leg and candle 28's close at 84 breaks nothing. The leg holds no
+    external higher low, so the internal lows decide: 90 at 33, 100 at 38,
+    104 at 44. Candle 45 closes at 99.
 
     On candle 45 the 104 is one candle old and confirms at 46, so it does not
     exist: the protected low is the 100 and the CHoCH is through it, on 45.
@@ -449,7 +451,6 @@ async def test_an_internal_swing_inside_its_window_does_not_move_the_protected_l
 
     assert [(c["break_index"], c["swing_price"], c["swing_strength"]) for c in chochs] == [
         (20, "95", "EXTERNAL"),
-        (28, "85", "EXTERNAL"),
         (45, "100", "INTERNAL"),
     ]
 
