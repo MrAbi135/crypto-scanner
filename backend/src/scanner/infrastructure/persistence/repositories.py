@@ -921,6 +921,19 @@ class PgLiquidityHistoryRepository:
 
             return [_to_liquidity_history(row) for row in rows]
 
+    async def latest_stamps(self) -> Mapping[str, datetime]:
+        """Each symbol's newest snapshot stamp, in one grouped query (the
+        depth-freshness alarm, owner M2 Q3)."""
+        stmt = select(
+            LiquidityHistoryRow.exchange_symbol,
+            func.max(LiquidityHistoryRow.observed_at),
+        ).group_by(LiquidityHistoryRow.exchange_symbol)
+
+        async with self._sessions() as session:
+            rows = await session.execute(stmt)
+
+            return {symbol: stamp for symbol, stamp in rows}
+
     async def fetch_until(
         self,
         exchange_symbol: str,
