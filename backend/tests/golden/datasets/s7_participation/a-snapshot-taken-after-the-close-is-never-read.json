@@ -1,0 +1,100 @@
+{
+  "dataset_id": "s7-a-snapshot-taken-after-the-close-is-never-read",
+  "engine": "participation",
+  "sls_sections": [
+    "6.4"
+  ],
+  "sls_rules": [
+    "6.4-depth-test",
+    "6.4-depth-input-no-look-ahead"
+  ],
+  "description": "The same loud, well-attended candle, with a healthy book for the week before it and a near-empty book stamped on its own day. The day's snapshot was read after the candle closed, so it is not evidence; the check completes on the week before and passes.",
+  "labelling_rationale": "SLS v1.0.20 §6.4, 'The depth input': 'A snapshot taken after the candle's close is never read (no look-ahead).' **The candle** is s7-a-thin-book-makes-an-abnormal-candle-suspect's: 2026-08-21T00:00, RVOL 5.0 (ABNORMAL), 30 trades against a median of 10 (participants pass), closing at 2026-08-21T04:00. **The snapshots.** Seven at 100, stamped 2026-08-14 .. 2026-08-20, and one at 1 stamped 2026-08-21. The stamp is the start of the UTC day; the book behind it is read when the daily job runs, later that day, so the 2026-08-21 book may well have been read after 04:00. The owner's ruling (Bundle D M2 Q1) treats a snapshot stamped day D as taken at the end of day D: only a candle closing at or after 2026-08-22T00:00 may read the 2026-08-21 one. **The verdict.** This candle reads the 2026-08-20 snapshot (100) against the median of 2026-08-14 .. 2026-08-20 (100). 100 >= 50, so the depth test passes, both tests ran, and the candle is validated and not suspect. Nothing is recorded: §6.4 records only a suspect. Had the engine read the 2026-08-21 stamp, the depth would be 1 and the candle would be tagged -- on a book from after its close.",
+  "labelled_by": "drafted by Claude Opus 5.5 2026-11-23 from SLS §6.4 (v1.0.20); pending developer verification",
+  "labelled_at": "2026-11-23",
+  "algo_version": "s7-participation-v5",
+  "symbol": "GOLDENVOLLOOK",
+  "timeframe": "H4",
+  "filler": {
+    "count": 297,
+    "open": "100",
+    "high": "103",
+    "low": "100",
+    "close": "100"
+  },
+  "depth_history": [
+    {
+      "stamped_at": "2026-08-14T00:00:00+00:00",
+      "depth_2pct": "100"
+    },
+    {
+      "stamped_at": "2026-08-15T00:00:00+00:00",
+      "depth_2pct": "100"
+    },
+    {
+      "stamped_at": "2026-08-16T00:00:00+00:00",
+      "depth_2pct": "100"
+    },
+    {
+      "stamped_at": "2026-08-17T00:00:00+00:00",
+      "depth_2pct": "100"
+    },
+    {
+      "stamped_at": "2026-08-18T00:00:00+00:00",
+      "depth_2pct": "100"
+    },
+    {
+      "stamped_at": "2026-08-19T00:00:00+00:00",
+      "depth_2pct": "100"
+    },
+    {
+      "stamped_at": "2026-08-20T00:00:00+00:00",
+      "depth_2pct": "100"
+    },
+    {
+      "stamped_at": "2026-08-21T00:00:00+00:00",
+      "depth_2pct": "1"
+    }
+  ],
+  "candles": [
+    {
+      "open_time": "2026-08-20T20:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100"
+    },
+    {
+      "open_time": "2026-08-21T00:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100",
+      "volume": "500",
+      "quote_volume": "50000",
+      "trade_count": 30
+    },
+    {
+      "open_time": "2026-08-21T04:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "volume_spikes": 0,
+      "suspect_volume": 0,
+      "expansions": 0,
+      "contractions": 0,
+      "range_expansions": 0,
+      "compressions": 0,
+      "accelerations": 0,
+      "exhaustion_watches": 0,
+      "events_inserted": 0
+    },
+    "events": []
+  }
+}

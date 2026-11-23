@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from scanner.application.detection.confluence_replay import ConfluenceReplayService
@@ -33,6 +34,7 @@ from scanner.application.detection.structure_shift_replay import (
     StructureShiftReplayService,
 )
 from scanner.application.marketdata.contexts import higher_timeframe
+from scanner.application.ports.liquidity_history import LiquidityHistoryRecord
 from scanner.application.ports.repositories import IncidentRepository
 from scanner.application.ports.setups import SetupRepository
 from scanner.application.ports.signal_transitions import SignalTransitionRepository
@@ -50,6 +52,7 @@ from tests.golden.harness.memory import (
     InMemoryIctZoneRepository,
     InMemoryIctZoneStateStore,
     InMemoryIctZoneTransitionRepository,
+    InMemoryLiquidityHistoryRepository,
     InMemoryLiquidityPoolRepository,
     InMemoryLiquidityStateStore,
     InMemoryLiquidityTransitionRepository,
@@ -336,7 +339,7 @@ async def run_confluence(
             InMemoryIctZoneInteractionContextRepository(zones, zone_transitions),
             interactions,
         ),
-        ParticipationReplayService(candles, events, clock),
+        ParticipationReplayService(candles, events, clock, liquidity_history=_depth(dataset)),
         ConfluenceReplayService(
             candles,
             events,
@@ -354,6 +357,7 @@ async def run_confluence(
             signals=signals,
             transitions=transitions,
             incidents=incidents,
+            liquidity_history=_depth(dataset),
         ),
     )
 
@@ -445,6 +449,16 @@ async def run_confluence(
     }
 
 
+def _depth(dataset: GoldenDataset) -> InMemoryLiquidityHistoryRepository:
+    """The dataset's declared daily depth, as `market.liquidity_history`."""
+    return InMemoryLiquidityHistoryRepository(
+        [
+            LiquidityHistoryRecord(dataset.symbol, stamped, Decimal(0), Decimal(0), depth)
+            for stamped, depth in dataset.depth_history
+        ]
+    )
+
+
 async def _run_participation(dataset: GoldenDataset) -> dict[str, Any]:
     """SLS §6 and §7 -- volume and momentum, in one service.
 
@@ -460,6 +474,7 @@ async def _run_participation(dataset: GoldenDataset) -> dict[str, Any]:
         events,
         FixedClock(HARNESS_CLOCK),
         algo_version=dataset.algo_version,
+        liquidity_history=_depth(dataset),
     )
 
     report = await service.run(

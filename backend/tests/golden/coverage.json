@@ -1346,8 +1346,12 @@
         {
           "id": "6.4-depth-test",
           "rule": "order-book depth (nearest snapshot) >= 50% of its 7-day median",
-          "status": "pending",
-          "blocked_on": "the replay passes depth=None because market.liquidity_history is empty until the daily universe job runs, and a golden dataset is candles -- it has no way to supply an order-book snapshot"
+          "status": "covered"
+        },
+        {
+          "id": "6.4-depth-input-no-look-ahead",
+          "rule": "the depth is the latest daily snapshot taken at or before the candle's close, the median over the seven ending at it; a snapshot taken after the close is never read (v1.0.20)",
+          "status": "covered"
         },
         {
           "id": "6.4-capped-at-neutral",

@@ -70,7 +70,12 @@ from scanner.shared import Timeframe
 # participation read 0 or 25 depending on where the window started
 # (MOMENTUM_ACCELERATING / EXHAUSTION_WATCH attribution 3/3 WINDOW_START),
 # and §6's volume facts could never fire below H1.
-PARTICIPATION_ALGO_VERSION = "s7-participation-v4"
+# v5: §6.4's depth input (SLS v1.0.20, Bundle D, owner ruling S2 option R).
+# The check read no depth, so depth_ok was None on every ABNORMAL candle; it
+# now reads the latest daily snapshot taken at or before the close and the
+# median of the seven ending at it (`domain.volume.depth`). A candle on a thin
+# book becomes VOLUME_SUSPECT, which §6.6's H1/H4 count reads.
+PARTICIPATION_ALGO_VERSION = "s7-participation-v5"
 
 
 @dataclass(frozen=True, slots=True)

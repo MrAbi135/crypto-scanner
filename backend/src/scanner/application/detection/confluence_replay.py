@@ -238,7 +238,12 @@ from scanner.shared import Timeframe
 # asked instead whether the LEG was displaced and any BOS fell inside it -- the
 # leg's displacement candle need not have been the break's. SLS v1.0.16; owner
 # ruling 2026-10-18 (variant C of three measured).
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v38"
+# v39: §6.4 with its depth input, and an incomplete check earns no positive
+# volume points (SLS v1.0.20, Bundle D M2). F4 is capped at neutral on an
+# ABNORMAL candle whose check could not run both tests, without the suspect
+# tag; and a thin book now makes the candle a suspect here exactly as it does
+# in participation, through the same DepthInput.
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v39"
 
 # The published set when nothing is configured (owner ruling 2026-09-15). A
 # default that published everything would open M15/M5 the day a setting went
