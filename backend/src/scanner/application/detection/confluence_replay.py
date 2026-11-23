@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
+from scanner.application.detection.depth_input import DepthInput
 from scanner.application.detection.event_versions import CURRENT_EVENT_VERSIONS
 from scanner.application.detection.liquidity_replay import LIQUIDITY_ALGO_VERSION
 from scanner.application.detection.orchestrator import build_event_key
@@ -61,6 +62,7 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRecord,
     LiquidityPoolRepository,
 )
+from scanner.application.ports.liquidity_history import LiquidityHistoryRepository
 from scanner.application.ports.metrics import DetectionMetrics, NullMetrics
 from scanner.application.ports.repositories import (
     IncidentRepository,
@@ -80,7 +82,14 @@ from scanner.domain.common import (
     wilder_atr,
     wilder_atr_series,
 )
-from scanner.domain.common.rvol import baseline_span, median, relative_volumes, rvol_at
+from scanner.domain.common.rvol import (
+    RvolClass,
+    baseline_span,
+    classify,
+    median,
+    relative_volumes,
+    rvol_at,
+)
 from scanner.domain.confluence import (
     RISK_STOP_PCT,
     TP_LADDER,
@@ -159,6 +168,7 @@ from scanner.domain.volume import (
     detect_volume_spike,
     volume_factor_score,
 )
+from scanner.domain.volume.depth import DepthReading
 from scanner.shared import Timeframe
 
 # v23: zone reads pinned to CURRENT_ZONE_VERSIONS. During a version
@@ -449,6 +459,7 @@ class ConfluenceReplayService:
         incidents: IncidentRepository | None = None,
         transitions: SignalTransitionRepository | None = None,
         signal_timeframes: frozenset[Timeframe] = DEFAULT_SIGNAL_TIMEFRAMES,
+        liquidity_history: LiquidityHistoryRepository | None = None,
     ) -> None:
         self._candles = candles
         self._events = events
@@ -472,6 +483,9 @@ class ConfluenceReplayService:
         self._incidents = incidents
         self._transitions = transitions
         self._signal_timeframes = signal_timeframes
+        # §6.4's depth input, read exactly as participation reads it, so both
+        # reach the same verdict on the same candle.
+        self._depth = DepthInput(liquidity_history)
 
     async def run(
         self,
@@ -572,7 +586,15 @@ class ConfluenceReplayService:
             series[0].open_time,
         )
 
-        reading = _read_participation(series, minutes, timeframe, relative_volumes(series, history))
+        rvols = relative_volumes(series, history)
+        # Only an ABNORMAL newest candle runs §6.4's check, so only it reads the book.
+        depth = (
+            await self._depth.at(symbol, newest.close_time)
+            if classify(rvol_at(series, len(series) - 1, rvols)) is RvolClass.ABNORMAL
+            else None
+        )
+
+        reading = _read_participation(series, minutes, timeframe, rvols, depth)
 
         # §6.7 caps on either tag: "hard cap 50 if `wash_risk` or
         # `suspect_volume`". §6.4's is per candle and this one is the
@@ -2838,6 +2860,7 @@ def _read_participation(
     minutes: Sequence[TradeAggregate] = (),
     timeframe: Timeframe | None = None,
     rvols: Sequence[Decimal | None] | None = None,
+    depth: DepthReading | None = None,
 ) -> _Reading:
     """§6 and §7 at the newest candle, recomputed rather than read back.
 
@@ -2865,7 +2888,13 @@ def _read_participation(
 
     spike = detect_volume_spike(series, last, rvols=rvols)
     expansion = detect_expansion(series, last, rvols=rvols)
-    check = cross_validate_abnormal_volume(series, last, rvols=rvols)
+    check = cross_validate_abnormal_volume(
+        series,
+        last,
+        depth=depth.depth if depth else None,
+        median_depth_7d=depth.median_depth_7d if depth else None,
+        rvols=rvols,
+    )
 
     return _Reading(
         rvol=rvol_at(series, last, rvols),
@@ -2884,9 +2913,8 @@ def _read_participation(
         spike_direction=spike.direction if spike else None,
         expansion_direction=expansion.direction if expansion else None,
         contracting=detect_contraction(series, last, rvols=rvols),
-        # The depth half of §6.4 is unread here for the same reason it is
-        # unread in the engine -- `market.liquidity_history` is empty -- so
-        # both reach the same verdict from the same evidence.
+        # §6.4 with its depth input (SLS v1.0.20), read through the same
+        # `DepthInput` participation uses: one verdict from one evidence.
         suspect=check.suspect if check else False,
         delta=delta_pct(series[last]),
         p90=p90,
