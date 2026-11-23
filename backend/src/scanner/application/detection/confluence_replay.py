@@ -306,6 +306,8 @@ class _Reading:
     expansion_direction: str | None
     contracting: bool
     suspect: bool
+    # §6.4: an ABNORMAL candle whose check could not run both tests (v1.0.20).
+    incomplete: bool
     delta: Decimal | None
     p90: Decimal | None
     median_p90: Decimal | None
@@ -2766,6 +2768,8 @@ def _volume_score(
                 stealth_flow=participation is ParticipationClass.STEALTH,
                 # §6.7's cap fires on either: §6.4's candle tag or §6.6's symbol one.
                 integrity_suspect=reading.suspect or wash_risk,
+                # §6.4's incomplete check (SLS v1.0.20): no positive points.
+                check_incomplete=reading.incomplete,
             )
         ).score
     ).score
@@ -2916,6 +2920,8 @@ def _read_participation(
         # §6.4 with its depth input (SLS v1.0.20), read through the same
         # `DepthInput` participation uses: one verdict from one evidence.
         suspect=check.suspect if check else False,
+        # An ABNORMAL candle whose check could not run both tests.
+        incomplete=check is not None and not check.validated,
         delta=delta_pct(series[last]),
         p90=p90,
         median_p90=median_p90,

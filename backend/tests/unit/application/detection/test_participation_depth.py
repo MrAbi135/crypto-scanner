@@ -164,3 +164,38 @@ async def test_confluence_reaches_the_verdict_participation_records(latest, trad
     )
 
     assert reading.suspect is bool(recorded)
+
+
+@pytest.mark.asyncio
+async def test_confluence_marks_an_abnormal_candle_without_depth_incomplete() -> None:
+    # Participants pass, no depth history: validated is False, so confluence
+    # must cap the volume factor, yet nothing is a suspect.
+    series = abnormal_series(trades=40)
+
+    reading = _read_participation(series, (), None, relative_volumes(series, ()), None)
+
+    assert reading.incomplete is True
+    assert reading.suspect is False
+
+
+@pytest.mark.asyncio
+async def test_confluence_marks_a_fully_checked_candle_complete() -> None:
+    series = abnormal_series(trades=40)
+    rows = history(latest="100")
+    depth = await DepthInput(InMemoryLiquidityHistoryRepository(rows)).at(
+        "BTCUSDT", series[-1].close_time
+    )
+
+    reading = _read_participation(series, (), None, relative_volumes(series, ()), depth)
+
+    assert reading.incomplete is False
+    assert reading.suspect is False
+
+
+def test_a_quiet_candle_is_neither_incomplete_nor_suspect() -> None:
+    series = [candle(i) for i in range(21)]
+
+    reading = _read_participation(series, (), None, relative_volumes(series, ()), None)
+
+    assert reading.incomplete is False
+    assert reading.suspect is False

@@ -9,7 +9,10 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
-from tests.golden.harness.memory import InMemoryEngineStateStore
+from tests.golden.harness.memory import (
+    InMemoryEngineStateStore,
+    InMemoryLiquidityHistoryRepository,
+)
 from tests.support.builders import make_candle
 
 from scanner.application.detection.confluence_replay import (
@@ -35,6 +38,7 @@ from scanner.application.ports.ict_evidence import LiquidityEvidenceRecord
 from scanner.application.ports.ict_zone_interactions import IctZoneInteractionRecord
 from scanner.application.ports.ict_zones import IctZoneRecord
 from scanner.application.ports.liquidity_detection import LiquidityPoolRecord
+from scanner.application.ports.liquidity_history import LiquidityHistoryRecord
 from scanner.application.ports.signal_transitions import SignalTransitionRecord
 from scanner.domain.common import TradeAggregate
 from scanner.domain.momentum.legs import Leg, LegKind
@@ -463,6 +467,21 @@ SHIFT_ALGO = "s4b-shift-test"
 HTF = Timeframe.D1
 
 
+def healthy_depth(symbol: str = "BTCUSDT") -> list[LiquidityHistoryRecord]:
+    """A steady daily ±2% depth across the fixture's span, so §6.4's check can
+    complete (SLS v1.0.20) and a test about something else is not capped by an
+    incomplete check. `no_depth=True` on `service` tests that case itself."""
+    first = BASE - timedelta(days=10)
+    last = BASE + TF.duration * (CANDLES + 12)
+    days = (last - first).days + 1
+    return [
+        LiquidityHistoryRecord(
+            symbol, first + timedelta(days=d), Decimal(1), Decimal(1), Decimal(100)
+        )
+        for d in range(days)
+    ]
+
+
 def service(
     *,
     events: list[EngineEventRecord] | None = None,
@@ -482,6 +501,7 @@ def service(
     metrics=None,
     signal_timeframes=None,
     tier: str | None = "T1",
+    no_depth: bool = False,
 ):
     repo = FakeEventRepository(events)
 
@@ -521,6 +541,7 @@ def service(
         transitions=transitions,
         metrics=metrics,
         **({} if signal_timeframes is None else {"signal_timeframes": signal_timeframes}),
+        liquidity_history=None if no_depth else InMemoryLiquidityHistoryRepository(healthy_depth()),
     )
 
     return svc, repo
@@ -1799,6 +1820,19 @@ async def test_a_spike_with_real_participation_pays_its_fifteen() -> None:
     candidate = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
 
     assert candidate.factors["F4"] == Decimal(65)
+
+
+@pytest.mark.asyncio
+async def test_a_spike_whose_check_cannot_complete_pays_nothing() -> None:
+    """§6.4, "An incomplete check" (SLS v1.0.20): the same spike with no depth
+    history in reach is capped at neutral -- and is not tagged suspect."""
+    setup = bullish_setup()
+
+    svc, _ = service(**setup, candles=make_series(last_volume="250", last_trades=40), no_depth=True)
+
+    candidate = next(c for c in (await run(svc, "BULLISH")).candidates if c.direction == "UP")
+
+    assert candidate.factors["F4"] == Decimal(50)
 
 
 @pytest.mark.asyncio
@@ -3826,6 +3860,7 @@ def test_the_payload_chain_carries_what_the_factors_cited() -> None:
         expansion_direction=None,
         contracting=False,
         suspect=False,
+        incomplete=False,
         delta=None,
         p90=None,
         median_p90=None,
@@ -3900,6 +3935,7 @@ def test_the_payload_states_the_stop_distance_in_the_same_r_as_everything_else()
         expansion_direction=None,
         contracting=False,
         suspect=False,
+        incomplete=False,
         delta=None,
         p90=None,
         median_p90=None,
