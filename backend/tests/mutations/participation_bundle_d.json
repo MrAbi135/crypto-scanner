@@ -1,0 +1,136 @@
+{
+  "description": "SLS v1.0.20 §6.4, Bundle D M2: the depth input, the incomplete check, and the depth-freshness alarm (owner M2 Q1-Q3). Each mutation removes or widens one rule; the named tests must notice. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/participation_bundle_d.json",
+  "pytest": [
+    "tests/unit/domain/volume/test_depth.py",
+    "tests/unit/application/detection/test_participation_depth.py",
+    "tests/unit/application/detection/test_confluence_replay.py",
+    "tests/unit/domain/confluence/test_factors.py",
+    "tests/unit/application/marketdata/test_depth_freshness.py",
+    "tests/golden/test_golden.py"
+  ],
+  "mutations": [
+    {
+      "name": "a later stamp becomes readable on its own day (end-of-day rule removed)",
+      "file": "backend/src/scanner/domain/volume/depth.py",
+      "old": "SNAPSHOT_TAKEN_BY = timedelta(days=1)",
+      "new": "SNAPSHOT_TAKEN_BY = timedelta(0)",
+      "expect_failing": [
+        "test_a_snapshot_is_readable_only_from_the_end_of_its_day",
+        "test_a_snapshot_stamped_on_the_closing_day_is_never_read",
+        "test_a_snapshot_stamped_on_the_closing_day_is_not_read"
+      ]
+    },
+    {
+      "name": "at-or-before becomes strictly before",
+      "file": "backend/src/scanner/domain/volume/depth.py",
+      "old": "        (s for s in snapshots if s.stamped_at <= cutoff),",
+      "new": "        (s for s in snapshots if s.stamped_at < cutoff),",
+      "expect_failing": [
+        "test_the_candle_reads_the_latest_readable_snapshot_and_its_seven_day_median"
+      ]
+    },
+    {
+      "name": "six snapshots are enough",
+      "file": "backend/src/scanner/domain/volume/depth.py",
+      "old": "    if len(readable) < DEPTH_MEDIAN_SNAPSHOTS:",
+      "new": "    if len(readable) < DEPTH_MEDIAN_SNAPSHOTS - 1:",
+      "expect_failing": [
+        "test_fewer_than_seven_readable_snapshots_is_out_of_reach",
+        "test_fewer_than_seven_snapshots_leaves_depth_without_a_verdict"
+      ]
+    },
+    {
+      "name": "the median takes eight snapshots",
+      "file": "backend/src/scanner/domain/volume/depth.py",
+      "old": "    window = readable[-DEPTH_MEDIAN_SNAPSHOTS:]",
+      "new": "    window = readable[-DEPTH_MEDIAN_SNAPSHOTS - 1 :]",
+      "expect_failing": [
+        "test_the_candle_reads_the_latest_readable_snapshot_and_its_seven_day_median"
+      ]
+    },
+    {
+      "name": "missing depth reads as a pass",
+      "file": "backend/src/scanner/domain/volume/detectors.py",
+      "old": "    if depth is None or median_depth_7d is None or median_depth_7d <= 0:\n        return None",
+      "new": "    if depth is None or median_depth_7d is None or median_depth_7d <= 0:\n        return True",
+      "expect_failing": [
+        "test_fewer_than_seven_snapshots_leaves_depth_without_a_verdict",
+        "test_confluence_marks_an_abnormal_candle_without_depth_incomplete"
+      ]
+    },
+    {
+      "name": "missing depth reads as a failure",
+      "file": "backend/src/scanner/domain/volume/detectors.py",
+      "old": "    if depth is None or median_depth_7d is None or median_depth_7d <= 0:\n        return None",
+      "new": "    if depth is None or median_depth_7d is None or median_depth_7d <= 0:\n        return False",
+      "expect_failing": [
+        "test_a_snapshot_stamped_on_the_closing_day_is_not_read",
+        "test_fewer_than_seven_snapshots_leaves_depth_without_a_verdict"
+      ]
+    },
+    {
+      "name": "an incomplete check is tagged suspect (and counted)",
+      "file": "backend/src/scanner/domain/volume/detectors.py",
+      "old": "        return self.participants_ok is False or self.depth_ok is False",
+      "new": "        return self.participants_ok is False or self.depth_ok is False or not self.validated",
+      "expect_failing": [
+        "test_a_snapshot_stamped_on_the_closing_day_is_not_read",
+        "test_confluence_marks_an_abnormal_candle_without_depth_incomplete"
+      ]
+    },
+    {
+      "name": "participation keeps reading no depth",
+      "file": "backend/src/scanner/application/detection/participation_replay.py",
+      "old": "            depth=depth.depth if depth else None,",
+      "new": "            depth=None,",
+      "expect_failing": [
+        "test_thin_book_on_an_abnormal_candle_is_tagged_suspect"
+      ]
+    },
+    {
+      "name": "confluence keeps reading no depth",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        depth=depth.depth if depth else None,",
+      "new": "        depth=None,",
+      "expect_failing": [
+        "test_confluence_marks_a_fully_checked_candle_complete"
+      ]
+    },
+    {
+      "name": "scoring ignores an incomplete check",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "                check_incomplete=reading.incomplete,",
+      "new": "                check_incomplete=False,",
+      "expect_failing": [
+        "test_a_spike_whose_check_cannot_complete_pays_nothing"
+      ]
+    },
+    {
+      "name": "the incomplete cap also lifts a low score",
+      "file": "backend/src/scanner/domain/volume/factor.py",
+      "old": "    incomplete = not capped and evidence.check_incomplete and clamped > INTEGRITY_CAP",
+      "new": "    incomplete = not capped and evidence.check_incomplete",
+      "expect_failing": [
+        "test_an_incomplete_check_never_lifts_a_low_score"
+      ]
+    },
+    {
+      "name": "the depth cache never moves to the next day",
+      "file": "backend/src/scanner/application/detection/depth_input.py",
+      "old": "        if cached is None or cached[0] != day:",
+      "new": "        if cached is None:",
+      "expect_failing": [
+        "test_depth_input_reads_once_per_symbol_per_day"
+      ]
+    },
+    {
+      "name": "exactly two days old counts as stale",
+      "file": "backend/src/scanner/application/marketdata/depth_freshness.py",
+      "old": "        stale_symbols=sum(1 for stamp in stamps if now - stamp > STALE_AFTER),",
+      "new": "        stale_symbols=sum(1 for stamp in stamps if now - stamp >= STALE_AFTER),",
+      "expect_failing": [
+        "test_exactly_two_days_is_not_yet_stale"
+      ]
+    }
+  ]
+}
