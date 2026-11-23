@@ -921,6 +921,31 @@ class PgLiquidityHistoryRepository:
 
             return [_to_liquidity_history(row) for row in rows]
 
+    async def fetch_until(
+        self,
+        exchange_symbol: str,
+        until: datetime,
+        *,
+        limit: int = 7,
+    ) -> Sequence[LiquidityHistoryRecord]:
+        if limit <= 0:
+            return []
+
+        async with self._sessions() as session:
+            rows = (
+                await session.execute(
+                    select(LiquidityHistoryRow)
+                    .where(
+                        LiquidityHistoryRow.exchange_symbol == exchange_symbol,
+                        LiquidityHistoryRow.observed_at <= until,
+                    )
+                    .order_by(LiquidityHistoryRow.observed_at.desc())
+                    .limit(limit)
+                )
+            ).scalars()
+
+            return [_to_liquidity_history(row) for row in rows]
+
 
 def _to_symbol(
     row: SymbolRow,

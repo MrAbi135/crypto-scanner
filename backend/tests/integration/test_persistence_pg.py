@@ -653,3 +653,37 @@ async def test_the_ledger_read_returns_resolved_rows_newest_first(engine) -> Non
     # The limit is applied in the query; a ledger that read everything and
     # sliced afterwards would grow with the history rather than the answer.
     assert len(await repo.list_ledger(symbol=symbol, limit=1)) == 1
+
+
+async def test_liquidity_history_fetch_until_is_point_in_time(engine) -> None:
+    """§6.4's depth input (SLS v1.0.20): nothing stamped after `until` is read."""
+    history = PgLiquidityHistoryRepository(build_session_factory(engine))
+    symbol = f"DEP{new_ulid()[:6]}USDT"
+    other = f"DEQ{new_ulid()[:6]}USDT"
+
+    for day in range(10):
+        await history.append(
+            LiquidityHistoryRecord(
+                exchange_symbol=symbol,
+                observed_at=BASE_TIME + timedelta(days=day),
+                daily_quote_volume=Decimal("1"),
+                spread_bps=Decimal("1"),
+                depth_2pct=Decimal(100 + day),
+            )
+        )
+    await history.append(
+        LiquidityHistoryRecord(
+            exchange_symbol=other,
+            observed_at=BASE_TIME + timedelta(days=3),
+            daily_quote_volume=Decimal("1"),
+            spread_bps=Decimal("1"),
+            depth_2pct=Decimal("1"),
+        )
+    )
+
+    rows = await history.fetch_until(symbol, BASE_TIME + timedelta(days=5), limit=3)
+
+    assert [r.observed_at for r in rows] == [BASE_TIME + timedelta(days=d) for d in (5, 4, 3)]
+    assert {r.exchange_symbol for r in rows} == {symbol}
+    assert await history.fetch_until(symbol, BASE_TIME + timedelta(days=30), limit=0) == []
+    assert await history.fetch_until(symbol, BASE_TIME - timedelta(days=1)) == []

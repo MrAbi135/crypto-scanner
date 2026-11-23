@@ -38,3 +38,15 @@ class LiquidityHistoryRepository(Protocol):
     ) -> Sequence[LiquidityHistoryRecord]:
         """Return most recent observations, newest first."""
         ...
+
+    async def fetch_until(
+        self,
+        exchange_symbol: str,
+        until: datetime,
+        *,
+        limit: int = 7,
+    ) -> Sequence[LiquidityHistoryRecord]:
+        """Return the newest `limit` observations stamped at or before `until`,
+        newest first. Point-in-time read for §6.4's depth input: nothing
+        stamped after `until` is ever returned."""
+        ...
