@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
 
-from scanner.domain.confluence import SignalLevels
+from scanner.domain.confluence import ZONE_DISTAL_EDGE, SignalLevels
 
 
 class SuppressionReason(str, Enum):
@@ -41,6 +41,10 @@ class SuppressionReason(str, Enum):
     # Retired by SLS v1.0.14 (2026-10-05): §0.3 no longer restricts M5 to Tier 1.
     # Kept so events written before that ruling stay readable. Nothing writes it.
     TIER_NOT_PERMITTED = "TIER_NOT_PERMITTED"
+    # SLS v1.0.20 §15.3(6): the invalidation is the zone's distal edge. The
+    # candidate is recorded with its full payload and never published; the
+    # swept extreme and M5's risk stop are not affected.
+    ZONE_EDGE_INVALIDATION = "ZONE_EDGE_INVALIDATION"
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,6 +263,12 @@ def publication_checks(
 
     if not timeframe_published:
         reasons.append(SuppressionReason.TIMEFRAME_NOT_PUBLISHED)
+
+    # §15.3(6): keyed on the invalidation's rule, which the sealed payload
+    # carries, so the verdict is reproducible from the stored row. M5 never
+    # reaches it: its invalidation is always the `risk_stop` (v1.0.15).
+    if payload.levels.invalidation.rule == ZONE_DISTAL_EDGE:
+        reasons.append(SuppressionReason.ZONE_EDGE_INVALIDATION)
 
     return PublicationDecision(published=not reasons, reasons=tuple(reasons))
 

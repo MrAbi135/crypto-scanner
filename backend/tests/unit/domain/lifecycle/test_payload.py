@@ -9,6 +9,8 @@ from decimal import Decimal
 import pytest
 
 from scanner.domain.confluence import (
+    RISK_STOP,
+    SWEPT_EXTREME,
     ZONE_DISTAL_EDGE,
     SignalLevels,
     TargetBand,
@@ -26,11 +28,15 @@ from scanner.domain.lifecycle import (
 GATES_OPEN = {"timeframe_published": True}
 
 
+# The fixture's invalidation is the swept extreme, which publishes; a
+# zone-edge invalidation never does since SLS v1.0.20 §15.3(6), and the tests
+# for that rule ask for it by name.
 def levels(
     *,
     direction: str = "UP",
     invalidation_price: str = "98",
     target_low: str = "112",
+    rule: str = SWEPT_EXTREME,
 ) -> SignalLevels:
     return SignalLevels(
         direction=direction,
@@ -40,7 +46,7 @@ def levels(
             band_low=Decimal(100),
             band_high=Decimal(104),
         ),
-        invalidation=Invalidation(Decimal(invalidation_price), ZONE_DISTAL_EDGE),
+        invalidation=Invalidation(Decimal(invalidation_price), rule),
         primary_target=TargetBand(
             low=Decimal(target_low),
             high=Decimal(114),
@@ -351,3 +357,54 @@ def test_significant_rounding_prints_one_spelling_per_value() -> None:
     # identically.
     assert _significant(Decimal("0"), 4) == "0"
     assert _significant(Decimal("0.00"), 4) == "0"
+
+
+def test_a_zone_edge_invalidation_is_never_published() -> None:
+    """§15.3(6): a candidate whose invalidation is the zone's distal edge is
+    recorded with its full payload and suppressed with its own reason.
+
+    Everything else about the payload passes, so the reason is the rule alone."""
+    decision = publication_checks(
+        payload(levels=levels(rule=ZONE_DISTAL_EDGE)),
+        feeds_fresh=True,
+        dedup_clear=True,
+        **GATES_OPEN,
+    )
+
+    assert not decision.published
+    assert decision.reasons == (SuppressionReason.ZONE_EDGE_INVALIDATION,)
+
+
+# The risk stop is measured from the proximal edge (104): 1% below it, as M5
+# sets it, so the R floor passes and only the rule is under test.
+@pytest.mark.parametrize(("rule", "stop"), [(SWEPT_EXTREME, "98"), (RISK_STOP, "102.96")])
+def test_the_swept_extreme_and_the_m5_risk_stop_still_publish(rule: str, stop: str) -> None:
+    """§15.3(6) names one rule. The swept extreme keeps publishing (owner
+    ruling, 2026-11-16) and M5's `risk_stop` is never a zone edge (v1.0.15)."""
+    decision = publication_checks(
+        payload(levels=levels(rule=rule, invalidation_price=stop)),
+        feeds_fresh=True,
+        dedup_clear=True,
+        **GATES_OPEN,
+    )
+
+    assert decision.published
+    assert decision.reasons == ()
+
+
+def test_a_zone_edge_with_other_failures_reports_every_reason() -> None:
+    """The zone-edge check joins the others; it does not replace them. A
+    duplicate that is also zone-edge must not look like a plain duplicate,
+    because a plain duplicate is merged as a refresh (§10.3)."""
+    decision = publication_checks(
+        payload(levels=levels(rule=ZONE_DISTAL_EDGE)),
+        feeds_fresh=False,
+        dedup_clear=False,
+        **GATES_OPEN,
+    )
+
+    assert set(decision.reasons) == {
+        SuppressionReason.STALE_FEEDS,
+        SuppressionReason.DUPLICATE_KEY,
+        SuppressionReason.ZONE_EDGE_INVALIDATION,
+    }

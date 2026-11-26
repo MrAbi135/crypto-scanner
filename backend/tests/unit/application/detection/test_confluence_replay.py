@@ -924,8 +924,12 @@ async def test_the_setup_row_is_append_only_across_a_re_evaluated_candle() -> No
     assert setups.rows.keys() == first.keys()
 
 
-def publishable_candidate(direction: str = "UP"):
+def publishable_candidate(direction: str = "UP", rule: str | None = None):
     """A candidate that has already cleared §8.6, built by hand.
+
+    Its invalidation is the swept extreme unless `rule` says otherwise: since
+    SLS v1.0.20 §15.3(6) a zone-edge invalidation is never published, and the
+    tests for that rule ask for it by name.
 
     The scoring fixtures in this file top out at 41 and the only series in the
     repository that clears §8.2 scores the same, so there is no way to reach
@@ -935,7 +939,7 @@ def publishable_candidate(direction: str = "UP"):
     """
     from scanner.application.detection.confluence_replay import SetupCandidate
     from scanner.domain.confluence import (
-        ZONE_DISTAL_EDGE,
+        SWEPT_EXTREME,
         SignalLevels,
         TargetBand,
         entry_zone,
@@ -948,7 +952,7 @@ def publishable_candidate(direction: str = "UP"):
         entry=entry_zone(
             zone_id="z1", direction=direction, band_low=Decimal(100), band_high=Decimal(104)
         ),
-        invalidation=Invalidation(Decimal(98), ZONE_DISTAL_EDGE),
+        invalidation=Invalidation(Decimal(98), rule or SWEPT_EXTREME),
         primary_target=TargetBand(
             low=Decimal(112), high=Decimal(114), pool_id="p1", strength=Decimal(60)
         ),
@@ -1256,6 +1260,81 @@ async def test_a_duplicate_that_also_fails_another_check_is_suppressed_not_merge
     ]
 
     assert suppressed == [{"reasons": ["STALE_FEEDS", "DUPLICATE_KEY"]}]
+
+
+@pytest.mark.asyncio
+async def test_a_zone_edge_candidate_is_suppressed_with_its_own_reason() -> None:
+    """SLS v1.0.20 §15.3(6): a zone-edge invalidation is recorded and never
+    published. No signal row, a suppression naming the reason, and the funnel
+    counts it under that reason (§14 still sees the candidate)."""
+    from scanner.domain.confluence import ZONE_DISTAL_EDGE
+
+    signals = FakeSignals()
+    metrics = RecordingMetrics()
+
+    svc, repo = service(
+        **bullish_setup(),
+        signals=signals,
+        incidents=FakeIncidents(),
+        transitions=FakeTransitions(),
+        metrics=metrics,
+    )
+
+    at = BASE + TF.duration * 10
+
+    await svc._publish("BTCUSDT", TF, at, publishable_candidate(rule=ZONE_DISTAL_EDGE))
+
+    assert signals.rows == {}
+
+    suppressed = [
+        json.loads(r.payload)["reasons"]
+        for r in repo.appended.values()
+        if r.event_type == "SIGNAL_SUPPRESSED_UP"
+    ]
+
+    assert suppressed == [["ZONE_EDGE_INVALIDATION"]]
+    assert metrics.outcomes == [("ZONE_EDGE_INVALIDATION", TF.value)]
+
+
+@pytest.mark.asyncio
+async def test_a_zone_edge_duplicate_of_a_live_signal_is_suppressed_not_refreshed() -> None:
+    """Owner-approved M3 call: §10.3 merges a re-detection only when the
+    duplicate key is the sole reason. A zone-edge candidate on a live key
+    (a signal published before Bundle D, or a swept-extreme one on the same
+    band -- the key does not carry the rule) would not publish on a free key,
+    so appending it would keep a zone-edge setup published in effect."""
+    from scanner.domain.confluence import ZONE_DISTAL_EDGE
+
+    signals = FakeSignals()
+    transitions = FakeTransitions()
+
+    svc, repo = service(
+        **bullish_setup(),
+        signals=signals,
+        incidents=FakeIncidents(),
+        transitions=transitions,
+    )
+
+    at = BASE + TF.duration * 10
+
+    await svc._publish("BTCUSDT", TF, at, publishable_candidate())
+
+    assert len(signals.rows) == 1
+
+    await svc._publish(
+        "BTCUSDT", TF, at + TF.duration, publishable_candidate(rule=ZONE_DISTAL_EDGE)
+    )
+
+    assert transitions.refreshes == []
+    assert len(signals.rows) == 1
+
+    suppressed = [
+        json.loads(r.payload)["reasons"]
+        for r in repo.appended.values()
+        if r.event_type.startswith("SIGNAL_SUPPRESSED_")
+    ]
+
+    assert suppressed == [["DUPLICATE_KEY", "ZONE_EDGE_INVALIDATION"]]
 
 
 @pytest.mark.asyncio
