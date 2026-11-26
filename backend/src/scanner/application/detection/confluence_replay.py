@@ -1350,6 +1350,16 @@ class ConfluenceReplayService:
                 event_at,
                 candidate.direction,
                 decision.reasons,
+                # §15.3(6): a zone-edge candidate "is recorded with its full
+                # payload". The sealed payload and its hash ride on the
+                # suppression, so the setup it would have published can be
+                # read back and verified later. Other suppressions keep their
+                # shape.
+                sealed=(
+                    payload
+                    if SuppressionReason.ZONE_EDGE_INVALIDATION in decision.reasons
+                    else None
+                ),
             )
 
             return
@@ -1448,6 +1458,7 @@ class ConfluenceReplayService:
         reasons: Sequence[SuppressionReason],
         *,
         unmet: tuple[str, ...] = (),
+        sealed: SignalPayload | None = None,
     ) -> None:
         """§12.2: "Fail => SUPPRESSED with recorded reason (auditable funnel:
         candidates -> published is a monitored ratio, §14)".
@@ -1468,6 +1479,12 @@ class ConfluenceReplayService:
 
         if unmet:
             detail["payload_unmet"] = list(unmet)
+
+        # The stored form is the hashed form (`SignalPayload.seal`), so the
+        # digest can be recomputed from the row itself.
+        if sealed is not None:
+            detail["payload"] = sealed.as_dict()
+            detail["payload_hash"] = sealed.seal()
 
         event_type = f"SIGNAL_SUPPRESSED_{direction}"
 

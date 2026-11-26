@@ -482,6 +482,77 @@
         "symbol": "GOLDENATHREE"
       }
     ],
-    "signals": []
+    "signals": [],
+    "suppressions": [
+      {
+        "detail": {
+          "payload": {
+            "archetype": "A3",
+            "confidence": "70",
+            "direction": "UP",
+            "entry_zone": {
+              "distal": "115.5",
+              "proximal": "120.45",
+              "refined_distal": "118.6",
+              "refined_proximal": "120.2",
+              "zone_id": "c3b06dd22938c2b5428cd95b503a0cc45d455761ba80bf70493983ea563ffb01"
+            },
+            "evidence_ids": [
+              "c3b06dd22938c2b5428cd95b503a0cc45d455761ba80bf70493983ea563ffb01",
+              "46b2f69fccfeb0dec5cb7324f786b754ef513ef0476e1ff939ddcbc3ff076546",
+              "54803e439823529ebf1732f77874e6700a05e1248b78a2270172f464c249c10b",
+              "551a0570f17c5265370e63d9c025bf3ad01da33e364a2af37e9f8ed3d7d34f25",
+              "a97abadd877632e454c0164ff3fddd9a6f919f601cbfab0609ff5a3d0fa522f8",
+              "f387b3475552749a26d6e14e22bbb421621b2646ee8a1c3523c7bf5beff1abe8"
+            ],
+            "factors": {
+              "F1": "67.5",
+              "F2": "80.97916666666666666666666667",
+              "F3": "61",
+              "F4": "50",
+              "F5": "32",
+              "F6": "100"
+            },
+            "grade": "B",
+            "htf_chain": {
+              "H4": "SIGNAL",
+              "HTF": "UP"
+            },
+            "invalidation": {
+              "price": "115.5",
+              "rule": "zone_distal_edge"
+            },
+            "reason": "A3 long: trend with a displaced break, retraced into the zone.",
+            "risk": {
+              "condition_tags": [],
+              "invalidation_distance_atr": "1.377766050131273987738411406",
+              "invalidation_distance_pct": "2.043765483071841453344343518",
+              "r_multiple": "4.656565656565656565656565657"
+            },
+            "symbol": "GOLDENATHREE",
+            "targets": {
+              "primary": {
+                "high": "129.5",
+                "low": "129.5",
+                "pool_id": "551a0570f17c5265370e63d9c025bf3ad01da33e364a2af37e9f8ed3d7d34f25",
+                "strength": "23.91666666666666666666666667"
+              },
+              "secondary": null
+            },
+            "timeframe": "H4",
+            "versions": {
+              "algo_version": "s8-confluence-v29",
+              "param_set_version": "2026.10.10.1"
+            }
+          },
+          "payload_hash": "7dfbf847df23677d2f9e75aa59c430522672135e73c4d0aca79e3843964f2c87",
+          "reasons": [
+            "ZONE_EDGE_INVALIDATION"
+          ]
+        },
+        "event_at": "2026-03-10T12:00:00+00:00",
+        "event_type": "SIGNAL_SUPPRESSED_UP"
+      }
+    ]
   }
 }

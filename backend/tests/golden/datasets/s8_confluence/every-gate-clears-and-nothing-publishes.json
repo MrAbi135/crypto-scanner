@@ -437,6 +437,7 @@
         "symbol": "GOLDENGATE"
       }
     ],
-    "signals": []
+    "signals": [],
+    "suppressions": []
   }
 }

@@ -446,6 +446,19 @@ async def run_confluence(
             # A real T17 holds every other test's signals too.
             if row.symbol == dataset.symbol
         ],
+        # §12.2's other outcome: a candidate §15.3 refused. Asserted so that a
+        # case whose setup is suppressed still pins what was refused and why --
+        # since SLS v1.0.20 §15.3(6) a zone-edge suppression carries the full
+        # sealed payload, so its levels, factors and grade stay under test.
+        "suppressions": [
+            {
+                "event_type": event.event_type,
+                "event_at": event.event_at,
+                "detail": json.loads(event.payload),
+            }
+            for event in sorted(events.events, key=lambda e: (e.event_at, e.event_type))
+            if event.symbol == dataset.symbol and event.event_type.startswith("SIGNAL_SUPPRESSED_")
+        ],
     }
 
 

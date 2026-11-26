@@ -1297,6 +1297,51 @@ async def test_a_zone_edge_candidate_is_suppressed_with_its_own_reason() -> None
 
 
 @pytest.mark.asyncio
+async def test_a_zone_edge_suppression_carries_the_sealed_payload_and_its_hash() -> None:
+    """§15.3(6): "recorded with its full payload". The row holds the payload in
+    its stored (hashed) form and the hash, and the hash recomputes from the row
+    alone. A suppression for any other reason keeps its old shape."""
+    import hashlib
+
+    from scanner.domain.confluence import ZONE_DISTAL_EDGE
+
+    svc, repo = service(
+        **bullish_setup(),
+        signals=FakeSignals(),
+        incidents=FakeIncidents(),
+        transitions=FakeTransitions(),
+    )
+
+    at = BASE + TF.duration * 10
+    zone_edge = publishable_candidate(rule=ZONE_DISTAL_EDGE)
+
+    await svc._publish("BTCUSDT", TF, at, zone_edge)
+    await svc._publish(
+        "BTCUSDT",
+        TF,
+        at + TF.duration,
+        replace(publishable_candidate(), stale_context=True),
+    )
+
+    rows = sorted(
+        (r for r in repo.appended.values() if r.event_type.startswith("SIGNAL_SUPPRESSED_")),
+        key=lambda r: r.event_at,
+    )
+    edge, stale = (json.loads(r.payload) for r in rows)
+
+    assert edge["reasons"] == ["ZONE_EDGE_INVALIDATION"]
+    assert edge["payload"] == zone_edge.payload.as_dict()
+    assert edge["payload"]["invalidation"]["rule"] == ZONE_DISTAL_EDGE
+
+    canonical = json.dumps(edge["payload"], sort_keys=True, separators=(",", ":"))
+
+    assert edge["payload_hash"] == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    assert edge["payload_hash"] == zone_edge.payload.seal()
+
+    assert stale == {"reasons": ["STALE_FEEDS"]}
+
+
+@pytest.mark.asyncio
 async def test_a_zone_edge_duplicate_of_a_live_signal_is_suppressed_not_refreshed() -> None:
     """Owner-approved M3 call: §10.3 merges a re-detection only when the
     duplicate key is the sole reason. A zone-edge candidate on a live key
