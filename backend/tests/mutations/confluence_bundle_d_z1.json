@@ -1,8 +1,9 @@
 {
-  "description": "SLS v1.0.20 §15.3(6), Bundle D M3: zone-edge candidates are suppressed with ZONE_EDGE_INVALIDATION, carry their sealed payload and hash, and are never merged as a refresh; swept extreme and M5's risk stop still publish. Each mutation removes or widens one rule; the named tests must notice. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/confluence_bundle_d_z1.json",
+  "description": "SLS v1.0.20 §15.3(6), Bundle D M3: zone-edge candidates are suppressed with ZONE_EDGE_INVALIDATION, carry their sealed payload and hash, and are never merged as a refresh; swept extreme and M5's risk stop still publish. The M5 golden is the publishing case: it must notice the publish path being skipped, the check widened to the risk stop, and its coil's bonus withdrawn. Each mutation removes or widens one rule; the named tests must notice. Run from backend/: uv run python -m tests.support.mutation_battery tests/mutations/confluence_bundle_d_z1.json",
   "pytest": [
     "tests/unit/domain/lifecycle/test_payload.py",
-    "tests/unit/application/detection/test_confluence_replay.py"
+    "tests/unit/application/detection/test_confluence_replay.py",
+    "tests/golden/test_golden.py"
   ],
   "mutations": [
     {
@@ -21,7 +22,8 @@
       "old": "    if payload.levels.invalidation.rule == ZONE_DISTAL_EDGE:\n",
       "new": "    if True:\n",
       "expect_failing": [
-        "test_the_swept_extreme_and_the_m5_risk_stop_still_publish"
+        "test_the_swept_extreme_and_the_m5_risk_stop_still_publish",
+        "an-m5-continuation-pullback-after-a-coil-publishes"
       ]
     },
     {
@@ -77,6 +79,24 @@
       "new": "            pass\n",
       "expect_failing": [
         "test_a_zone_edge_suppression_carries_the_sealed_payload_and_its_hash"
+      ]
+    },
+    {
+      "name": "publish path skipped (the M5 golden publishes nothing)",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "        if self._signals is None:\n            return\n",
+      "new": "        if True:\n            return\n",
+      "expect_failing": [
+        "an-m5-continuation-pullback-after-a-coil-publishes"
+      ]
+    },
+    {
+      "name": "compression synergy not paid (the M5 golden falls under A3's floor)",
+      "file": "backend/src/scanner/application/detection/confluence_replay.py",
+      "old": "    if \"COMPRESSION\" in event_types:\n",
+      "new": "    if False:\n",
+      "expect_failing": [
+        "an-m5-continuation-pullback-after-a-coil-publishes"
       ]
     }
   ]
