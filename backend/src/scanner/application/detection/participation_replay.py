@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
+from scanner.application.detection.depth_input import DepthInput
 from scanner.application.detection.orchestrator import build_event_key
 from scanner.application.detection.state import (
     EngineStateManager,
@@ -32,8 +33,15 @@ from scanner.application.ports.detection import (
     EngineEventRecord,
     EngineEventRepository,
 )
+from scanner.application.ports.liquidity_history import LiquidityHistoryRepository
 from scanner.domain.common import Candle, wilder_atr_series
-from scanner.domain.common.rvol import baseline_span, classify, relative_volumes
+from scanner.domain.common.rvol import (
+    RvolClass,
+    baseline_span,
+    classify,
+    relative_volumes,
+    rvol_at,
+)
 from scanner.domain.momentum import (
     detect_compression,
     detect_range_expansion,
@@ -62,7 +70,12 @@ from scanner.shared import Timeframe
 # participation read 0 or 25 depending on where the window started
 # (MOMENTUM_ACCELERATING / EXHAUSTION_WATCH attribution 3/3 WINDOW_START),
 # and §6's volume facts could never fire below H1.
-PARTICIPATION_ALGO_VERSION = "s7-participation-v4"
+# v5: §6.4's depth input (SLS v1.0.20, Bundle D, owner ruling S2 option R).
+# The check read no depth, so depth_ok was None on every ABNORMAL candle; it
+# now reads the latest daily snapshot taken at or before the close and the
+# median of the seven ending at it (`domain.volume.depth`). A candle on a thin
+# book becomes VOLUME_SUSPECT, which §6.6's H1/H4 count reads.
+PARTICIPATION_ALGO_VERSION = "s7-participation-v5"
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,11 +105,15 @@ class ParticipationReplayService:
         *,
         algo_version: str = PARTICIPATION_ALGO_VERSION,
         state: EngineStateManager | None = None,
+        liquidity_history: LiquidityHistoryRepository | None = None,
     ) -> None:
         self._candles = candles
         self._events = events
         self._clock = clock
         self._algo_version = algo_version
+        # §6.4's depth input (SLS v1.0.20). Absent, the depth half reports
+        # None and the check is incomplete, never failed.
+        self._depth = DepthInput(liquidity_history)
         # The last candle a pass decided. Absent (the golden harness, `engine
         # run` over a historical range), every pass decides its whole window.
         self._state = state
@@ -166,15 +183,20 @@ class ParticipationReplayService:
         # additionally requires §6.2's absolute quote floor, so an abnormal candle
         # on a thin symbol produces no spike -- and that is exactly the candle
         # §6.4 exists to cross-examine.
+        # Only an ABNORMAL candle runs the check, so only it reads the book.
+        depth = (
+            await self._depth.at(symbol, candle.close_time)
+            if classify(rvol_at(series, index, rvols)) is RvolClass.ABNORMAL
+            else None
+        )
+
         check = cross_validate_abnormal_volume(
             series,
             index,
-            # `market.liquidity_history` is empty until the daily universe job
-            # has run, so the depth half reports None rather than a verdict.
-            # Passing the repository today would read the same empty history;
-            # it arrives with §6.6, which needs it for its own depth test.
-            depth=None,
-            median_depth_7d=None,
+            # §6.4's depth input: the latest daily snapshot taken at or before
+            # this candle's close, never a later one (`domain.volume.depth`).
+            depth=depth.depth if depth else None,
+            median_depth_7d=depth.median_depth_7d if depth else None,
             rvols=rvols,
         )
 

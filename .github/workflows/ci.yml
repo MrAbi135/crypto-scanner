@@ -167,10 +167,10 @@ jobs:
         run: |
           docker run --rm -v "$PWD/ops/prometheus:/p" -w /p/tests \
             --entrypoint promtool prom/prometheus:v3.1.0 \
-            check rules ../alerts/detection-targets.yml ../alerts/process-liveness.yml
+            check rules ../alerts/detection-targets.yml ../alerts/process-liveness.yml ../alerts/depth-snapshots.yml
           docker run --rm -v "$PWD/ops/prometheus:/p" -w /p/tests \
             --entrypoint promtool prom/prometheus:v3.1.0 \
-            test rules detection-targets_test.yml
+            test rules detection-targets_test.yml depth-snapshots_test.yml
 
   # ops/soak's shell tests: the invariants triage + check G verdict, and the
   # deploy script's image-id verification. Pure text logic that fails silently

@@ -67,6 +67,7 @@ from scanner.infrastructure.persistence.liquidity_detection_repositories import 
 from scanner.infrastructure.persistence.repositories import (
     PgCandleRepository,
     PgIncidentRepository,
+    PgLiquidityHistoryRepository,
     PgSymbolRepository,
     PgTradeAggregateRepository,
 )
@@ -210,6 +211,8 @@ def build_detection_pipeline(
             candles,
             events,
             clock,
+            # §6.4's depth input (SLS v1.0.20): market.liquidity_history.
+            liquidity_history=PgLiquidityHistoryRepository(sessions),
             # Each candle decided once: the next pass starts after the last one.
             state=EngineStateManager(
                 RedisEngineStateStore(redis_client),
@@ -244,6 +247,7 @@ def build_detection_pipeline(
             transitions=PgSignalTransitionRepository(sessions),
             metrics=metrics,
             signal_timeframes=signal_timeframes,
+            liquidity_history=PgLiquidityHistoryRepository(sessions),
         ),
         monitor=SignalMonitorService(
             candles,

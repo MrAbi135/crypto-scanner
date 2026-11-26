@@ -168,6 +168,41 @@ class TestVolumeFactorScore:
         assert result.score == Decimal(30)
         assert result.integrity_capped is False
 
+    def test_an_incomplete_check_earns_no_positive_points(self) -> None:
+        """§6.4, "An incomplete check" (SLS v1.0.20): capped at neutral, like a
+        suspect candle, but it is not a suspect -- the reason is kept apart."""
+        result = volume_factor_score(
+            VolumeFactorEvidence(spike_aligned=True, expansion_aligned=True, check_incomplete=True)
+        )
+
+        assert result.score == Decimal(50)
+        assert result.incomplete_capped is True
+        assert result.integrity_capped is False
+
+    def test_an_incomplete_check_never_lifts_a_low_score(self) -> None:
+        result = volume_factor_score(
+            VolumeFactorEvidence(opposing_spike=True, check_incomplete=True)
+        )
+
+        assert result.score == Decimal(30)
+        assert result.incomplete_capped is False
+
+    def test_a_complete_clean_check_is_not_capped(self) -> None:
+        result = volume_factor_score(VolumeFactorEvidence(spike_aligned=True))
+
+        assert result.score > Decimal(50)
+        assert result.incomplete_capped is False
+        assert result.integrity_capped is False
+
+    def test_a_suspect_candle_is_reported_as_suspect_not_incomplete(self) -> None:
+        result = volume_factor_score(
+            VolumeFactorEvidence(spike_aligned=True, integrity_suspect=True, check_incomplete=True)
+        )
+
+        assert result.score == Decimal(50)
+        assert result.integrity_capped is True
+        assert result.incomplete_capped is False
+
     def test_every_adjustment_carries_its_evidence_id(self) -> None:
         """§6.7: "every adjustment stores its evidence id -- the score is an
         auditable sum, not a number".

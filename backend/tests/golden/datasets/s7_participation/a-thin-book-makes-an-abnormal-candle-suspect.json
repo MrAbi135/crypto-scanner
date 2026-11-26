@@ -1,0 +1,107 @@
+{
+  "dataset_id": "s7-a-thin-book-makes-an-abnormal-candle-suspect",
+  "engine": "participation",
+  "sls_sections": [
+    "6.4"
+  ],
+  "sls_rules": [
+    "6.4-depth-test",
+    "6.4-failing-either-tags-suspect"
+  ],
+  "description": "One loud candle whose trade count rose with its volume, printed while the order book stood at well under half its seven-day median. The book half fails, so the candle is tagged suspect with a completed check.",
+  "labelling_rationale": "§6.4's second test is the order book: 'order-book depth not anomalously thin (depth >= 50% of its 7-day median)'. SLS v1.0.20 fixes the input: the latest daily depth snapshot taken at or before the candle's close, and the median of the seven snapshots ending at that one. **2026-08-21T00:00 -- the candle.** Volume 500 against the filler's rolling 20-candle H4 median of 100 is RVOL 5.0, the inclusive floor of §6.1's ABNORMAL band, so §6.4 runs. It printed on 30 trades against a 20-candle median of 10 -- exactly 3x, which passes the participants test. **The book.** The candle closes at 2026-08-21T04:00. A daily snapshot carries the start of its UTC day as its stamp but is read later that day, so (owner ruling, Bundle D M2 Q1) a snapshot stamped day D is readable only from D+1 00:00: the newest this candle may read is the one stamped 2026-08-20. The seven ending there are 2026-08-14 .. 2026-08-20: six at 100 and the 2026-08-20 one at 40. Their median is 100, half of it is 50, and 40 is below it, so the depth test fails. **The verdict.** Failing either half tags suspect_volume, so VOLUME_SUSPECT is recorded with rvol 5, participants_ok true, depth_ok false -- and validated true, because both tests ran: this is a completed check that failed, not an incomplete one. **Why nothing else fires.** The candle is a doji under §6.2's 250,000 absolute quote floor (50,000), the same construction as s7-abnormal-volume-cross-validation, which keeps the case to §6.4 alone.",
+  "labelled_by": "drafted by Claude Opus 5.5 2026-11-23 from SLS §6.4 (v1.0.20); pending developer verification",
+  "labelled_at": "2026-11-23",
+  "algo_version": "s7-participation-v5",
+  "symbol": "GOLDENVOLDEPTH",
+  "timeframe": "H4",
+  "filler": {
+    "count": 297,
+    "open": "100",
+    "high": "103",
+    "low": "100",
+    "close": "100"
+  },
+  "depth_history": [
+    {
+      "stamped_at": "2026-08-14T00:00:00+00:00",
+      "depth_2pct": "100"
+    },
+    {
+      "stamped_at": "2026-08-15T00:00:00+00:00",
+      "depth_2pct": "100"
+    },
+    {
+      "stamped_at": "2026-08-16T00:00:00+00:00",
+      "depth_2pct": "100"
+    },
+    {
+      "stamped_at": "2026-08-17T00:00:00+00:00",
+      "depth_2pct": "100"
+    },
+    {
+      "stamped_at": "2026-08-18T00:00:00+00:00",
+      "depth_2pct": "100"
+    },
+    {
+      "stamped_at": "2026-08-19T00:00:00+00:00",
+      "depth_2pct": "100"
+    },
+    {
+      "stamped_at": "2026-08-20T00:00:00+00:00",
+      "depth_2pct": "40"
+    }
+  ],
+  "candles": [
+    {
+      "open_time": "2026-08-20T20:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100"
+    },
+    {
+      "open_time": "2026-08-21T00:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100",
+      "volume": "500",
+      "quote_volume": "50000",
+      "trade_count": 30
+    },
+    {
+      "open_time": "2026-08-21T04:00:00+00:00",
+      "open": "100",
+      "high": "103",
+      "low": "100",
+      "close": "100"
+    }
+  ],
+  "expected": {
+    "report": {
+      "candles": 300,
+      "volume_spikes": 0,
+      "suspect_volume": 1,
+      "expansions": 0,
+      "contractions": 0,
+      "range_expansions": 0,
+      "compressions": 0,
+      "accelerations": 0,
+      "exhaustion_watches": 0,
+      "events_inserted": 1
+    },
+    "events": [
+      {
+        "event_type": "VOLUME_SUSPECT",
+        "event_at": "2026-08-21T00:00:00+00:00",
+        "payload": {
+          "rvol": "5",
+          "participants_ok": true,
+          "depth_ok": false,
+          "validated": true
+        }
+      }
+    ]
+  }
+}

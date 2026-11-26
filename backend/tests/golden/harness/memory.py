@@ -35,6 +35,7 @@ from scanner.application.ports.liquidity_detection import (
     LiquidityPoolRecord,
     LiquidityTransitionRecord,
 )
+from scanner.application.ports.liquidity_history import LiquidityHistoryRecord
 from scanner.application.ports.setups import SetupRecord
 from scanner.application.ports.signals import SignalRecord
 from scanner.domain.common import Candle, TradeAggregate
@@ -680,6 +681,46 @@ class InMemoryTradeAggregateRepository:
         return tuple(
             item for item in self.aggregates if item.symbol == symbol and start <= item.minute < end
         )
+
+
+class InMemoryLiquidityHistoryRepository:
+    """`market.liquidity_history`, the daily ±2% depth §6.4 reads. Empty unless
+    a dataset supplies it -- and then §6.4's depth half reports None, which is
+    what production does for a symbol the daily job has not yet seen."""
+
+    def __init__(self, records: Sequence[LiquidityHistoryRecord] = ()) -> None:
+        self.records = list(records)
+
+    async def append(self, record: LiquidityHistoryRecord) -> None:
+        if not any(
+            r.exchange_symbol == record.exchange_symbol and r.observed_at == record.observed_at
+            for r in self.records
+        ):
+            self.records.append(record)
+
+    async def fetch_recent(
+        self, exchange_symbol: str, *, limit: int = 7
+    ) -> Sequence[LiquidityHistoryRecord]:
+        mine = sorted(
+            (r for r in self.records if r.exchange_symbol == exchange_symbol),
+            key=lambda r: r.observed_at,
+            reverse=True,
+        )
+        return mine[: max(limit, 0)]
+
+    async def fetch_until(
+        self, exchange_symbol: str, until: datetime, *, limit: int = 7
+    ) -> Sequence[LiquidityHistoryRecord]:
+        mine = sorted(
+            (
+                r
+                for r in self.records
+                if r.exchange_symbol == exchange_symbol and r.observed_at <= until
+            ),
+            key=lambda r: r.observed_at,
+            reverse=True,
+        )
+        return mine[: max(limit, 0)]
 
 
 class InMemorySymbolRepository:

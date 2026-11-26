@@ -263,8 +263,8 @@ async def test_an_abnormal_candle_on_the_same_trade_count_is_tagged_suspect() ->
     payload = json.loads(tagged.payload)  # type: ignore[attr-defined]
 
     assert payload["participants_ok"] is False
-    # `market.liquidity_history` is empty, so the book half has no verdict --
-    # and the record says so rather than implying a clean bill.
+    # No depth history is given, so the book half has no verdict -- and the
+    # record says so rather than implying a clean bill.
     assert payload["depth_ok"] is None
     assert payload["validated"] is False
 

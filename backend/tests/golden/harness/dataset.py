@@ -71,6 +71,11 @@ class GoldenDataset:
     # A3 and A4 can never classify. §8.7 itself opens by declaring it:
     # "H4 BULLISH; D1 BULLISH".
     htf_state: str | None = None
+    # Declared daily ±2% depth snapshots (`market.liquidity_history`), for
+    # §6.4's depth input (SLS v1.0.20). Each is (day stamp, depth). Absent, the
+    # depth half of §6.4 has no verdict, as for a symbol the daily job has not
+    # yet seen.
+    depth_history: tuple[tuple[datetime, Decimal], ...] = ()
 
     @property
     def scenario_start_index(self) -> int:
@@ -147,6 +152,11 @@ def load_dataset(path: Path) -> GoldenDataset:
             f"({', '.join(state.value for state in TrendState)})"
         )
 
+    depth_history = tuple(
+        (datetime.fromisoformat(entry["stamped_at"]), Decimal(entry["depth_2pct"]))
+        for entry in raw.get("depth_history", [])
+    )
+
     return GoldenDataset(
         dataset_id=raw["dataset_id"],
         engine=raw["engine"],
@@ -164,6 +174,7 @@ def load_dataset(path: Path) -> GoldenDataset:
         path=path,
         filler_count=len(filler),
         htf_state=htf_state,
+        depth_history=depth_history,
     )
 
 

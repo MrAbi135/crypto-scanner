@@ -44,6 +44,8 @@ class VolumeFactor:
     score: Decimal
     contributions: tuple[VolumeContribution, ...] = field(default_factory=tuple)
     integrity_capped: bool = False
+    # §6.4, an incomplete check (SLS v1.0.20): capped at neutral, untagged.
+    incomplete_capped: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +61,12 @@ class VolumeFactorEvidence:
 
     # §6.6 wash_risk or §6.4 suspect_volume.
     integrity_suspect: bool = False
+
+    # §6.4, "An incomplete check" (SLS v1.0.20): an ABNORMAL candle whose
+    # cross-validation could not run both tests earns no positive volume
+    # points -- capped at neutral like a suspect candle, but it is not a
+    # suspect: no tag, no fake-volume count. A missing input is not evidence.
+    check_incomplete: bool = False
 
     evidence_ids: dict[str, str] = field(default_factory=dict)
 
@@ -89,10 +97,14 @@ def volume_factor_score(evidence: VolumeFactorEvidence) -> VolumeFactor:
     # legitimate-looking bonuses must not lift it.
     capped = evidence.integrity_suspect and clamped > INTEGRITY_CAP
 
+    # The same neutral ceiling, kept apart so a reader can tell why it applied.
+    incomplete = not capped and evidence.check_incomplete and clamped > INTEGRITY_CAP
+
     return VolumeFactor(
-        score=INTEGRITY_CAP if capped else clamped,
+        score=INTEGRITY_CAP if (capped or incomplete) else clamped,
         contributions=tuple(contributions),
         integrity_capped=capped,
+        incomplete_capped=incomplete,
     )
 
 

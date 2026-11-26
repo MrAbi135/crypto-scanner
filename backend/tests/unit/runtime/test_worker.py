@@ -316,3 +316,49 @@ async def test_a_tiering_failure_does_not_take_the_integrity_check_with_it() -> 
         )
 
     fake_volume.run_symbol.assert_awaited_once()
+
+
+async def test_depth_freshness_is_published_for_observable_symbols() -> None:
+    from prometheus_client import CollectorRegistry
+
+    from scanner.infrastructure.observability.depth_metrics import (
+        OLDEST_LATEST,
+        DepthFreshnessMetrics,
+    )
+
+    stamp = datetime(2026, 11, 20, tzinfo=UTC)
+    history = AsyncMock()
+    history.latest_stamps.return_value = {
+        "AUSDT": stamp,
+        "GONEUSDT": datetime(2020, 1, 1, tzinfo=UTC),
+    }
+    symbols = AsyncMock()
+    symbols.list_observable.return_value = [Symbol("AUSDT")]
+    registry = CollectorRegistry()
+
+    await worker._publish_depth_freshness(
+        history,
+        symbols,
+        DepthFreshnessMetrics(registry),
+        FakeClock(datetime(2026, 11, 23, tzinfo=UTC)),
+    )
+
+    assert registry.get_sample_value(OLDEST_LATEST) == stamp.timestamp()
+
+
+async def test_a_failed_depth_freshness_refresh_is_not_fatal() -> None:
+    from prometheus_client import CollectorRegistry
+
+    from scanner.infrastructure.observability.depth_metrics import DepthFreshnessMetrics
+
+    history = AsyncMock()
+    history.latest_stamps.side_effect = RuntimeError("db down")
+    symbols = AsyncMock()
+    symbols.list_observable.return_value = [Symbol("AUSDT")]
+
+    await worker._publish_depth_freshness(
+        history,
+        symbols,
+        DepthFreshnessMetrics(CollectorRegistry()),
+        FakeClock(datetime(2026, 11, 23, tzinfo=UTC)),
+    )

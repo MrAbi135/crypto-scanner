@@ -1,0 +1,63 @@
+# promtool unit tests for the depth-snapshot alarm (owner M2 Q3).
+#
+# Run:  promtool test rules ops/prometheus/tests/depth-snapshots_test.yml
+rule_files:
+  - ../alerts/depth-snapshots.yml
+
+evaluation_interval: 5m
+
+tests:
+  # promtool's clock starts at 0 (1970-01-01T00:00). A stamp of 0 is
+  # therefore "now" at the start of the test.
+  #
+  # Samples every 5m, not every hour: an instant query looks back only 5m, so
+  # hourly samples leave the series absent between them, `for: 15m` never
+  # completes, and a "stays quiet" case would pass whatever the rule says.
+  - interval: 5m
+    name: a stamp just under two days old stays quiet, and fires once past two days
+    input_series:
+      # 721 samples, 0h .. 60h.
+      - series: scanner_depth_snapshot_oldest_latest_timestamp_seconds
+        values: "0+0x720"
+    alert_rule_test:
+      - eval_time: 47h
+        alertname: DepthSnapshotStale
+        exp_alerts: []
+      - eval_time: 49h
+        alertname: DepthSnapshotStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "A symbol's newest depth snapshot is over two days old"
+              description: "The stalest observable symbol's newest daily depth snapshot is 2d 1h 0m 0s old. §6.4 keeps scoring on it (no age limit in the SLS); check the worker's daily universe job."
+
+  - interval: 5m
+    name: a stamp refreshed every day never fires
+    input_series:
+      # The stamp moves forward by a day every 288 samples (one per 5m),
+      # 0h .. 72h, with no gap the rule could hide in.
+      - series: scanner_depth_snapshot_oldest_latest_timestamp_seconds
+        values: "0x287 86400x287 172800x287"
+    alert_rule_test:
+      - eval_time: 71h
+        alertname: DepthSnapshotStale
+        exp_alerts: []
+
+  - interval: 5m
+    name: nothing published fires after two hours, and a published stamp is quiet
+    input_series:
+      - series: some_other_metric
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: DepthSnapshotFreshnessMissing
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: DepthSnapshotFreshnessMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "No depth-snapshot freshness published"
+              description: "The worker publishes the depth-snapshot freshness at boot and after each daily run; none has been seen for two hours."

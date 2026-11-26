@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
@@ -16,6 +16,7 @@ from scanner.application.marketdata.contexts import parse_timeframes
 from scanner.application.marketdata.daily_universe_job import (
     DailyUniverseJob,
 )
+from scanner.application.marketdata.depth_freshness import depth_freshness
 from scanner.application.marketdata.fake_volume_job import (
     FakeVolumeJob,
     SuspectVolumeCounter,
@@ -40,6 +41,7 @@ from scanner.infrastructure.exchanges.binance import (
     BinanceRestAdapter,
     RateBudget,
 )
+from scanner.infrastructure.observability.depth_metrics import DepthFreshnessMetrics
 from scanner.infrastructure.persistence.database import (
     build_engine,
     build_session_factory,
@@ -106,6 +108,36 @@ async def _sync_symbols(sync: SymbolSyncService) -> None:
         log.exception("symbol_registry_sync_failed")
 
 
+async def _publish_depth_freshness(
+    history: PgLiquidityHistoryRepository,
+    symbols: PgSymbolRepository,
+    metrics: DepthFreshnessMetrics,
+    clock: Clock,
+) -> None:
+    """The depth-freshness alarm's gauges (owner M2 Q3). Never fatal: a failed
+    refresh leaves the last timestamp in place, and the alert's `time()`
+    comparison still ages it."""
+    try:
+        observable = await symbols.list_observable()
+        freshness = depth_freshness(
+            await history.latest_stamps(),
+            (symbol.exchange_symbol for symbol in observable),
+            clock.now(),
+        )
+        metrics.publish(freshness)
+
+        log.info(
+            "depth_freshness_published",
+            oldest_latest_stamp=(
+                freshness.oldest_latest_stamp.isoformat() if freshness.oldest_latest_stamp else None
+            ),
+            stale_symbols=freshness.stale_symbols,
+            symbols_with_snapshots=freshness.symbols_with_snapshots,
+        )
+    except Exception:
+        log.exception("depth_freshness_publish_failed")
+
+
 async def _run_daily_universe_loop(
     job: DailyUniverseJob,
     symbols: PgSymbolRepository,
@@ -113,6 +145,7 @@ async def _run_daily_universe_loop(
     fake_volume: FakeVolumeJob,
     clock: Clock,
     stable_peg: StablePegJob | None = None,
+    publish_depth_freshness: Callable[[], Awaitable[None]] | None = None,
 ) -> None:
     # Once at boot, before the first sleep. `market.symbols` had zero rows for
     # the entire life of the project because `sync-symbols` existed only as a
@@ -120,6 +153,9 @@ async def _run_daily_universe_loop(
     # `list_active()` -- so an empty registry made the whole worker a no-op
     # that looked perfectly healthy.
     await _sync_symbols(sync)
+
+    if publish_depth_freshness is not None:
+        await publish_depth_freshness()
 
     while True:
         await asyncio.sleep(await _seconds_until_next_utc_midnight())
@@ -199,6 +235,10 @@ async def _run_daily_universe_loop(
                     symbol=symbol.exchange_symbol,
                 )
 
+        # After tonight's collection, so the gauge reports what it produced.
+        if publish_depth_freshness is not None:
+            await publish_depth_freshness()
+
 
 def main() -> None:
     settings = get_settings("worker")
@@ -215,6 +255,7 @@ def main() -> None:
 
         symbol_repo = PgSymbolRepository(sessions)
         liquidity_history_repo = PgLiquidityHistoryRepository(sessions)
+        depth_metrics = DepthFreshnessMetrics()
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             rest_adapter = BinanceRestAdapter(
@@ -265,6 +306,9 @@ def main() -> None:
                     fake_volume,
                     clock,
                     StablePegJob(rest_adapter, symbol_repo, clock),
+                    lambda: _publish_depth_freshness(
+                        liquidity_history_repo, symbol_repo, depth_metrics, clock
+                    ),
                 )
             )
 

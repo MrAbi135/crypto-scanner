@@ -1,0 +1,40 @@
+# The daily ±2% depth snapshots SLS §6.4 reads (Bundle D monitoring).
+#
+# Owner ruling M2 Q3 (option a): the SLS sets no age limit on the snapshot a
+# candle reads, so a symbol whose daily collection stopped keeps scoring on its
+# last snapshot. Instead of a scoring rule, an alarm: any observable symbol
+# whose newest snapshot is more than two days old. Monitoring only.
+#
+# The worker publishes the stalest symbol's newest stamp as a timestamp, and
+# the rule ages it with time(). If the worker stops refreshing, the stamp
+# stays put and the rule still fires; a gauge holding an age would freeze at
+# its last healthy value. Stamps are the start of a UTC day and the job runs
+# just after midnight, so a healthy stamp is under two days old at all times
+# and crosses two days only when a daily run is missed.
+groups:
+  - name: depth-snapshots
+    rules:
+      - alert: DepthSnapshotStale
+        expr: time() - scanner_depth_snapshot_oldest_latest_timestamp_seconds > 2 * 86400
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A symbol's newest depth snapshot is over two days old"
+          description: >-
+            The stalest observable symbol's newest daily depth snapshot is
+            {{ $value | humanizeDuration }} old. §6.4 keeps scoring on it (no
+            age limit in the SLS); check the worker's daily universe job.
+
+      # Nothing published at all: the worker has not run its refresh since it
+      # started, or no symbol has any snapshot.
+      - alert: DepthSnapshotFreshnessMissing
+        expr: absent(scanner_depth_snapshot_oldest_latest_timestamp_seconds)
+        for: 2h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No depth-snapshot freshness published"
+          description: >-
+            The worker publishes the depth-snapshot freshness at boot and after
+            each daily run; none has been seen for two hours.
