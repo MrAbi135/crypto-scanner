@@ -2043,7 +2043,7 @@
           "id": "8.5-synergy-compression-resolved",
           "rule": "compression resolved by the setup's displacement is worth +4",
           "status": "pending",
-          "blocked_on": "s8-an-m5-continuation-pullback-after-a-coil-publishes earns the +4 with its coil right before the setup's displacement, but the engine awards it for any COMPRESSION in the window (confluence_replay._synergies), so no case can yet tell a coil the setup resolved from one it did not; the negative case needs that distinction in the engine first"
+          "blocked_on": "s8-an-m5-continuation-pullback-after-a-coil-publishes earns the +4 from a coil that a falling candle leaves first, three candles before the setup's displacement: today's engine pays it for any COMPRESSION in the window (confluence_replay._synergies), and a strict reading of 'resolved by the setup's displacement' would not. Pending the owner's ruling on what 'resolved by' means, then an engine check and a negative case"
         },
         {
           "id": "8.5-penalty-exhaustion",
