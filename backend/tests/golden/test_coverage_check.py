@@ -146,6 +146,7 @@ UNVERIFIED_LABELS = frozenset(
         "a-swept-order-block-that-fails-becomes-a-breaker.json",
         "an-unswept-order-block-that-fails-becomes-a-mitigation-block.json",
         "an-a3-continuation-pullback-is-recorded-not-published.json",
+        "an-m5-continuation-pullback-after-a-coil-publishes.json",
         "a-thin-book-makes-an-abnormal-candle-suspect.json",
         "a-snapshot-taken-after-the-close-is-never-read.json",
     }
