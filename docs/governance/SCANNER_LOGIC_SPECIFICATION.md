@@ -4,8 +4,8 @@
 
 **Document Status:** Authoritative specification for all detection, scoring, ranking, alerting, and AI-interpretation logic
 **Authority:** Subordinate only to `PROJECT_CONSTITUTION.md` v1.0.0; supreme over all implementation decisions concerning trading logic
-**Version:** 1.0.21
-**Ratified:** 2026-07-12 · **Last amended:** 2026-11-17 (v1.0.21; see Amendment History)
+**Version:** 1.0.22
+**Ratified:** 2026-07-12 · **Last amended:** 2026-11-26 (v1.0.22; see Amendment History)
 **Amendment Rule:** Any change to detection logic requires a versioned revision of this document, per Constitution §30.8 and §42.7
 
 > Every algorithm, detector, AI prompt, ranking formula, alert rule, and dashboard element in this platform implements THIS document. If the code and this document disagree, the code is wrong. No engineer may resolve an ambiguity by guessing: ambiguities are resolved by amending this specification.
@@ -666,7 +666,7 @@ Volume is confirmation evidence, never a standalone signal — and in crypto it 
 
 `ABNORMAL` class (≥ 5× baseline) triggers mandatory cross-validation before it may contribute positive score: (1) trade-count on candle ≥ 3× its 20-candle median (many participants, not one wash loop); (2) order-book depth not anomalously thin (depth ≥ 50% of its 7-day median). Failing either ⇒ tag `suspect_volume`, volume factor contribution capped at neutral (50), symbol fake-volume counter incremented (§6.6).
 
-**The depth input (v1.0.20).** The depth for test (2) is the latest daily ±2% depth snapshot taken **at or before** the candle's close. The 7-day median is taken over the seven daily snapshots ending at that one. A snapshot taken after the candle's close is never read (no look-ahead). *Implementation pending: ships with Bundle D.*
+**The depth input (v1.0.20).** The depth for test (2) is the latest daily ±2% depth snapshot taken **at or before** the candle's close. The 7-day median is taken over the seven daily snapshots ending at that one. A snapshot taken after the candle's close is never read (no look-ahead). A daily snapshot carries the start of its UTC day as its stamp, but the book behind it is read later that day, so a snapshot stamped day D counts as taken at the end of day D: only a candle closing at or after D+1 00:00 UTC may read it (v1.0.22). *Implementation pending: ships with Bundle D.*
 
 **An incomplete check (v1.0.20).** The check is *validated* only when both tests could be evaluated. When an input is missing (no trade count, or no depth snapshot in reach), the check is not validated, and then:
 
@@ -1216,6 +1216,19 @@ Every parameter change increments `param_set_version` and requires golden-datase
 ---
 
 ## Amendment History
+
+### v1.0.22 — 2026-11-26
+
+**§6.4: when a daily depth snapshot counts as taken.** v1.0.20 said the depth
+input is the latest snapshot taken at or before the candle's close, but not
+what "taken" means for a row stamped with the start of its UTC day whose book
+is read later that day. The owner ruled (Bundle D M2) that such a snapshot counts
+as taken at the end of its day, so a candle closing earlier that day never reads
+it. The Bundle D implementation already follows this; v1.0.22 writes it into the
+text.
+
+**Implementation pending: ships with Bundle D**, with the rest of §6.4
+(v1.0.20). No parameter changes, and nothing else in the text changes.
 
 ### v1.0.21 — 2026-11-17
 
