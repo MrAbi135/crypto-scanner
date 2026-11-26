@@ -1,7 +1,10 @@
-"""The golden A3 publication, through the real tables, as the application role.
+"""The golden A3 setup, through the real tables, as the application role.
 
-`s8-a3-continuation-pullback-publishes` is the only golden in which a signal
-is written, and it writes it into `InMemorySignalRepository`. The golden run
+`s8-a3-continuation-pullback-is-recorded-not-published` was the golden in which
+a signal was written, into `InMemorySignalRepository`. Since SLS v1.0.20
+§15.3(6) its zone-edge invalidation is suppressed instead (Bundle D M3), so
+this file now holds the Postgres path to that verdict: no T17 row and no T18
+transition, on the first pass and on a second one. The golden run
 also hands the engine no transition repository and no incident repository.
 Each of those is a place the real publish path differs:
 
@@ -35,7 +38,6 @@ import pytest
 pytest.importorskip("testcontainers")
 
 from scanner.application.ports.repositories import IncidentRecord
-from scanner.domain.lifecycle import SignalState
 from scanner.infrastructure.persistence.database import build_session_factory
 from scanner.infrastructure.persistence.repositories import PgIncidentRepository
 from scanner.infrastructure.persistence.setup_repository import PgSetupRepository
@@ -50,7 +52,9 @@ from tests.golden.harness.runner import run_confluence
 
 pytestmark = pytest.mark.integration
 
-_DATASET = DATASET_ROOT / "s8_confluence" / "an-a3-continuation-pullback-publishes.json"
+_DATASET = (
+    DATASET_ROOT / "s8_confluence" / "an-a3-continuation-pullback-is-recorded-not-published.json"
+)
 
 
 def _by_value(value: Any) -> Any:
@@ -98,81 +102,43 @@ def _postgres(app_engine) -> dict[str, Any]:
     }
 
 
-async def test_the_golden_signal_is_published_through_postgres_as_the_app_role(app_engine) -> None:
-    """Same candles, real tables, restricted role: the same record comes back.
-
-    Compared field for field against the in-memory run, including the two
-    digests the golden's canonical form leaves out (`signal_id`,
-    `payload_hash`) -- they are what the seal and the dedup lookup key on.
-    """
+async def test_the_golden_zone_edge_setup_is_suppressed_through_postgres_as_the_app_role(
+    app_engine,
+) -> None:
+    """Same candles, real tables, restricted role: the same record comes back,
+    and §15.3(6) writes nothing to T17 or T18 on the real path either."""
     dataset = load_dataset(_DATASET)
 
-    memory_signals = InMemorySignalRepository()
-    memory = await run_confluence(dataset, signals=memory_signals)
+    memory = await run_confluence(dataset, signals=InMemorySignalRepository())
 
     # The premise: the in-memory run is the golden. If this fails, the golden
     # test fails too, and the rest of this file has nothing to compare against.
     assert canonical_bytes(memory) == canonical_bytes(dataset.expected)
+    assert memory["signals"] == []
+    assert [s["detail"]["reasons"] for s in memory["suppressions"]] == [["ZONE_EDGE_INVALIDATION"]]
 
     repos = _postgres(app_engine)
     postgres = await run_confluence(dataset, **repos)
 
     assert _by_value(postgres) == _by_value(memory)
-
-    [written] = [row for row in await repos["signals"].scan() if row.symbol == dataset.symbol]
-    [expected] = await memory_signals.scan()
-
-    # SignalRecord equality compares Decimals by value, so the padded scale
-    # is not a difference here either; a rounded value would be.
-    assert written == expected
-
-    # §12's first edge. The golden run has no transition repository, so this
-    # row is the one fact about publication that only a real run can show.
-    [published] = await repos["transitions"].list_for_signal(written.signal_id)
-
-    assert (published.from_state, published.to_state) == (
-        SignalState.DETECTED.value,
-        SignalState.PUBLISHED.value,
-    )
-    assert published.refresh is False
-    assert published.at_candle_open_time == written.published_at
-    assert await repos["transitions"].current_state(written.signal_id) == (
-        SignalState.PUBLISHED.value
-    )
+    assert [row for row in await repos["signals"].scan() if row.symbol == dataset.symbol] == []
 
 
-async def test_a_second_pass_merges_a_refresh_instead_of_publishing_again(app_engine) -> None:
-    """§10.3 on the real path: the same setup re-detected on the same close is
-    "merged as a refresh event on the existing signal -- never a second alert".
-
-    The golden cannot show this. With no transition repository the engine's
-    dedup blocker has no state to read and no table to merge into.
-    """
+async def test_a_second_pass_on_a_zone_edge_setup_publishes_nothing(app_engine) -> None:
+    """With a transition repository the dedup blocker has state to read; a
+    zone-edge setup seen again still writes no signal and nothing to merge a
+    refresh into (§15.3(6), and no refresh for a zone edge)."""
     dataset = _resymbol(load_dataset(_DATASET), "GOLDENATHREEREFRESH")
     repos = _postgres(app_engine)
 
     first = await run_confluence(dataset, **repos)
     again = await run_confluence(dataset, **repos)
 
-    [written] = [row for row in await repos["signals"].scan() if row.symbol == dataset.symbol]
-
-    assert len(first["signals"]) == 1
-    assert _by_value(again["signals"]) == _by_value(first["signals"])
+    assert first["signals"] == [] == again["signals"]
 
     # T16 is append-only too: the re-evaluated candle does not add a row.
     assert _by_value(again["setups"]) == _by_value(first["setups"])
-
-    history = await repos["transitions"].list_for_signal(written.signal_id)
-
-    assert [(t.from_state, t.to_state, t.refresh) for t in history] == [
-        (SignalState.DETECTED.value, SignalState.PUBLISHED.value, False),
-        (SignalState.PUBLISHED.value, SignalState.PUBLISHED.value, True),
-    ]
-
-    # A refresh is news about the signal, not a move: the state is unchanged.
-    assert await repos["transitions"].current_state(written.signal_id) == (
-        SignalState.PUBLISHED.value
-    )
+    assert [row for row in await repos["signals"].scan() if row.symbol == dataset.symbol] == []
 
 
 async def test_an_open_incident_on_the_symbol_withholds_the_same_signal(app_engine) -> None:

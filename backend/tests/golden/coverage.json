@@ -2126,7 +2126,7 @@
           "id": "8.7-worked-example",
           "rule": "the normative illustration's arithmetic: F1..F6 of 85/80/90/70/65/100 weight to a base of 82.25, +13 of synergy gives a final of 95, archetype A3 publishes at Grade S",
           "status": "pending",
-          "blocked_on": "the chain is now reproduced end to end by s8-a3-continuation-pullback-publishes (declared H4/D1 BULLISH, external SSL sweep, displaced BOS up, retrace into an OB_A/OTE stack, A3 published), but not the arithmetic this rule names: 8.3.1 itself records that F1 cannot reach 85 at any pair count, F4 70 needs a volume reading the golden quote floor cannot produce, and F3 90 needs an entry-grade Confirmation, which is a lower-timeframe fact a single-timeframe series cannot carry. The figures stay asserted in tests/unit/domain/confluence/test_factor_points.py"
+          "blocked_on": "the chain is now reproduced end to end by s8-a3-continuation-pullback-is-recorded-not-published (declared H4/D1 BULLISH, external SSL sweep, displaced BOS up, retrace into an OB_A/OTE stack, A3 at its floor; since SLS v1.0.20 15.3(6) its zone-edge invalidation is suppressed, not published), but not the arithmetic this rule names: 8.3.1 itself records that F1 cannot reach 85 at any pair count, F4 70 needs a volume reading the golden quote floor cannot produce, and F3 90 needs an entry-grade Confirmation, which is a lower-timeframe fact a single-timeframe series cannot carry. The figures stay asserted in tests/unit/domain/confluence/test_factor_points.py"
         }
       ]
     }
