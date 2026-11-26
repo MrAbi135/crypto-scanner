@@ -1,0 +1,618 @@
+{
+  "dataset_id": "s8-an-m5-continuation-pullback-after-a-coil-publishes",
+  "engine": "confluence",
+  "sls_sections": [
+    "3.4",
+    "3.5",
+    "4.6",
+    "4.7",
+    "5.7",
+    "7.3",
+    "7.5",
+    "8.1",
+    "8.2",
+    "8.3",
+    "8.4",
+    "8.5",
+    "8.6"
+  ],
+  "sls_rules": [
+    "8.1-four-stage-model",
+    "8.1-every-point-traceable",
+    "8.2-all-gates-required",
+    "8.2-structure-gate",
+    "8.2-pd-gate",
+    "8.2-zone-gate",
+    "8.3-every-factor-scored",
+    "8.3-attribution-is-enumerated",
+    "8.3-f4-is-the-published-volume-factor",
+    "8.3-f6-aligned-scores-100",
+    "8.3.1-f1-break-quality",
+    "8.3.1-f1-trend-maturity",
+    "8.3.1-f1-clean-break-record",
+    "8.3.1-f2-sweep-quality",
+    "8.3.1-f2-stop-hunt",
+    "8.3.1-f2-target-pool-strength",
+    "8.3.1-f3-zone-grade",
+    "8.3.1-f3-state-freshness",
+    "8.3.1-f3-stack-depth",
+    "8.3.1-f5-opposed-or-neutral-scores-zero",
+    "8.3.1-f5-acceleration",
+    "8.3.1-f5-no-exhaustion",
+    "8.4-weighted-sum",
+    "8.5-base-plus-adjustments-floored",
+    "8.5-adjustments-itemised",
+    "8.5-final-is-floored",
+    "8.5-synergy-zone-stack",
+    "8.6-archetype-required-chains",
+    "8.6-confidence-floors",
+    "7.3-compression-per-candle",
+    "7.3-compression-envelope"
+  ],
+  "description": "An M5 continuation pullback whose invalidation is M5's risk stop, so SLS v1.0.20 15.3(6) does not touch it: a seven-candle coil, an external sell-side sweep, a displaced BOS up, and a retrace into an order block stacked with the OTE band. It classifies as A3 at 73 and publishes.",
+  "labelling_rationale": "Built for Bundle D M3 so that one golden still publishes (the H4 A3 case is now a zone-edge suppression). **The series.** The H4 A3 case's own scenario candles, laid on M5, with one change: seven quiet candles inserted after its 36th scenario candle (scenario indices 36-42, 2026-03-02 03:00-03:30), each high 120.3, low 119.9 (range 0.4). The filler is 5900 flat M5 candles (O 100, H 101, L 99, C 100) because M5's RVOL baseline is the same time-of-day slot over the prior twenty days (2.11): twenty days of M5 is 5760 candles, and without them G1 cannot read RVOL. **The coil (7.3).** ATR(14, Wilder) runs from 1.78 down to 1.29 across those seven candles, so every range of 0.4 is under 0.7 x ATR and the seven-candle envelope of 0.4 is under 2 x ATR: a COMPRESSION is recorded. How it resolves, candle by candle: the first candle after it (scenario index 43, low 119.15, close 119.4) already closes below the coil's low of 119.9; index 44 falls further; index 45 sweeps the external sell-side pool (low 115.5); index 46 is the displacement candle that breaks structure up (close 126.2). That is 7.3's 'sweep-or-break resolution' of a coil next to a liquidity pool. Read strictly, 8.5's 'resolved by the setup's displacement' is not met: the displacement is not the candle that leaves the coil. **The chain (8.2-8.6).** Exactly the H4 case's: HTF declared BULLISH, all six gates pass, the displaced external BOS, the swept external SSL with a confirmed stop hunt, and the retrace into the OB_A 115.5-120.45 stacked with the OTE band. Factors: F1 67.5, F2 77.854..., F3 61, F4 50, F5 32, F6 100. Base = 67.5x.20 + 77.854x.15 + 61x.20 + 50x.15 + 32x.15 + 100x.15 = 64.678. F2 is three points lower than on H4 (80.979) only because the target pool's strength carries its timeframe's weight (4.4: tf_weight = TF rank / max rank), and M5 ranks lowest. Synergies (8.5): zone-stack +5 and compression resolved +4, so 73.678, floored to 73. A3's floor is 70, so the candidate is publishable. **Premise.** Without the coil the same series on M5 scores 69 and does not publish: the coil is a doctrine fact that earns its +4, not a number adjusted to clear the floor. **The signal (15.2, 15.3, 12.5).** On M5 the entry is the proximal edge, 120.45; the invalidation is the risk stop, 1% of the proximal edge below it, 119.2455; targets are the R ladder from 2R with the resting pool at 129.5 as primary. The rule is risk_stop, never zone_distal_edge, so 15.3(6) does not apply; R >= 1.5 holds by construction; TTL is 48 (12.5, M5). The last close (121.1) is above the entry, so the levels are coherent. **Not claimed.** 8.5 says the +4 is for a compression resolved by the setup's displacement; the engine awards it for any COMPRESSION in the window. This case's coil is left first by a falling candle, three candles before the setup's displacement, so it matches today's engine and 7.3's reading but not a strict reading of 8.5; 8.5-synergy-compression-resolved stays pending until the owner rules what 'resolved by' means (bundle list F1).",
+  "labelled_by": "drafted by Claude Opus 5.5 2026-11-26 from SLS 2.11, 7.3, 8.2-8.6, 12.5, 15.2 and 15.3 (v1.0.22); pending the owner's blind review",
+  "labelled_at": "2026-11-26",
+  "algo_version": "s8-confluence-v40",
+  "symbol": "GOLDENATHREEFIVE",
+  "timeframe": "M5",
+  "htf_state": "BULLISH",
+  "filler": {
+    "count": 5900,
+    "open": "100",
+    "high": "101",
+    "low": "99",
+    "close": "100"
+  },
+  "candles": [
+    {
+      "open_time": "2026-03-02T00:00:00+00:00",
+      "open": "100",
+      "high": "102.25",
+      "low": "99.75",
+      "close": "102"
+    },
+    {
+      "open_time": "2026-03-02T00:05:00+00:00",
+      "open": "102",
+      "high": "104.25",
+      "low": "101.75",
+      "close": "104"
+    },
+    {
+      "open_time": "2026-03-02T00:10:00+00:00",
+      "open": "104",
+      "high": "106.25",
+      "low": "103.75",
+      "close": "106"
+    },
+    {
+      "open_time": "2026-03-02T00:15:00+00:00",
+      "open": "106",
+      "high": "108.25",
+      "low": "105.75",
+      "close": "108"
+    },
+    {
+      "open_time": "2026-03-02T00:20:00+00:00",
+      "open": "108",
+      "high": "110.25",
+      "low": "107.75",
+      "close": "110"
+    },
+    {
+      "open_time": "2026-03-02T00:25:00+00:00",
+      "open": "110",
+      "high": "112.5",
+      "low": "109.75",
+      "close": "112"
+    },
+    {
+      "open_time": "2026-03-02T00:30:00+00:00",
+      "open": "112",
+      "high": "112.25",
+      "low": "110.25",
+      "close": "110.5"
+    },
+    {
+      "open_time": "2026-03-02T00:35:00+00:00",
+      "open": "110.5",
+      "high": "110.75",
+      "low": "108.75",
+      "close": "109"
+    },
+    {
+      "open_time": "2026-03-02T00:40:00+00:00",
+      "open": "109",
+      "high": "109.25",
+      "low": "107.25",
+      "close": "107.5"
+    },
+    {
+      "open_time": "2026-03-02T00:45:00+00:00",
+      "open": "107.5",
+      "high": "107.75",
+      "low": "105.5",
+      "close": "106"
+    },
+    {
+      "open_time": "2026-03-02T00:50:00+00:00",
+      "open": "106",
+      "high": "108.25",
+      "low": "105.75",
+      "close": "108"
+    },
+    {
+      "open_time": "2026-03-02T00:55:00+00:00",
+      "open": "108",
+      "high": "110.25",
+      "low": "107.75",
+      "close": "110"
+    },
+    {
+      "open_time": "2026-03-02T01:00:00+00:00",
+      "open": "110",
+      "high": "112.25",
+      "low": "109.75",
+      "close": "112"
+    },
+    {
+      "open_time": "2026-03-02T01:05:00+00:00",
+      "open": "112",
+      "high": "114.25",
+      "low": "111.75",
+      "close": "114"
+    },
+    {
+      "open_time": "2026-03-02T01:10:00+00:00",
+      "open": "114",
+      "high": "116.25",
+      "low": "113.75",
+      "close": "116"
+    },
+    {
+      "open_time": "2026-03-02T01:15:00+00:00",
+      "open": "116",
+      "high": "118.5",
+      "low": "115.75",
+      "close": "118"
+    },
+    {
+      "open_time": "2026-03-02T01:20:00+00:00",
+      "open": "118",
+      "high": "118.25",
+      "low": "116.25",
+      "close": "116.5"
+    },
+    {
+      "open_time": "2026-03-02T01:25:00+00:00",
+      "open": "116.5",
+      "high": "116.75",
+      "low": "114.75",
+      "close": "115"
+    },
+    {
+      "open_time": "2026-03-02T01:30:00+00:00",
+      "open": "115",
+      "high": "115.25",
+      "low": "113.25",
+      "close": "113.5"
+    },
+    {
+      "open_time": "2026-03-02T01:35:00+00:00",
+      "open": "113.5",
+      "high": "113.75",
+      "low": "111.5",
+      "close": "112"
+    },
+    {
+      "open_time": "2026-03-02T01:40:00+00:00",
+      "open": "112",
+      "high": "114.25",
+      "low": "111.75",
+      "close": "114"
+    },
+    {
+      "open_time": "2026-03-02T01:45:00+00:00",
+      "open": "114",
+      "high": "116.25",
+      "low": "113.75",
+      "close": "116"
+    },
+    {
+      "open_time": "2026-03-02T01:50:00+00:00",
+      "open": "116",
+      "high": "118.25",
+      "low": "115.75",
+      "close": "118"
+    },
+    {
+      "open_time": "2026-03-02T01:55:00+00:00",
+      "open": "118",
+      "high": "120.25",
+      "low": "117.75",
+      "close": "120"
+    },
+    {
+      "open_time": "2026-03-02T02:00:00+00:00",
+      "open": "120",
+      "high": "122.25",
+      "low": "119.75",
+      "close": "122"
+    },
+    {
+      "open_time": "2026-03-02T02:05:00+00:00",
+      "open": "122",
+      "high": "124.5",
+      "low": "121.75",
+      "close": "124"
+    },
+    {
+      "open_time": "2026-03-02T02:10:00+00:00",
+      "open": "124",
+      "high": "124.25",
+      "low": "122.25",
+      "close": "122.5"
+    },
+    {
+      "open_time": "2026-03-02T02:15:00+00:00",
+      "open": "122.5",
+      "high": "122.75",
+      "low": "120.75",
+      "close": "121"
+    },
+    {
+      "open_time": "2026-03-02T02:20:00+00:00",
+      "open": "121",
+      "high": "121.25",
+      "low": "119.25",
+      "close": "119.5"
+    },
+    {
+      "open_time": "2026-03-02T02:25:00+00:00",
+      "open": "119.5",
+      "high": "119.75",
+      "low": "117.5",
+      "close": "118"
+    },
+    {
+      "open_time": "2026-03-02T02:30:00+00:00",
+      "open": "118",
+      "high": "118.85",
+      "low": "117.75",
+      "close": "118.6"
+    },
+    {
+      "open_time": "2026-03-02T02:35:00+00:00",
+      "open": "118.6",
+      "high": "119.45",
+      "low": "118.35",
+      "close": "119.2"
+    },
+    {
+      "open_time": "2026-03-02T02:40:00+00:00",
+      "open": "119.2",
+      "high": "120.05",
+      "low": "118.95",
+      "close": "119.8"
+    },
+    {
+      "open_time": "2026-03-02T02:45:00+00:00",
+      "open": "119.8",
+      "high": "120.65",
+      "low": "119.55",
+      "close": "120.4"
+    },
+    {
+      "open_time": "2026-03-02T02:50:00+00:00",
+      "open": "120.4",
+      "high": "121.5",
+      "low": "120.15",
+      "close": "121"
+    },
+    {
+      "open_time": "2026-03-02T02:55:00+00:00",
+      "open": "121",
+      "high": "121.25",
+      "low": "119.95",
+      "close": "120.2"
+    },
+    {
+      "open": "120",
+      "high": "120.3",
+      "low": "119.9",
+      "close": "120.2",
+      "open_time": "2026-03-02T03:00:00+00:00"
+    },
+    {
+      "open": "120.2",
+      "high": "120.3",
+      "low": "119.9",
+      "close": "120",
+      "open_time": "2026-03-02T03:05:00+00:00"
+    },
+    {
+      "open": "120",
+      "high": "120.3",
+      "low": "119.9",
+      "close": "120.2",
+      "open_time": "2026-03-02T03:10:00+00:00"
+    },
+    {
+      "open": "120.2",
+      "high": "120.3",
+      "low": "119.9",
+      "close": "120",
+      "open_time": "2026-03-02T03:15:00+00:00"
+    },
+    {
+      "open": "120",
+      "high": "120.3",
+      "low": "119.9",
+      "close": "120.2",
+      "open_time": "2026-03-02T03:20:00+00:00"
+    },
+    {
+      "open": "120.2",
+      "high": "120.3",
+      "low": "119.9",
+      "close": "120",
+      "open_time": "2026-03-02T03:25:00+00:00"
+    },
+    {
+      "open": "120",
+      "high": "120.3",
+      "low": "119.9",
+      "close": "120.2",
+      "open_time": "2026-03-02T03:30:00+00:00"
+    },
+    {
+      "open_time": "2026-03-02T03:35:00+00:00",
+      "open": "120.2",
+      "high": "120.45",
+      "low": "119.15",
+      "close": "119.4"
+    },
+    {
+      "open_time": "2026-03-02T03:40:00+00:00",
+      "open": "119.4",
+      "high": "119.65",
+      "low": "118.1",
+      "close": "118.6"
+    },
+    {
+      "open_time": "2026-03-02T03:45:00+00:00",
+      "open": "119",
+      "high": "119.2",
+      "low": "115.5",
+      "close": "118.6"
+    },
+    {
+      "open_time": "2026-03-02T03:50:00+00:00",
+      "open": "118.6",
+      "high": "126.5",
+      "low": "118.4",
+      "close": "126.2"
+    },
+    {
+      "open_time": "2026-03-02T03:55:00+00:00",
+      "open": "126.2",
+      "high": "128.05",
+      "low": "125.95",
+      "close": "127.8"
+    },
+    {
+      "open_time": "2026-03-02T04:00:00+00:00",
+      "open": "127.8",
+      "high": "129.5",
+      "low": "127.55",
+      "close": "129"
+    },
+    {
+      "open_time": "2026-03-02T04:05:00+00:00",
+      "open": "129",
+      "high": "129.25",
+      "low": "126.5",
+      "close": "126.75"
+    },
+    {
+      "open_time": "2026-03-02T04:10:00+00:00",
+      "open": "126.75",
+      "high": "127",
+      "low": "124.25",
+      "close": "124.5"
+    },
+    {
+      "open_time": "2026-03-02T04:15:00+00:00",
+      "open": "124.5",
+      "high": "124.75",
+      "low": "122",
+      "close": "122.25"
+    },
+    {
+      "open_time": "2026-03-02T04:20:00+00:00",
+      "open": "122.25",
+      "high": "122.5",
+      "low": "119.5",
+      "close": "120"
+    },
+    {
+      "open_time": "2026-03-02T04:25:00+00:00",
+      "open": "120",
+      "high": "120.2",
+      "low": "119.65",
+      "close": "119.8"
+    },
+    {
+      "open_time": "2026-03-02T04:30:00+00:00",
+      "open": "119.8",
+      "high": "120.3",
+      "low": "119.65",
+      "close": "120.1"
+    },
+    {
+      "open_time": "2026-03-02T04:35:00+00:00",
+      "open": "120.1",
+      "high": "120.6",
+      "low": "119.95",
+      "close": "120.4"
+    },
+    {
+      "open_time": "2026-03-02T04:40:00+00:00",
+      "open": "120.4",
+      "high": "120.85",
+      "low": "120.25",
+      "close": "120.65"
+    },
+    {
+      "open_time": "2026-03-02T04:45:00+00:00",
+      "open": "120.65",
+      "high": "121.1",
+      "low": "120.5",
+      "close": "120.9"
+    },
+    {
+      "open_time": "2026-03-02T04:50:00+00:00",
+      "open": "120.9",
+      "high": "121.3",
+      "low": "120.75",
+      "close": "121.1"
+    }
+  ],
+  "expected": {
+    "candidates": [
+      {
+        "archetype": "A3",
+        "confidence": "73",
+        "direction": "UP",
+        "factors": {
+          "F1": "67.5",
+          "F2": "77.85416666666666666666666667",
+          "F3": "61",
+          "F4": "50",
+          "F5": "32",
+          "F6": "100"
+        },
+        "failed_gates": [],
+        "gates_passed": true,
+        "grade": "B",
+        "publishable": true
+      },
+      {
+        "archetype": null,
+        "confidence": null,
+        "direction": "DOWN",
+        "factors": {},
+        "failed_gates": [
+          "G2",
+          "G3"
+        ],
+        "gates_passed": false,
+        "grade": null,
+        "publishable": false
+      }
+    ],
+    "report": {
+      "candles": 5959,
+      "events_inserted": 1,
+      "htf_state": "UP",
+      "trend_state": "BULLISH",
+      "unreachable": []
+    },
+    "setups": [
+      {
+        "adjustments": "{\"applied\": [{\"code\": \"zone_stack\", \"points\": \"5\"}, {\"code\": \"compression_resolved\", \"points\": \"4\"}], \"penalty\": \"0\", \"penalty_capped\": false, \"synergy\": \"9\", \"synergy_capped\": false}",
+        "archetype": "A3",
+        "base_confidence": "64.67812500000000000000000000",
+        "direction": "UP",
+        "evidence": "{\"archetype_closest\": null, \"archetype_unmet\": {\"A1\": [\"mss_confirmed\", \"mss_origin_zone_retested\"], \"A2\": [\"breaker_formed\", \"breaker_first_retest_respected\", \"breaker_grade_a_or_entry_grade_confirmation\"]}, \"archetype_withdrawn_by_pd\": false, \"attribution\": {\"F1\": [{\"code\": \"break_confirmed\", \"evidence_id\": \"51dd416096c0a8039faffe32339637c2f17fea6d080467e0e61fd996bf862747\", \"points\": \"15\"}, {\"code\": \"displaced\", \"evidence_id\": \"51dd416096c0a8039faffe32339637c2f17fea6d080467e0e61fd996bf862747\", \"points\": \"18\"}, {\"code\": \"external\", \"evidence_id\": \"cedf331c3a896bc3270b89419e4b2ee6abfc1d748f70b98f9e253a9c69959e55\", \"points\": \"12\"}, {\"code\": \"trend_maturity\", \"evidence_id\": null, \"points\": \"7.5\"}, {\"code\": \"clean_record\", \"evidence_id\": null, \"points\": \"15\"}], \"F2\": [{\"code\": \"sweep_confirmed\", \"evidence_id\": \"394f99db405807225b676985f0b0f2fc9c8a2c9360dff1d7878e085541604669\", \"points\": \"20\"}, {\"code\": \"external\", \"evidence_id\": \"394f99db405807225b676985f0b0f2fc9c8a2c9360dff1d7878e085541604669\", \"points\": \"16\"}, {\"code\": \"depth\", \"evidence_id\": \"394f99db405807225b676985f0b0f2fc9c8a2c9360dff1d7878e085541604669\", \"points\": \"12\"}, {\"code\": \"unclaimed\", \"evidence_id\": \"394f99db405807225b676985f0b0f2fc9c8a2c9360dff1d7878e085541604669\", \"points\": \"6\"}, {\"code\": \"fresh\", \"evidence_id\": \"394f99db405807225b676985f0b0f2fc9c8a2c9360dff1d7878e085541604669\", \"points\": \"6\"}, {\"code\": \"stop_hunt\", \"evidence_id\": \"83266080903dcb6fbee25465c531ce029e4cba289da09a28d2cfc3710d42e25d\", \"points\": \"15\"}, {\"code\": \"target_pool\", \"evidence_id\": \"e5a3b987094f9a179174b4f5d18593e78072bcbe8a1c55398bf88757785a345e\", \"points\": \"2.854166666666666666666666668\"}], \"F3\": [{\"code\": \"grade\", \"evidence_id\": \"50ebee027eda490eb3b4d444473e07d9222fc5f11842c8fbc329bb159d950d2f\", \"points\": \"40\"}, {\"code\": \"state\", \"evidence_id\": \"50ebee027eda490eb3b4d444473e07d9222fc5f11842c8fbc329bb159d950d2f\", \"points\": \"6\"}, {\"code\": \"stack\", \"evidence_id\": \"50ebee027eda490eb3b4d444473e07d9222fc5f11842c8fbc329bb159d950d2f\", \"points\": \"15\"}], \"F4\": [{\"code\": \"volume_factor_score\", \"evidence_id\": null, \"points\": \"50\"}], \"F5\": [{\"code\": \"acceleration\", \"evidence_id\": null, \"points\": \"12\"}, {\"code\": \"no_exhaustion\", \"evidence_id\": null, \"points\": \"20\"}], \"F6\": [{\"code\": \"htf_aligned\", \"evidence_id\": null, \"points\": \"100\"}]}, \"grade\": \"B\", \"unreachable_inputs\": [], \"zone_id\": \"50ebee027eda490eb3b4d444473e07d9222fc5f11842c8fbc329bb159d950d2f\"}",
+        "factor_scores": "{\"F1\": \"67.5\", \"F2\": \"77.85416666666666666666666667\", \"F3\": \"61\", \"F4\": \"50\", \"F5\": \"32\", \"F6\": \"100\"}",
+        "final_confidence": "73",
+        "floor_passed": true,
+        "gate_results": "{\"failed\": [], \"passed\": true}",
+        "symbol": "GOLDENATHREEFIVE"
+      }
+    ],
+    "signals": [
+      {
+        "archetype": "A3",
+        "dedup_key": "GOLDENATHREEFIVE|M5|UP|A3|120.4:115.5",
+        "direction": "UP",
+        "entry_distal": "115.5",
+        "entry_proximal": "120.45",
+        "final_confidence": "73",
+        "grade": "B",
+        "invalidation_level": "119.2455",
+        "payload": {
+          "archetype": "A3",
+          "confidence": "73",
+          "direction": "UP",
+          "entry_zone": {
+            "distal": "115.5",
+            "proximal": "120.45",
+            "refined_distal": "118.6",
+            "refined_proximal": "120.2",
+            "zone_id": "50ebee027eda490eb3b4d444473e07d9222fc5f11842c8fbc329bb159d950d2f"
+          },
+          "evidence_ids": [
+            "50ebee027eda490eb3b4d444473e07d9222fc5f11842c8fbc329bb159d950d2f",
+            "394f99db405807225b676985f0b0f2fc9c8a2c9360dff1d7878e085541604669",
+            "51dd416096c0a8039faffe32339637c2f17fea6d080467e0e61fd996bf862747",
+            "83266080903dcb6fbee25465c531ce029e4cba289da09a28d2cfc3710d42e25d",
+            "cedf331c3a896bc3270b89419e4b2ee6abfc1d748f70b98f9e253a9c69959e55",
+            "e5a3b987094f9a179174b4f5d18593e78072bcbe8a1c55398bf88757785a345e"
+          ],
+          "factors": {
+            "F1": "67.5",
+            "F2": "77.85416666666666666666666667",
+            "F3": "61",
+            "F4": "50",
+            "F5": "32",
+            "F6": "100"
+          },
+          "grade": "B",
+          "htf_chain": {
+            "HTF": "UP",
+            "M5": "SIGNAL"
+          },
+          "invalidation": {
+            "price": "119.2455",
+            "rule": "risk_stop"
+          },
+          "reason": "A3 long: trend with a displaced break, retraced into the zone.",
+          "risk": {
+            "condition_tags": [],
+            "invalidation_distance_atr": "0.7470047493328474860333225871",
+            "invalidation_distance_pct": "0.9946325350949628406275805120",
+            "r_multiple": "2"
+          },
+          "symbol": "GOLDENATHREEFIVE",
+          "targets": {
+            "ladder": {
+              "start_r": "2",
+              "step_r": "1",
+              "unbounded": true
+            },
+            "primary": {
+              "high": "129.5",
+              "low": "129.5",
+              "pool_id": "e5a3b987094f9a179174b4f5d18593e78072bcbe8a1c55398bf88757785a345e",
+              "strength": "11.41666666666666666666666667"
+            },
+            "secondary": null
+          },
+          "timeframe": "M5",
+          "versions": {
+            "algo_version": "s8-confluence-v40",
+            "param_set_version": "2026.10.10.1"
+          }
+        },
+        "published_at": "2026-03-02T04:50:00+00:00",
+        "symbol": "GOLDENATHREEFIVE",
+        "target_bands": "{\"ladder\":{\"start_r\":\"2\",\"step_r\":\"1\",\"unbounded\":true},\"primary\":{\"high\":\"129.5\",\"low\":\"129.5\",\"pool_id\":\"e5a3b987094f9a179174b4f5d18593e78072bcbe8a1c55398bf88757785a345e\",\"strength\":\"11.41666666666666666666666667\"},\"secondary\":null}",
+        "ttl_candles": 48
+      }
+    ],
+    "suppressions": []
+  }
+}

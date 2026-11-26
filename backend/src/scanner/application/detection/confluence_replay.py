@@ -243,7 +243,12 @@ from scanner.shared import Timeframe
 # ABNORMAL candle whose check could not run both tests, without the suspect
 # tag; and a thin book now makes the candle a suspect here exactly as it does
 # in participation, through the same DepthInput.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v39"
+# v40: §15.3(6) (SLS v1.0.20, Bundle D M3). A candidate whose invalidation is
+# the zone's distal edge is suppressed with ZONE_EDGE_INVALIDATION and never
+# published, and its suppression carries the sealed payload and its hash; a
+# zone-edge duplicate of a live signal is suppressed, not refreshed. Swept
+# extreme and M5's risk stop publish as before.
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v40"
 
 # The published set when nothing is configured (owner ruling 2026-09-15). A
 # default that published everything would open M15/M5 the day a setting went
@@ -1350,6 +1355,16 @@ class ConfluenceReplayService:
                 event_at,
                 candidate.direction,
                 decision.reasons,
+                # §15.3(6): a zone-edge candidate "is recorded with its full
+                # payload". The sealed payload and its hash ride on the
+                # suppression, so the setup it would have published can be
+                # read back and verified later. Other suppressions keep their
+                # shape.
+                sealed=(
+                    payload
+                    if SuppressionReason.ZONE_EDGE_INVALIDATION in decision.reasons
+                    else None
+                ),
             )
 
             return
@@ -1448,6 +1463,7 @@ class ConfluenceReplayService:
         reasons: Sequence[SuppressionReason],
         *,
         unmet: tuple[str, ...] = (),
+        sealed: SignalPayload | None = None,
     ) -> None:
         """§12.2: "Fail => SUPPRESSED with recorded reason (auditable funnel:
         candidates -> published is a monitored ratio, §14)".
@@ -1468,6 +1484,12 @@ class ConfluenceReplayService:
 
         if unmet:
             detail["payload_unmet"] = list(unmet)
+
+        # The stored form is the hashed form (`SignalPayload.seal`), so the
+        # digest can be recomputed from the row itself.
+        if sealed is not None:
+            detail["payload"] = sealed.as_dict()
+            detail["payload_hash"] = sealed.seal()
 
         event_type = f"SIGNAL_SUPPRESSED_{direction}"
 

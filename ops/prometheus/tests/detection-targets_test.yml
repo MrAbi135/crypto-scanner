@@ -155,6 +155,36 @@ tests:
                 Either the market changed or the doctrine did; check which
                 suppression reason moved before assuming the first.
 
+  # Bundle D M3 (SLS v1.0.20 §15.3(6)): on deploy day the zone-edge setups that
+  # used to publish arrive as ZONE_EDGE_INVALIDATION suppressions instead, so
+  # the published share drops by design and this alert is expected to fire once
+  # (owner, 2026-11-26: noted in the M8 checklist, not silenced). The new
+  # outcome value is summed like any other suppression reason.
+  - interval: 5m
+    name: zone-edge setups turning into suppressions on deploy day fire once
+    input_series:
+      # Yesterday: two published, two refused on R per step -- a ratio of 0.5.
+      # Today: half of those publications are zone-edge and refused, plus one
+      # more zone-edge candidate -- 1 of 5, so 0.4x yesterday's ratio.
+      - series: 'scanner_detection_publications_total{outcome="published"}'
+        values: "0+2x288 576+1x72"
+      - series: 'scanner_detection_publications_total{outcome="BELOW_MIN_RR"}'
+        values: "0+2x360"
+      - series: 'scanner_detection_publications_total{outcome="ZONE_EDGE_INVALIDATION"}'
+        values: "0+0x288 0+2x72"
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: PublicationRatioShift
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Candidate→published ratio shifted more than ±50% (SLS §14)"
+              description: >-
+                The publication rate is 0.40× yesterday's at the same hour.
+                Either the market changed or the doctrine did; check which
+                suppression reason moved before assuming the first.
+
   - interval: 5m
     name: a steady publication ratio does not fire
     input_series:
