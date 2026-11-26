@@ -243,7 +243,12 @@ from scanner.shared import Timeframe
 # ABNORMAL candle whose check could not run both tests, without the suspect
 # tag; and a thin book now makes the candle a suspect here exactly as it does
 # in participation, through the same DepthInput.
-CONFLUENCE_ALGO_VERSION = "s8-confluence-v39"
+# v40: §15.3(6) (SLS v1.0.20, Bundle D M3). A candidate whose invalidation is
+# the zone's distal edge is suppressed with ZONE_EDGE_INVALIDATION and never
+# published, and its suppression carries the sealed payload and its hash; a
+# zone-edge duplicate of a live signal is suppressed, not refreshed. Swept
+# extreme and M5's risk stop publish as before.
+CONFLUENCE_ALGO_VERSION = "s8-confluence-v40"
 
 # The published set when nothing is configured (owner ruling 2026-09-15). A
 # default that published everything would open M15/M5 the day a setting went
